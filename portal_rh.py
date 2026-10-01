@@ -230,6 +230,22 @@ else:
     opcoes = codigos
 
 freq = ler_frequencia(int(ano), mes)
+
+# Resumo mensal no topo
+contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0}
+for r in freq:
+    codigo = str(r.get("situacao") or "").upper().strip()
+    if codigo in contagens:
+        contagens[codigo] += 1
+
+st.markdown("#### Resumo do mês")
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Faltas", contagens["FA"])
+k2.metric("Atestados", contagens["A"])
+k3.metric("Folgas", contagens["FO"])
+k4.metric("Presenças", contagens["OK"])
+k5.metric("Liberados", contagens["LB"])
+
 mapa = {}
 obs_mapa = {}
 for r in freq:
@@ -290,16 +306,36 @@ if alteracoes:
     for i, cid, dia, antes, depois in precisa_lb:
         nome = editado.iloc[i]["COLABORADOR"]
         chave = (cid, dia)
-        observacoes[chave] = st.text_input(
-            f"{nome} • dia {dia:02d} • LB — Quem liberou / observação",
-            value=obs_mapa.get(chave, ""),
-            key=f"obs_lb_{cid}_{ano}_{mes}_{dia}",
-            placeholder="Ex.: Liberado por Supervisor Fulano — motivo..."
+        st.markdown(f"**{nome} • dia {dia:02d} • LIBERADO (LB)**")
+        lb1, lb2 = st.columns(2)
+        valor_anterior = obs_mapa.get(chave, "")
+        liberado_por_anterior = ""
+        motivo_anterior = ""
+        if " | MOTIVO: " in valor_anterior:
+            parte1, motivo_anterior = valor_anterior.split(" | MOTIVO: ", 1)
+            liberado_por_anterior = parte1.replace("LIBERADO POR: ", "", 1)
+        with lb1:
+            liberado_por = st.text_input(
+                "Quem liberou *",
+                value=liberado_por_anterior,
+                key=f"lb_por_{cid}_{ano}_{mes}_{dia}",
+                placeholder="Nome de quem autorizou a liberação"
+            )
+        with lb2:
+            motivo = st.text_input(
+                "Motivo da liberação *",
+                value=motivo_anterior,
+                key=f"lb_motivo_{cid}_{ano}_{mes}_{dia}",
+                placeholder="Informe por que o colaborador foi liberado"
+            )
+        observacoes[chave] = (
+            f"LIBERADO POR: {liberado_por.strip()} | MOTIVO: {motivo.strip()}"
+            if liberado_por.strip() and motivo.strip() else ""
         )
 
     pode_salvar = all(str(v).strip() for v in observacoes.values())
     if precisa_lb and not pode_salvar:
-        st.warning("LB exige obrigatoriamente quem liberou / observação.")
+        st.warning("Para cada LB, informe obrigatoriamente quem liberou e o motivo da liberação.")
 
     if st.button("💾 Salvar alterações", type="primary", disabled=not pode_salvar):
         try:
