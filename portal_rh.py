@@ -431,6 +431,12 @@ for c in colaboradores:
     row = {
         "COLABORADOR": _nome_colaborador(c),
         "FUNÇÃO": str(c.get("funcao") or c.get("funcao_padrao") or ""),
+        # Apenas na visualização da grade: encurta o nome da empresa.
+        # O valor original no cadastro/Supabase e na exportação permanece inalterado.
+        "EMPRESA": ({
+            "10 SUL SERVICE": "SERVICE",
+            "10 SUL PRESTADORA": "PRESTADORA",
+        }.get(str(c.get("empresa") or "").strip().upper(), str(c.get("empresa") or "").strip())),
     }
     for dia in range(1, ultimo_visivel + 1):
         row[f"{dia:02d}"] = mapa.get((cid, dia), "")
@@ -442,6 +448,7 @@ colunas_dia = [f"{d:02d}" for d in range(1, ultimo_visivel + 1)]
 config = {
     "COLABORADOR": st.column_config.TextColumn("COLABORADOR", width="large", disabled=True),
     "FUNÇÃO": st.column_config.TextColumn("FUNÇÃO", width="medium", disabled=True),
+    "EMPRESA": st.column_config.TextColumn("EMPRESA", width="small", disabled=True),
 }
 for c in colunas_dia:
     config[c] = st.column_config.SelectboxColumn(c, options=opcoes, width="small", required=False)
@@ -484,7 +491,7 @@ editado = st.data_editor(
     _base_editor,
     use_container_width=True,
     hide_index=True,
-    disabled=["COLABORADOR","FUNÇÃO"],
+    disabled=["COLABORADOR","FUNÇÃO","EMPRESA"],
     column_config=config,
     key=f"rh_grade_{ano}_{mes}_{st.session_state[_nonce_key]}",
     height=min(820, 72 + max(1, len(df))*35),
