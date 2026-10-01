@@ -69,6 +69,18 @@ def sincronizar_seed():
     # nem adivinhar o nome físico da coluna.
     return
 
+
+def garantir_ocorrencias():
+    for r in STATUS_PADRAO:
+        try:
+            sb("POST", "rh_ocorrencias", "on_conflict=codigo", r,
+               "resolution=merge-duplicates,return=minimal")
+        except Exception:
+            # Compatibilidade com tabela sem ordem/exige_observacao.
+            minimo = {k: r[k] for k in ("codigo", "descricao", "ativo")}
+            sb("POST", "rh_ocorrencias", "on_conflict=codigo", minimo,
+               "resolution=merge-duplicates,return=minimal")
+
 def ler_colaboradores():
     # Não ordena pelo Supabase para não depender do nome físico da coluna.
     rows = sb("GET", "rh_colaboradores", "select=*&ativo=eq.true") or []
