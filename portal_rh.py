@@ -64,32 +64,10 @@ def _nome_colaborador(registro):
     return str(registro.get(campo) or "") if campo else ""
 
 def sincronizar_seed():
-    # A tabela atual usa COLABORADOR. Mantemos fallback para bases antigas.
-    tentativas = ("colaborador", "nome", "nome_colaborador")
-    ultimo_erro = None
-
-    for campo_nome in tentativas:
-        regs = [{campo_nome: n, "funcao": f, "ativo": True} for n, f in SEED_COLABORADORES]
-        try:
-            for i in range(0, len(regs), 300):
-                sb("POST", "rh_colaboradores", f"on_conflict={campo_nome}", regs[i:i+300],
-                   "resolution=merge-duplicates,return=minimal")
-            return
-        except Exception as e:
-            ultimo_erro = e
-
-    raise RuntimeError(f"Não foi possível sincronizar colaboradores: {ultimo_erro}")
-
-def garantir_ocorrencias():
-    for r in STATUS_PADRAO:
-        try:
-            sb("POST", "rh_ocorrencias", "on_conflict=codigo", r,
-               "resolution=merge-duplicates,return=minimal")
-        except Exception:
-            # Compatibilidade caso a tabela criada anteriormente não tenha ordem/exige_observacao.
-            minimo = {k:r[k] for k in ("codigo","descricao","ativo")}
-            sb("POST", "rh_ocorrencias", "on_conflict=codigo", minimo,
-               "resolution=merge-duplicates,return=minimal")
+    # O cadastro de colaboradores já existe no Supabase.
+    # O Portal RH apenas consulta esse cadastro; não tenta recriá-lo
+    # nem adivinhar o nome físico da coluna.
+    return
 
 def ler_colaboradores():
     # Não ordena pelo Supabase para não depender do nome físico da coluna.
