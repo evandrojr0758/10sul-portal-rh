@@ -300,7 +300,7 @@ def ler_frequencia(ano, mes):
 
 
 
-def gerar_excel_frequencia(ano, mes, colaboradores, freq):
+def gerar_excel_frequencia(ano, mes, colaboradores, freq, ocorrencia_codigo_por_id):
     """Gera as abas BaseFuncionario e BaseFuncionário no padrão do fechamento mensal."""
     ano = int(ano)
     mes = int(mes)
@@ -310,7 +310,7 @@ def gerar_excel_frequencia(ano, mes, colaboradores, freq):
     for r in freq:
         try:
             d = pd.to_datetime(r.get("data")).date()
-            freq_por_chave[(int(r.get("colaborador_id")), d.day)] = str(r.get("situacao") or "").strip().upper()
+            freq_por_chave[(int(r.get("colaborador_id")), d.day)] = ocorrencia_codigo_por_id.get(int(r.get("ocorrencia_id"))) if r.get("ocorrencia_id") is not None else ""
         except Exception:
             pass
 
@@ -470,12 +470,17 @@ def gerar_excel_frequencia(ano, mes, colaboradores, freq):
     saida.seek(0)
     return saida.getvalue()
 
-def salvar_frequencia(colaborador_id, dia, codigo, observacao=""):
+def salvar_frequencia(colaborador_id, dia, codigo, ocorrencia_id_por_codigo, observacao="", autorizado_por=""):
+    codigo = str(codigo or "").strip().upper()
+    ocorrencia_id = ocorrencia_id_por_codigo.get(codigo)
+    if codigo and ocorrencia_id is None:
+        raise ValueError(f"Ocorrência {codigo} não encontrada em rh_ocorrencias.")
     payload = {
         "colaborador_id": int(colaborador_id),
         "data": dia.isoformat(),
-        "situacao": codigo,
-        "observacao": observacao.strip() or None,
+        "ocorrencia_id": ocorrencia_id,
+        "observacao": str(observacao or "").strip() or None,
+        "autorizado_por": str(autorizado_por or "").strip() or None,
         "atualizado_em": datetime.now().isoformat(timespec="seconds"),
     }
     sb("POST", "rh_frequencia", "on_conflict=colaborador_id,data", payload,
@@ -533,6 +538,8 @@ if ultimo_visivel == 0:
     st.stop()
 
 ocorrencias = ler_ocorrencias()
+ocorrencia_id_por_codigo = {str(x.get("codigo") or "").upper().strip(): int(x["id"]) for x in ocorrencias if x.get("codigo") and x.get("id") is not None}
+ocorrencia_codigo_por_id = {v: k for k, v in ocorrencia_id_por_codigo.items()}
 codigos = [str(x.get("codigo","")).upper().strip() for x in ocorrencias if x.get("codigo")]
 codigos = list(dict.fromkeys(codigos))
 if "" not in codigos:
@@ -552,7 +559,7 @@ for r in freq:
     try:
         d = pd.to_datetime(r.get("data")).date()
         chave = (int(r.get("colaborador_id")), d.day)
-        mapa[chave] = str(r.get("situacao") or "")
+        mapa[chave] = ocorrencia_codigo_por_id.get(int(r.get("ocorrencia_id")), "") if r.get("ocorrencia_id") is not None else ""
         obs_mapa[chave] = str(r.get("observacao") or "")
     except Exception:
         pass
@@ -649,7 +656,7 @@ with resumo_topo:
 
 # Exportação no mesmo padrão das abas BaseFuncionario e BaseFuncionário usadas no fechamento.
 try:
-    _excel_export = gerar_excel_frequencia(int(ano), mes, colaboradores, freq)
+    _excel_export = gerar_excel_frequencia(int(ano), mes, colaboradores, freq, ocorrencia_codigo_por_id)
     st.download_button(
         "📥 Exportar Excel — BaseFuncionario / BaseFuncionário",
         data=_excel_export,
@@ -722,9 +729,7 @@ if alteracoes:
             else:
                 st.session_state.rh_responsaveis_pendentes[chave] = responsavel.strip()
                 # Salva responsável + motivo em um único campo, preservando o banco atual.
-                st.session_state.rh_observacoes_pendentes[chave] = (
-                    f"RESPONSÁVEL: {responsavel.strip()} | OBSERVAÇÃO: {observacao.strip()}"
-                )
+                st.session_state.rh_observacoes_pendentes[chave] = observacao.strip()
                 # SOMENTE este botão confirma. Retira o alvo para o callback do X não cancelar.
                 st.session_state.pop("rh_modal_alvo", None)
                 st.rerun()
@@ -771,29 +776,57 @@ if alteracoes:
         st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
     if st.button("💾 Salvar alterações", type="primary", disabled=not pode_salvar):
-        try:
-            for i, cid, dia, antes, depois in alteracoes:
-                data_dia = date(int(ano), mes, dia)
-                if depois in ("LB", "COMP"):
-                    chave = f"{cid}_{int(ano)}_{mes}_{dia}"
-                    responsavel = str(st.session_state.rh_responsaveis_pendentes.get(chave, "")).strip()
-                    obs = str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip()
-                    if not responsavel or not obs:
-                        raise ValueError("LB/COMP sem autorização confirmada. Operação bloqueada.")
-                else:
-                    obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
-                salvar_frequencia(cid, data_dia, depois, obs)
+        # Antes de salvar, exige preenchimento de TODAS as células liberadas no período.
+        # Dias futuros não entram porque a grade contém somente até ultimo_visivel.
+        celulas_vazias = []
+        for i, cid in enumerate(ids):
+            nome_colab = str(editado.iloc[i]["COLABORADOR"] or "").strip()
+            empresa_colab = str(editado.iloc[i].get("EMPRESA", "") or "").strip()
+            for dia_check in range(1, ultimo_visivel + 1):
+                col_check = f"{dia_check:02d}"
+                valor_check = str(editado.iloc[i][col_check] or "").strip()
+                if not valor_check or valor_check.lower() in ("none", "nan"):
+                    celulas_vazias.append({
+                        "COLABORADOR": nome_colab,
+                        "EMPRESA": empresa_colab,
+                        "DIA": col_check,
+                    })
 
-            for _, cid, dia, _, _ in pendentes_obs:
-                chave = f"{cid}_{int(ano)}_{mes}_{dia}"
-                st.session_state.rh_observacoes_pendentes.pop(chave, None)
-                st.session_state.rh_responsaveis_pendentes.pop(chave, None)
-            st.session_state.pop(_draft_key, None)
-            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
-            st.success(f"{len(alteracoes)} lançamento(s) salvo(s).")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Não foi possível salvar: {e}")
+        if celulas_vazias:
+            st.error(
+                f"Não foi possível salvar. Existem {len(celulas_vazias)} célula(s) não preenchida(s). "
+                "Preencha todos os lançamentos abaixo antes de continuar."
+            )
+            st.dataframe(
+                pd.DataFrame(celulas_vazias),
+                use_container_width=True,
+                hide_index=True,
+                height=min(420, 38 + len(celulas_vazias) * 35),
+            )
+        else:
+            try:
+                for i, cid, dia, antes, depois in alteracoes:
+                    data_dia = date(int(ano), mes, dia)
+                    if depois in ("LB", "COMP"):
+                        chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+                        responsavel = str(st.session_state.rh_responsaveis_pendentes.get(chave, "")).strip()
+                        obs = str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip()
+                        if not responsavel or not obs:
+                            raise ValueError("LB/COMP sem autorização confirmada. Operação bloqueada.")
+                    else:
+                        obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
+                    salvar_frequencia(cid, data_dia, depois, ocorrencia_id_por_codigo, obs, responsavel if depois in ("LB", "COMP") else "")
+    
+                for _, cid, dia, _, _ in pendentes_obs:
+                    chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+                    st.session_state.rh_observacoes_pendentes.pop(chave, None)
+                    st.session_state.rh_responsaveis_pendentes.pop(chave, None)
+                st.session_state.pop(_draft_key, None)
+                st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
+                st.success(f"{len(alteracoes)} lançamento(s) salvo(s).")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível salvar: {e}")
 
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
@@ -913,7 +946,7 @@ st.markdown("#### 📝 Observações de LB / COMP")
 registros_obs = []
 nomes_por_id = {int(c["id"]): _nome_colaborador(c) for c in colaboradores}
 for r in freq:
-    codigo = str(r.get("situacao") or "").upper().strip()
+    codigo = ocorrencia_codigo_por_id.get(int(r.get("ocorrencia_id")), "") if r.get("ocorrencia_id") is not None else ""
     observacao = str(r.get("observacao") or "").strip()
     if codigo in ("LB", "COMP") and observacao:
         try:
