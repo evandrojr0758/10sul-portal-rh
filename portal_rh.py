@@ -280,7 +280,13 @@ if _cancelar:
     _editor_key = f"rh_grade_{ano}_{mes}"
     _estado_editor = st.session_state.get(_editor_key)
     if isinstance(_estado_editor, dict):
-        _edited_rows = _estado_editor.setdefault("edited_rows", {})
+        # Dependendo da versão do Streamlit, edited_rows pode existir como None.
+        # Nunca usamos setdefault diretamente porque ele preserva o None.
+        _edited_rows = _estado_editor.get("edited_rows")
+        if not isinstance(_edited_rows, dict):
+            _edited_rows = {}
+            _estado_editor["edited_rows"] = _edited_rows
+
         _row_key = str(_row) if str(_row) in _edited_rows else _row
         if _row_key in _edited_rows and isinstance(_edited_rows[_row_key], dict):
             # Remove apenas a alteração LB/COMP desta célula; o data_editor
