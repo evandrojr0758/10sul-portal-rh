@@ -775,8 +775,27 @@ if alteracoes:
     if pendentes_obs and not pode_salvar and not modal_aberto:
         st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
+    # Exibe o resultado do último salvamento parcial após o rerun.
+    _aviso_pendencias_key = f"rh_aviso_pendencias_{int(ano)}_{mes}"
+    aviso_pendencias = st.session_state.pop(_aviso_pendencias_key, None)
+    if aviso_pendencias:
+        qtd_salvos = int(aviso_pendencias.get("salvos", 0))
+        pendencias_exibir = aviso_pendencias.get("pendencias", [])
+        st.success(f"{qtd_salvos} lançamento(s) salvo(s) com sucesso.")
+        if pendencias_exibir:
+            st.warning(
+                f"Ainda existem {len(pendencias_exibir)} célula(s) não preenchida(s). "
+                "Você pode continuar o preenchimento depois."
+            )
+            st.dataframe(
+                pd.DataFrame(pendencias_exibir),
+                use_container_width=True,
+                hide_index=True,
+                height=min(420, 38 + len(pendencias_exibir) * 35),
+            )
+
     if st.button("💾 Salvar alterações", type="primary", disabled=not pode_salvar):
-        # Antes de salvar, exige preenchimento de TODAS as células liberadas no período.
+        # Células vazias geram ALERTA, mas não bloqueiam o salvamento parcial.
         # Dias futuros não entram porque a grade contém somente até ultimo_visivel.
         celulas_vazias = []
         for i, cid in enumerate(ids):
@@ -792,41 +811,36 @@ if alteracoes:
                         "DIA": col_check,
                     })
 
-        if celulas_vazias:
-            st.error(
-                f"Não foi possível salvar. Existem {len(celulas_vazias)} célula(s) não preenchida(s). "
-                "Preencha todos os lançamentos abaixo antes de continuar."
-            )
-            st.dataframe(
-                pd.DataFrame(celulas_vazias),
-                use_container_width=True,
-                hide_index=True,
-                height=min(420, 38 + len(celulas_vazias) * 35),
-            )
-        else:
-            try:
-                for i, cid, dia, antes, depois in alteracoes:
-                    data_dia = date(int(ano), mes, dia)
-                    if depois in ("LB", "COMP"):
-                        chave = f"{cid}_{int(ano)}_{mes}_{dia}"
-                        responsavel = str(st.session_state.rh_responsaveis_pendentes.get(chave, "")).strip()
-                        obs = str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip()
-                        if not responsavel or not obs:
-                            raise ValueError("LB/COMP sem autorização confirmada. Operação bloqueada.")
-                    else:
-                        obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
-                    salvar_frequencia(cid, data_dia, depois, ocorrencia_id_por_codigo, obs, responsavel if depois in ("LB", "COMP") else "")
-    
-                for _, cid, dia, _, _ in pendentes_obs:
+        try:
+            for i, cid, dia, antes, depois in alteracoes:
+                data_dia = date(int(ano), mes, dia)
+                if depois in ("LB", "COMP"):
                     chave = f"{cid}_{int(ano)}_{mes}_{dia}"
-                    st.session_state.rh_observacoes_pendentes.pop(chave, None)
-                    st.session_state.rh_responsaveis_pendentes.pop(chave, None)
-                st.session_state.pop(_draft_key, None)
-                st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
-                st.success(f"{len(alteracoes)} lançamento(s) salvo(s).")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Não foi possível salvar: {e}")
+                    responsavel = str(st.session_state.rh_responsaveis_pendentes.get(chave, "")).strip()
+                    obs = str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip()
+                    if not responsavel or not obs:
+                        raise ValueError("LB/COMP sem autorização confirmada. Operação bloqueada.")
+                else:
+                    responsavel = ""
+                    obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
+                salvar_frequencia(cid, data_dia, depois, ocorrencia_id_por_codigo, obs, responsavel)
+
+            for _, cid, dia, _, _ in pendentes_obs:
+                chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+                st.session_state.rh_observacoes_pendentes.pop(chave, None)
+                st.session_state.rh_responsaveis_pendentes.pop(chave, None)
+
+            # Guarda o resultado para aparecer depois do rerun. O salvamento é permitido
+            # mesmo com pendências; as células vazias permanecem para preenchimento posterior.
+            st.session_state[_aviso_pendencias_key] = {
+                "salvos": len(alteracoes),
+                "pendencias": celulas_vazias,
+            }
+            st.session_state.pop(_draft_key, None)
+            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível salvar: {e}")
 
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
