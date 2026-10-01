@@ -64,10 +64,22 @@ def _nome_colaborador(registro):
     return str(registro.get(campo) or "") if campo else ""
 
 def sincronizar_seed():
-    # O cadastro de colaboradores já existe no Supabase.
-    # O Portal RH apenas consulta esse cadastro; não tenta recriá-lo
-    # nem adivinhar o nome físico da coluna.
-    return
+    """Carrega no Supabase os colaboradores padrão quando a tabela estiver vazia."""
+    existentes = sb("GET", "rh_colaboradores", "select=id&limit=1") or []
+    if existentes:
+        return
+
+    payload = []
+    for nome, funcao in SEED_COLABORADORES:
+        payload.append({
+            "colaborador": nome,
+            "funcao": funcao or None,
+            "empresa": "10 SUL",
+            "status": "ATIVO",
+            "ativo": True,
+        })
+
+    sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
 
 def garantir_ocorrencias():
@@ -82,9 +94,32 @@ def garantir_ocorrencias():
                "resolution=merge-duplicates,return=minimal")
 
 def ler_colaboradores():
-    # Não ordena pelo Supabase para não depender do nome físico da coluna.
     rows = sb("GET", "rh_colaboradores", "select=*&ativo=eq.true") or []
     return sorted(rows, key=lambda r: _nome_colaborador(r).upper())
+
+
+def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL"):
+    nome = str(nome or "").strip().upper()
+    if not nome:
+        raise ValueError("Informe o nome do colaborador.")
+
+    existentes = sb(
+        "GET",
+        "rh_colaboradores",
+        "select=id,colaborador&colaborador=eq." + urllib.parse.quote(nome)
+    ) or []
+    if existentes:
+        raise ValueError("Este colaborador já está cadastrado.")
+
+    payload = {
+        "colaborador": nome,
+        "funcao": str(funcao or "").strip().upper() or None,
+        "cracha": str(cracha or "").strip() or None,
+        "empresa": str(empresa or "10 SUL").strip().upper(),
+        "status": "ATIVO",
+        "ativo": True,
+    }
+    sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
 def ler_ocorrencias():
     rows = sb("GET", "rh_ocorrencias", "select=*&ativo=eq.true") or []
@@ -255,6 +290,34 @@ if alteracoes:
             st.rerun()
         except Exception as e:
             st.error(f"Não foi possível salvar: {e}")
+
+with st.expander("👥 Cadastro de colaboradores"):
+    st.caption("Cadastro exclusivo do Portal RH. Novos colaboradores passam a aparecer automaticamente na grade de frequência.")
+
+    with st.form("form_novo_colaborador", clear_on_submit=True):
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            novo_nome = st.text_input("Colaborador *")
+            novo_cracha = st.text_input("Crachá")
+        with cc2:
+            nova_funcao = st.text_input("Função")
+            nova_empresa = st.text_input("Empresa", value="10 SUL")
+
+        incluir = st.form_submit_button("➕ Cadastrar colaborador", type="primary")
+        if incluir:
+            try:
+                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa)
+                st.success("Colaborador cadastrado com sucesso.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível cadastrar: {e}")
+
+    cadastro_df = pd.DataFrame(colaboradores)
+    mostrar = [c for c in ["id", "cracha", "colaborador", "funcao", "empresa", "status", "ativo"] if c in cadastro_df.columns]
+    if mostrar:
+        st.dataframe(cadastro_df[mostrar], use_container_width=True, hide_index=True)
+    else:
+        st.info("Nenhum colaborador cadastrado.")
 
 with st.expander("⚙️ Cadastro de ocorrências"):
     st.caption("Esses códigos alimentam as opções disponíveis na grade.")
