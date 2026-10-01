@@ -619,10 +619,22 @@ if _cancelar:
         st.session_state.pop(_resp, None)
 
 # Fonte exibida pelo editor: rascunho atual ou a base salva.
+# O fingerprint da base garante que, após F5/salvamento, o Supabase volte a ser
+# a fonte de verdade. Assim, registro já persistido nunca perde a trava de edição.
+import hashlib
+_base_serializada = df.fillna("").astype(str).to_csv(index=False)
+_base_fingerprint = hashlib.sha256(_base_serializada.encode("utf-8")).hexdigest()
+_fp_key = f"rh_grade_base_fp_{_periodo_key}"
 _base_editor = st.session_state.get(_draft_key)
-if not isinstance(_base_editor, pd.DataFrame) or list(_base_editor.columns) != list(df.columns) or len(_base_editor) != len(df):
+if (
+    not isinstance(_base_editor, pd.DataFrame)
+    or list(_base_editor.columns) != list(df.columns)
+    or len(_base_editor) != len(df)
+    or st.session_state.get(_fp_key) != _base_fingerprint
+):
     _base_editor = df.copy()
     st.session_state[_draft_key] = _base_editor.copy()
+    st.session_state[_fp_key] = _base_fingerprint
 
 editado = st.data_editor(
     _base_editor,
@@ -667,6 +679,31 @@ try:
 except Exception as e:
     st.warning(f"Não foi possível preparar a exportação em Excel: {e}")
 
+# Resultado do salvamento parcial: aviso em modal central, sem lista extensa na página.
+_aviso_pendencias_key = f"rh_aviso_pendencias_{int(ano)}_{mes}"
+
+@st.dialog("⚠️ Preenchimento pendente")
+def modal_pendencias_salvamento(qtd_salvos, qtd_pendencias):
+    st.success(f"{int(qtd_salvos)} lançamento(s) salvo(s) com sucesso.")
+    st.markdown(
+        f"Ainda existem **{int(qtd_pendencias)} célula(s) não preenchida(s)** "
+        "até o dia atual."
+    )
+    st.caption("Você pode sair e retornar depois para concluir o preenchimento.")
+    if st.button("Entendi", type="primary", use_container_width=True):
+        st.session_state.pop(_aviso_pendencias_key, None)
+        st.rerun()
+
+aviso_pendencias = st.session_state.get(_aviso_pendencias_key)
+if aviso_pendencias:
+    _qtd_salvos = int(aviso_pendencias.get("salvos", 0))
+    _qtd_pendencias = int(aviso_pendencias.get("qtd_pendencias", 0))
+    if _qtd_pendencias > 0:
+        modal_pendencias_salvamento(_qtd_salvos, _qtd_pendencias)
+    else:
+        st.session_state.pop(_aviso_pendencias_key, None)
+        st.success(f"{_qtd_salvos} lançamento(s) salvo(s) com sucesso.")
+
 alteracoes = []
 for i, cid in enumerate(ids):
     for dia in range(1, ultimo_visivel + 1):
@@ -678,6 +715,68 @@ for i, cid in enumerate(ids):
 
 if alteracoes:
     st.markdown("#### Alterações pendentes")
+
+    # Registros que já existem no Supabase são consolidados. Qualquer edição deles
+    # exige a senha administrativa, inclusive após F5 ou em outro computador.
+    SENHA_EDICAO_RH = "28266451"
+    if "rh_edicoes_autorizadas" not in st.session_state:
+        st.session_state.rh_edicoes_autorizadas = set()
+    if "rh_motivos_edicao" not in st.session_state:
+        st.session_state.rh_motivos_edicao = {}
+
+    edicoes_salvas = []
+    for _i, _cid, _dia, _antes, _depois in alteracoes:
+        _chave_reg = f"{_cid}_{int(ano)}_{mes}_{_dia}"
+        # 'antes' vem de df, que é reconstruído a partir de rh_frequencia.
+        # Portanto, valor anterior preenchido = registro já persistido no Supabase.
+        if str(_antes or "").strip() and _chave_reg not in st.session_state.rh_edicoes_autorizadas:
+            edicoes_salvas.append((_i, _cid, _dia, _antes, _depois, _chave_reg))
+
+    def _cancelar_edicao_salva():
+        alvo = st.session_state.pop("rh_edicao_salva_alvo", None)
+        if alvo:
+            _draft = st.session_state.get(_draft_key)
+            if isinstance(_draft, pd.DataFrame):
+                _draft = _draft.copy()
+                _draft.at[int(alvo["row"]), str(alvo["col"])] = alvo.get("antes", "")
+                st.session_state[_draft_key] = _draft
+            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
+
+    @st.dialog("🔒 Alteração de lançamento salvo", on_dismiss=_cancelar_edicao_salva)
+    def modal_senha_edicao(i, cid, dia, antes, depois, chave_reg):
+        nome = str(editado.iloc[i]["COLABORADOR"] or "")
+        st.markdown(f"**{nome}**")
+        st.caption(f"Dia {dia:02d} • {antes} → {depois or 'VAZIO'}")
+        st.warning("Este lançamento já foi salvo. A alteração exige senha e motivo obrigatório.")
+        senha = st.text_input("Senha de autorização *", type="password", key=f"senha_edicao_{chave_reg}")
+        motivo_alt = st.text_area(
+            "Motivo da alteração *",
+            key=f"motivo_edicao_{chave_reg}",
+            placeholder="Informe por que o lançamento salvo precisa ser alterado",
+        )
+        if st.button("Confirmar alteração", type="primary", use_container_width=True):
+            if senha != SENHA_EDICAO_RH:
+                st.error("Senha incorreta. A alteração não foi autorizada.")
+            elif not motivo_alt.strip():
+                st.error("Informe obrigatoriamente o motivo da alteração.")
+            else:
+                st.session_state.rh_edicoes_autorizadas.add(chave_reg)
+                if "rh_motivos_edicao" not in st.session_state:
+                    st.session_state.rh_motivos_edicao = {}
+                st.session_state.rh_motivos_edicao[chave_reg] = motivo_alt.strip()
+                st.session_state.pop("rh_edicao_salva_alvo", None)
+                st.rerun()
+
+    # A senha vem antes de qualquer outra confirmação. Fechar no X restaura o valor salvo.
+    modal_senha_aberto = False
+    if edicoes_salvas:
+        _i, _cid, _dia, _antes, _depois, _chave_reg = edicoes_salvas[0]
+        st.session_state.rh_edicao_salva_alvo = {
+            "row": _i, "col": f"{_dia:02d}", "antes": _antes
+        }
+        modal_senha_edicao(_i, _cid, _dia, _antes, _depois, _chave_reg)
+        modal_senha_aberto = True
+
     pendentes_obs = [(i, cid, d, a, n) for i, cid, d, a, n in alteracoes if n in ("LB", "COMP")]
 
     if "rh_observacoes_pendentes" not in st.session_state:
@@ -736,7 +835,7 @@ if alteracoes:
 
     # Abre automaticamente o primeiro LB/COMP ainda não confirmado.
     modal_aberto = False
-    for i, cid, dia, antes, depois in pendentes_obs:
+    for i, cid, dia, antes, depois in ([] if modal_senha_aberto else pendentes_obs):
         chave_sessao = f"{cid}_{int(ano)}_{mes}_{dia}"
         confirmado = (
             str(st.session_state.rh_observacoes_pendentes.get(chave_sessao, "")).strip()
@@ -775,26 +874,7 @@ if alteracoes:
     if pendentes_obs and not pode_salvar and not modal_aberto:
         st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
-    # Exibe o resultado do último salvamento parcial após o rerun.
-    _aviso_pendencias_key = f"rh_aviso_pendencias_{int(ano)}_{mes}"
-    aviso_pendencias = st.session_state.pop(_aviso_pendencias_key, None)
-    if aviso_pendencias:
-        qtd_salvos = int(aviso_pendencias.get("salvos", 0))
-        pendencias_exibir = aviso_pendencias.get("pendencias", [])
-        st.success(f"{qtd_salvos} lançamento(s) salvo(s) com sucesso.")
-        if pendencias_exibir:
-            st.warning(
-                f"Ainda existem {len(pendencias_exibir)} célula(s) não preenchida(s). "
-                "Você pode continuar o preenchimento depois."
-            )
-            st.dataframe(
-                pd.DataFrame(pendencias_exibir),
-                use_container_width=True,
-                hide_index=True,
-                height=min(420, 38 + len(pendencias_exibir) * 35),
-            )
-
-    if st.button("💾 Salvar alterações", type="primary", disabled=not pode_salvar):
+    if st.button("💾 Salvar alterações", type="primary", disabled=(not pode_salvar) or bool(edicoes_salvas)):
         # Células vazias geram ALERTA, mas não bloqueiam o salvamento parcial.
         # Dias futuros não entram porque a grade contém somente até ultimo_visivel.
         celulas_vazias = []
@@ -823,6 +903,14 @@ if alteracoes:
                 else:
                     responsavel = ""
                     obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
+
+                # Auditoria de alteração de registro já salvo: preserva o motivo no próprio
+                # registro, sem exigir mudança de estrutura no Supabase.
+                chave_ed = f"{cid}_{int(ano)}_{mes}_{dia}"
+                motivo_ed = str(st.session_state.rh_motivos_edicao.get(chave_ed, "")).strip()
+                if str(antes or "").strip() and antes != depois and motivo_ed:
+                    trilha = f"ALTERAÇÃO {antes or 'VAZIO'} -> {depois or 'VAZIO'} | MOTIVO: {motivo_ed}"
+                    obs = f"{obs} | {trilha}".strip(" |") if obs else trilha
                 salvar_frequencia(cid, data_dia, depois, ocorrencia_id_por_codigo, obs, responsavel)
 
             for _, cid, dia, _, _ in pendentes_obs:
@@ -830,11 +918,17 @@ if alteracoes:
                 st.session_state.rh_observacoes_pendentes.pop(chave, None)
                 st.session_state.rh_responsaveis_pendentes.pop(chave, None)
 
+            # A autorização vale somente para esta edição. Depois de salvar,
+            # uma nova alteração do mesmo registro exigirá a senha novamente.
+            for _, cid, dia, _, _ in alteracoes:
+                st.session_state.rh_edicoes_autorizadas.discard(f"{cid}_{int(ano)}_{mes}_{dia}")
+                st.session_state.rh_motivos_edicao.pop(f"{cid}_{int(ano)}_{mes}_{dia}", None)
+
             # Guarda o resultado para aparecer depois do rerun. O salvamento é permitido
             # mesmo com pendências; as células vazias permanecem para preenchimento posterior.
             st.session_state[_aviso_pendencias_key] = {
                 "salvos": len(alteracoes),
-                "pendencias": celulas_vazias,
+                "qtd_pendencias": len(celulas_vazias),
             }
             st.session_state.pop(_draft_key, None)
             st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
