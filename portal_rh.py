@@ -656,15 +656,21 @@ for coluna in colunas_dia:
         if codigo in contagens:
             contagens[codigo] += 1
 
+# Média diária conforme regra do Portal RH:
+# (FO + FA + OK + A) / quantidade de dias transcorridos no período exibido.
+_total_media = contagens["FO"] + contagens["FA"] + contagens["OK"] + contagens["A"]
+_media_diaria = (_total_media / ultimo_visivel) if ultimo_visivel else 0
+
 with resumo_topo:
     st.markdown("#### Resumo do mês")
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
     k1.metric("Faltas", contagens["FA"])
     k2.metric("Atestados", contagens["A"])
     k3.metric("Folgas", contagens["FO"])
     k4.metric("Presenças", contagens["OK"])
     k5.metric("Liberados", contagens["LB"])
     k6.metric("Compensações", contagens["COMP"])
+    k7.metric("Média", f"{_media_diaria:.2f}".replace(".", ","))
 
 # Exportação no mesmo padrão das abas BaseFuncionario e BaseFuncionário usadas no fechamento.
 try:
