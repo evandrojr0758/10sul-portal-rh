@@ -190,6 +190,18 @@ def _nome_colaborador(registro):
     campo = _campo_nome_colaborador(registro)
     return str(registro.get(campo) or "") if campo else ""
 
+def _classificacao_colaborador(registro):
+    """Retorna OPERACIONAL/OUTROS usando a classificação real do cadastro.
+    Aceita nomes de coluna equivalentes para manter compatibilidade com a base atual.
+    """
+    for campo in ("classificacao", "classificação", "tipo", "categoria", "grupo",
+                  "tipo_colaborador", "classificacao_colaborador", "status_operacional"):
+        if campo in registro and registro.get(campo) not in (None, ""):
+            valor = str(registro.get(campo)).strip().upper()
+            if valor in ("OPERACIONAL", "OUTROS"):
+                return valor
+    return "OUTROS"
+
 def _empresa_colaborador(registro, visual=False):
     """Usa a empresa real da BaseFuncionário como referência sem alterar o cadastro no banco."""
     nome = _nome_colaborador(registro).strip().upper()
@@ -564,6 +576,33 @@ for r in freq:
     except Exception:
         pass
 
+# Filtro visual por classificação do colaborador. Não altera cadastro nem dados salvos.
+_colaboradores_todos = list(colaboradores)
+_filtro_status = st.selectbox(
+    "Filtrar por STATUS",
+    ["TODOS", "OPERACIONAL", "OUTROS"],
+    index=0,
+    key=f"rh_filtro_status_{int(ano)}_{mes}",
+)
+if _filtro_status == "TODOS":
+    colaboradores = _colaboradores_todos
+else:
+    colaboradores = [
+        c for c in _colaboradores_todos
+        if _classificacao_colaborador(c) == _filtro_status
+    ]
+
+# Pequeno quadro de quantidade de colaboradores por função, obedecendo ao filtro.
+_resumo_funcoes = (
+    pd.DataFrame({"FUNÇÃO": [str(c.get("funcao") or c.get("funcao_padrao") or "SEM FUNÇÃO").strip() or "SEM FUNÇÃO" for c in colaboradores]})
+    .value_counts("FUNÇÃO")
+    .reset_index(name="QTD")
+    .sort_values(["QTD", "FUNÇÃO"], ascending=[False, True])
+    .reset_index(drop=True)
+)
+with st.expander("📊 Resumo por função", expanded=False):
+    st.dataframe(_resumo_funcoes, use_container_width=False, hide_index=True)
+
 linhas = []
 ids = []
 for c in colaboradores:
@@ -571,6 +610,8 @@ for c in colaboradores:
     ids.append(cid)
     row = {
         "COLABORADOR": _nome_colaborador(c),
+        # Classificação usada na Média de Recebíveis. Apenas OPERACIONAL entra no cálculo.
+        "STATUS": _classificacao_colaborador(c),
         "FUNÇÃO": str(c.get("funcao") or c.get("funcao_padrao") or ""),
         # Na grade usa a empresa real da BaseFuncionário e exibe o nome abreviado.
         "EMPRESA": _empresa_colaborador(c, visual=True),
@@ -584,6 +625,7 @@ colunas_dia = [f"{d:02d}" for d in range(1, ultimo_visivel + 1)]
 
 config = {
     "COLABORADOR": st.column_config.TextColumn("COLABORADOR", width="large", disabled=True),
+    "STATUS": st.column_config.TextColumn("STATUS", width="small", disabled=True),
     "FUNÇÃO": st.column_config.TextColumn("FUNÇÃO", width="medium", disabled=True),
     "EMPRESA": st.column_config.TextColumn("EMPRESA", width="small", disabled=True),
 }
@@ -640,7 +682,7 @@ editado = st.data_editor(
     _base_editor,
     use_container_width=True,
     hide_index=True,
-    disabled=["COLABORADOR","FUNÇÃO","EMPRESA"],
+    disabled=["COLABORADOR","STATUS","FUNÇÃO","EMPRESA"],
     column_config=config,
     key=f"rh_grade_{ano}_{mes}_{st.session_state[_nonce_key]}",
     height=min(820, 72 + max(1, len(df))*35),
@@ -656,10 +698,23 @@ for coluna in colunas_dia:
         if codigo in contagens:
             contagens[codigo] += 1
 
-# Média diária conforme regra do Portal RH:
-# (FO + FA + OK + A) / quantidade de dias transcorridos no período exibido.
-_total_media = contagens["FO"] + contagens["FA"] + contagens["OK"] + contagens["A"]
-_media_diaria = (_total_media / ultimo_visivel) if ultimo_visivel else 0
+# Média de Recebíveis — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
+# Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
+_codigos_recebiveis = {"FO", "FA", "OK", "A"}
+_total_recebiveis = 0
+# Mapa com o que está salvo; depois sobrepomos o que estiver visível/pendente na grade atual.
+_mapa_media = dict(mapa)
+for i, cid in enumerate(ids):
+    for dia in range(1, ultimo_visivel + 1):
+        _mapa_media[(cid, dia)] = str(editado.iloc[i][f"{dia:02d}"] or "").upper().strip()
+for _c in _colaboradores_todos:
+    if _classificacao_colaborador(_c) != "OPERACIONAL":
+        continue
+    _cid = int(_c["id"])
+    for _dia in range(1, ultimo_visivel + 1):
+        if str(_mapa_media.get((_cid, _dia), "") or "").upper().strip() in _codigos_recebiveis:
+            _total_recebiveis += 1
+_media_diaria = (_total_recebiveis / ultimo_visivel) if ultimo_visivel else 0
 
 with resumo_topo:
     st.markdown("#### Resumo do mês")
@@ -670,7 +725,7 @@ with resumo_topo:
     k4.metric("Presenças", contagens["OK"])
     k5.metric("Liberados", contagens["LB"])
     k6.metric("Compensações", contagens["COMP"])
-    k7.metric("Média", f"{_media_diaria:.2f}".replace(".", ","))
+    k7.metric("Média de Recebíveis", f"{_media_diaria:.2f}".replace(".", ","))
 
 # Exportação no mesmo padrão das abas BaseFuncionario e BaseFuncionário usadas no fechamento.
 try:
