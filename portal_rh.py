@@ -121,6 +121,22 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL"):
     }
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
+
+def alterar_status_colaborador(colaborador_id, ativo):
+    """Desativa/reativa sem apagar o histórico do colaborador."""
+    payload = {
+        "ativo": bool(ativo),
+        "status": "ATIVO" if ativo else "INATIVO",
+    }
+    sb(
+        "PATCH",
+        "rh_colaboradores",
+        "id=eq." + urllib.parse.quote(str(colaborador_id)),
+        payload,
+        "return=minimal",
+    )
+
+
 def ler_ocorrencias():
     rows = sb("GET", "rh_ocorrencias", "select=*&ativo=eq.true") or []
     if not rows:
@@ -292,7 +308,7 @@ if alteracoes:
             st.error(f"Não foi possível salvar: {e}")
 
 with st.expander("👥 Cadastro de colaboradores"):
-    st.caption("Cadastro exclusivo do Portal RH. Novos colaboradores passam a aparecer automaticamente na grade de frequência.")
+    st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
 
     with st.form("form_novo_colaborador", clear_on_submit=True):
         cc1, cc2 = st.columns(2)
@@ -312,12 +328,51 @@ with st.expander("👥 Cadastro de colaboradores"):
             except Exception as e:
                 st.error(f"Não foi possível cadastrar: {e}")
 
-    cadastro_df = pd.DataFrame(colaboradores)
-    mostrar = [c for c in ["id", "cracha", "colaborador", "funcao", "empresa", "status", "ativo"] if c in cadastro_df.columns]
-    if mostrar:
+    st.markdown("#### Gerenciar colaboradores")
+    mostrar_inativos = st.checkbox("Mostrar colaboradores inativos", value=False)
+
+    params_cadastro = "select=*"
+    if not mostrar_inativos:
+        params_cadastro += "&ativo=eq.true"
+    todos_cadastro = sb("GET", "rh_colaboradores", params_cadastro) or []
+    todos_cadastro = sorted(todos_cadastro, key=lambda r: _nome_colaborador(r).upper())
+
+    if todos_cadastro:
+        opcoes = {
+            f"{_nome_colaborador(r)} — {str(r.get('funcao') or 'SEM FUNÇÃO')} — {'ATIVO' if r.get('ativo', True) else 'INATIVO'}": r
+            for r in todos_cadastro
+        }
+        escolhido_label = st.selectbox(
+            "Selecione um colaborador",
+            options=list(opcoes.keys()),
+            key="gerenciar_colaborador",
+        )
+        escolhido = opcoes[escolhido_label]
+
+        a1, a2 = st.columns([1, 3])
+        with a1:
+            if bool(escolhido.get("ativo", True)):
+                if st.button("🚫 Desativar colaborador", type="secondary", use_container_width=True):
+                    try:
+                        alterar_status_colaborador(escolhido["id"], False)
+                        st.success(f"{_nome_colaborador(escolhido)} foi desativado. O histórico foi mantido.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível desativar: {e}")
+            else:
+                if st.button("✅ Reativar colaborador", type="primary", use_container_width=True):
+                    try:
+                        alterar_status_colaborador(escolhido["id"], True)
+                        st.success(f"{_nome_colaborador(escolhido)} foi reativado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível reativar: {e}")
+
+        cadastro_df = pd.DataFrame(todos_cadastro)
+        mostrar = [c for c in ["id", "cracha", "colaborador", "funcao", "empresa", "status", "ativo"] if c in cadastro_df.columns]
         st.dataframe(cadastro_df[mostrar], use_container_width=True, hide_index=True)
     else:
-        st.info("Nenhum colaborador cadastrado.")
+        st.info("Nenhum colaborador encontrado para o filtro selecionado.")
 
 with st.expander("⚙️ Cadastro de ocorrências"):
     st.caption("Esses códigos alimentam as opções disponíveis na grade.")
