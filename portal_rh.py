@@ -270,25 +270,33 @@ config = {
 for c in colunas_dia:
     config[c] = st.column_config.SelectboxColumn(c, options=opcoes, width="small", required=False)
 
-# Se o modal de LB/COMP foi fechado pelo X, desfaz somente aquela seleção
-# na grade. A observação digitada no modal não é considerada/salva.
-_cancelar = st.session_state.pop("rh_cancelar_lb_comp", None)
+# Se havia um modal de LB/COMP aberto e o app voltou a executar sem que
+# "Confirmar observação" tivesse sido clicado, isso significa cancelamento
+# pelo X. Nesse caso, desfaz imediatamente a seleção na grade.
+_cancelar = st.session_state.pop("rh_modal_alvo", None)
 if _cancelar:
     _row = int(_cancelar.get("row", -1))
     _col = str(_cancelar.get("col", ""))
     _editor_key = f"rh_grade_{ano}_{mes}"
     _estado_editor = st.session_state.get(_editor_key)
     if isinstance(_estado_editor, dict):
-        _edited_rows = _estado_editor.get("edited_rows", {})
+        _edited_rows = _estado_editor.setdefault("edited_rows", {})
         _row_key = str(_row) if str(_row) in _edited_rows else _row
         if _row_key in _edited_rows and isinstance(_edited_rows[_row_key], dict):
+            # Remove apenas a alteração LB/COMP desta célula; o data_editor
+            # volta a mostrar o valor original (vazio/None ou o status anterior).
             _edited_rows[_row_key].pop(_col, None)
             if not _edited_rows[_row_key]:
                 _edited_rows.pop(_row_key, None)
-    # Garante que nenhum texto digitado no modal cancelado fique como observação pendente.
+
     _obs_key = _cancelar.get("obs_key")
     if _obs_key:
         st.session_state.get("rh_observacoes_pendentes", {}).pop(_obs_key, None)
+
+    # O texto digitado sem confirmação também é descartado.
+    _modal_text_key = _cancelar.get("modal_text_key")
+    if _modal_text_key:
+        st.session_state.pop(_modal_text_key, None)
 
 editado = st.data_editor(
     df,
@@ -343,22 +351,16 @@ if alteracoes:
         if chave_salva not in chaves_validas:
             st.session_state.rh_observacoes_pendentes.pop(chave_salva, None)
 
-    def _modal_dispensado():
-        # Fechar no X = cancelar. Não confirma nem salva a observação.
-        alvo = st.session_state.get("rh_modal_alvo")
-        if alvo:
-            st.session_state.rh_cancelar_lb_comp = dict(alvo)
-        st.session_state.pop("rh_modal_alvo", None)
-
-    @st.dialog("Observação obrigatória", on_dismiss=_modal_dispensado)
+    @st.dialog("Observação obrigatória", on_dismiss="rerun")
     def modal_observacao(i, cid, dia, codigo, nome, valor_atual=""):
         descricao = "LIBERADO (LB)" if codigo == "LB" else "COMPENSAÇÃO (COMP)"
         st.markdown(f"**{nome}**")
         st.caption(f"Dia {dia:02d} • {descricao}")
+        modal_text_key = f"modal_obs_{cid}_{ano}_{mes}_{dia}_{codigo}"
         observacao = st.text_area(
             "Observação *",
             value=valor_atual,
-            key=f"modal_obs_{cid}_{ano}_{mes}_{dia}_{codigo}",
+            key=modal_text_key,
             placeholder="Informe obrigatoriamente o motivo/observação deste lançamento.",
             height=130,
         )
@@ -368,6 +370,8 @@ if alteracoes:
             else:
                 chave = f"{cid}_{int(ano)}_{mes}_{dia}"
                 st.session_state.rh_observacoes_pendentes[chave] = observacao.strip()
+                # Somente este botão confirma. Removemos o marcador antes do rerun
+                # para que o retorno não seja interpretado como cancelamento pelo X.
                 st.session_state.pop("rh_modal_alvo", None)
                 st.rerun()
 
@@ -382,6 +386,7 @@ if alteracoes:
                 "row": i,
                 "col": f"{dia:02d}",
                 "obs_key": chave_sessao,
+                "modal_text_key": f"modal_obs_{cid}_{ano}_{mes}_{dia}_{depois}",
             }
             modal_observacao(i, cid, dia, depois, nome, valor_anterior)
             modal_aberto = True
