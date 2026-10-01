@@ -604,6 +604,10 @@ _resumo_funcoes = (
 with st.expander("📊 Resumo por função", expanded=False):
     st.dataframe(_resumo_funcoes, use_container_width=False, hide_index=True)
 
+# Reserva o espaço dos rankings logo abaixo do resumo por função.
+# O conteúdo é preenchido depois da grade para considerar também alterações ainda não salvas.
+_rankings_topo = st.container()
+
 linhas = []
 ids = []
 for c in colaboradores:
@@ -698,6 +702,49 @@ for coluna in colunas_dia:
         codigo = str(valor or "").upper().strip()
         if codigo in contagens:
             contagens[codigo] += 1
+
+# Rankings compactos por colaborador — obedecem ao filtro TODOS / OPERACIONAL / OUTROS
+# e consideram o mês selecionado, inclusive alterações ainda pendentes na grade.
+_rank_faltas = []
+_rank_atestados = []
+for _i in range(len(editado)):
+    _nome = str(editado.iloc[_i]["COLABORADOR"] or "").strip()
+    _qtd_fa = 0
+    _qtd_a = 0
+    for _col in colunas_dia:
+        _codigo = str(editado.iloc[_i][_col] or "").upper().strip()
+        if _codigo == "FA":
+            _qtd_fa += 1
+        elif _codigo == "A":
+            _qtd_a += 1
+    if _qtd_fa > 0:
+        _rank_faltas.append({"COLABORADOR": _nome, "QTD": _qtd_fa})
+    if _qtd_a > 0:
+        _rank_atestados.append({"COLABORADOR": _nome, "QTD": _qtd_a})
+
+_rank_faltas = pd.DataFrame(_rank_faltas, columns=["COLABORADOR", "QTD"])
+_rank_atestados = pd.DataFrame(_rank_atestados, columns=["COLABORADOR", "QTD"])
+if not _rank_faltas.empty:
+    _rank_faltas = _rank_faltas.sort_values(["QTD", "COLABORADOR"], ascending=[False, True]).head(10)
+if not _rank_atestados.empty:
+    _rank_atestados = _rank_atestados.sort_values(["QTD", "COLABORADOR"], ascending=[False, True]).head(10)
+
+with _rankings_topo:
+    _rf, _ra = st.columns(2)
+    with _rf:
+        st.markdown("##### 🚫 Ranking de Faltas")
+        if _rank_faltas.empty:
+            st.caption("Nenhuma falta registrada no período.")
+        else:
+            st.bar_chart(_rank_faltas.set_index("COLABORADOR")["QTD"], height=250)
+            st.dataframe(_rank_faltas, use_container_width=True, hide_index=True, height=210)
+    with _ra:
+        st.markdown("##### 🏥 Ranking de Atestados")
+        if _rank_atestados.empty:
+            st.caption("Nenhum atestado registrado no período.")
+        else:
+            st.bar_chart(_rank_atestados.set_index("COLABORADOR")["QTD"], height=250)
+            st.dataframe(_rank_atestados, use_container_width=True, hide_index=True, height=210)
 
 # Média de Recebíveis — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
 # Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
