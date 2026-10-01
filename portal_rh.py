@@ -601,12 +601,16 @@ _resumo_funcoes = (
     .sort_values(["QTD", "FUNÇÃO"], ascending=[False, True])
     .reset_index(drop=True)
 )
-with st.expander("📊 Resumo por função", expanded=False):
+# Área de análises recolhível para manter a tela principal compacta.
+# O resumo por função e os dois rankings ficam juntos e fechados por padrão.
+_analises_expander = st.expander("📊 Análises de Frequência", expanded=False)
+with _analises_expander:
+    st.markdown("##### Resumo por Função")
     st.dataframe(_resumo_funcoes, use_container_width=False, hide_index=True)
 
-# Reserva o espaço dos rankings logo abaixo do resumo por função.
-# O conteúdo é preenchido depois da grade para considerar também alterações ainda não salvas.
-_rankings_topo = st.container()
+    # Reserva o espaço dos rankings dentro do próprio expander.
+    # O conteúdo é preenchido depois da grade para considerar também alterações ainda não salvas.
+    _rankings_topo = st.container()
 
 linhas = []
 ids = []
@@ -737,14 +741,12 @@ with _rankings_topo:
             st.caption("Nenhuma falta registrada no período.")
         else:
             st.bar_chart(_rank_faltas.set_index("COLABORADOR")["QTD"], height=250)
-            st.dataframe(_rank_faltas, use_container_width=True, hide_index=True, height=210)
     with _ra:
         st.markdown("##### 🏥 Ranking de Atestados")
         if _rank_atestados.empty:
             st.caption("Nenhum atestado registrado no período.")
         else:
             st.bar_chart(_rank_atestados.set_index("COLABORADOR")["QTD"], height=250)
-            st.dataframe(_rank_atestados, use_container_width=True, hide_index=True, height=210)
 
 # Média de Recebíveis — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
 # Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
