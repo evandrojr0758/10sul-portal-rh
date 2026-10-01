@@ -5,9 +5,13 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import datetime, date
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Portal RH | 10 Sul", page_icon="👥", layout="wide")
 
@@ -159,6 +163,178 @@ def ler_frequencia(ano, mes):
         "&data=lte." + urllib.parse.quote(fim)
     )
     return sb("GET", "rh_frequencia", params) or []
+
+
+
+def gerar_excel_frequencia(ano, mes, colaboradores, freq):
+    """Gera as abas BaseFuncionario e BaseFuncionário no padrão do fechamento mensal."""
+    ano = int(ano)
+    mes = int(mes)
+    dias_mes = calendar.monthrange(ano, mes)[1]
+
+    freq_por_chave = {}
+    for r in freq:
+        try:
+            d = pd.to_datetime(r.get("data")).date()
+            freq_por_chave[(int(r.get("colaborador_id")), d.day)] = str(r.get("situacao") or "").strip().upper()
+        except Exception:
+            pass
+
+    wb = Workbook()
+    ws_res = wb.active
+    ws_res.title = "BaseFuncionario"
+    ws_base = wb.create_sheet("BaseFuncionário")
+
+    # ---------- BaseFuncionário ----------
+    cab = ["EMPRESA", "CRACHÁ", "COLABORADOR", "BONIFCAÇÃO", "STATUS", "FUNÇÃO", "LOCAL", "DESLIGAMENTO"]
+    for c, valor in enumerate(cab, 1):
+        ws_base.cell(3, c, valor)
+
+    for dia in range(1, dias_mes + 1):
+        col = 8 + dia
+        ws_base.cell(3, col, date(ano, mes, dia))
+        ws_base.cell(2, col, f'=TEXT({get_column_letter(col)}3,"ddd")')
+
+    col_falta = 9 + dias_mes
+    col_atestado = 10 + dias_mes
+    ws_base.cell(3, col_falta, "FALTA")
+    ws_base.cell(3, col_atestado, "ATESTADO")
+
+    for idx, c in enumerate(colaboradores, start=4):
+        cid = int(c["id"])
+        empresa = str(c.get("empresa") or "10 SUL").strip().upper()
+        funcao = str(c.get("funcao") or c.get("funcao_padrao") or "").strip().upper()
+        status_cad = str(c.get("status") or "ATIVO").strip().upper()
+        ativo = bool(c.get("ativo", True))
+
+        ws_base.cell(idx, 1, empresa)
+        ws_base.cell(idx, 2, c.get("cracha") or "")
+        ws_base.cell(idx, 3, _nome_colaborador(c))
+        ws_base.cell(idx, 4, "OPERACIONAL")
+        ws_base.cell(idx, 5, "OPERACIONAL" if ativo and status_cad != "INATIVO" else "INATIVO")
+        ws_base.cell(idx, 6, funcao)
+        ws_base.cell(idx, 7, str(c.get("local") or "CMC ARA"))
+        ws_base.cell(idx, 8, "REGISTRO" if ativo else (c.get("data_desligamento") or "DESLIGAMENTO"))
+
+        for dia in range(1, dias_mes + 1):
+            ws_base.cell(idx, 8 + dia, freq_por_chave.get((cid, dia), ""))
+
+        primeira = get_column_letter(9)
+        ultima = get_column_letter(8 + dias_mes)
+        ws_base.cell(idx, col_falta, f'=COUNTIF({primeira}{idx}:{ultima}{idx},"FA")')
+        ws_base.cell(idx, col_atestado, f'=COUNTIF({primeira}{idx}:{ultima}{idx},"A")')
+
+    # ---------- BaseFuncionario (resumo) ----------
+    ws_res["C1"] = "Operacional"
+    ws_res["B2"] = "Data"
+    codigos_resumo = [
+        (3, "OK", "Presentes"),
+        (4, "A", "Atestado"),
+        (5, "LP", "Licença Paternidade"),
+        (6, "FE", "Férias"),
+        (7, "DE", "Destra"),
+        (8, "FA", "Falta"),
+        (9, "FO", "Folga"),
+    ]
+    for linha, codigo, descricao in codigos_resumo:
+        ws_res.cell(linha, 1, codigo)
+        ws_res.cell(linha, 2, descricao)
+
+    ultima_linha_base = max(130, 3 + len(colaboradores))
+    for dia in range(1, dias_mes + 1):
+        col_res = 2 + dia
+        col_base = 8 + dia
+        letra_res = get_column_letter(col_res)
+        letra_base = get_column_letter(col_base)
+        ws_res.cell(2, col_res, date(ano, mes, dia))
+        for linha, _, _ in codigos_resumo:
+            ws_res.cell(
+                linha, col_res,
+                f'=COUNTIFS(BaseFuncionário!$E$4:$E${ultima_linha_base},BaseFuncionario!$C$1,'
+                f'BaseFuncionário!{letra_base}$4:{letra_base}${ultima_linha_base},BaseFuncionario!$A{linha})'
+            )
+
+    ws_res["B10"] = "HORA EXTRA"
+    ws_res["B11"] = "08:00"
+    ws_res["B13"] = "EQUIVALÊNCIA"
+    ws_res["B14"] = "AUSÊNCIAS"
+    ws_res["B15"] = "Total faltas após compe"
+    ws_res["B17"] = "Descrição"
+    ws_res["B18"] = "Qtd Frota"
+    ws_res["B19"] = "M.O Ideal"
+    ws_res["B20"] = "M.O Real"
+    ws_res["B21"] = "Delta M.O"
+    ws_res["B23"] = "EXCEDENTE"
+    ws_res["B24"] = "FALTAS"
+
+    for dia in range(1, dias_mes + 1):
+        col = 2 + dia
+        letra = get_column_letter(col)
+        ws_res.cell(17, col, date(ano, mes, dia))
+        ws_res.cell(11, col, f'={letra}3+{letra}4+{letra}8+{letra}9')
+        ws_res.cell(12, col, f'={letra}4+{letra}8')
+        ws_res.cell(13, col, 0)  # Hora extra ainda não é controlada neste Portal RH.
+        ws_res.cell(14, col, f'={letra}4+{letra}8')
+        ws_res.cell(15, col, f'=IF({letra}14=0,"",IF({letra}14<{letra}13,"",IF({letra}14>{letra}13,{letra}14-{letra}13,"")))')
+        ws_res.cell(16, col, f'={letra}9+{letra}8+{letra}4+{letra}3')
+        ws_res.cell(18, col, 202)
+        ws_res.cell(19, col, f'={letra}18*0.47')
+        ws_res.cell(20, col, f'=IF({letra}3+{letra}9+{letra}4+{letra}8>{letra}19,{letra}19,{letra}9+{letra}3+{letra}4+{letra}8)')
+        ws_res.cell(21, col, f'=IF({letra}19-{letra}20>{letra}19,{letra}19,{letra}19-{letra}20)')
+        ws_res.cell(22, col, f'={letra}19-{letra}20')
+        ws_res.cell(23, col, f'=IF({letra}22>{letra}19,{letra}22-{letra}19,"")')
+        ws_res.cell(24, col, f'=IF({letra}8>0,{letra}8,"")')
+
+    # Formatação aproximada ao modelo de fechamento.
+    azul = "1F4E78"
+    azul_claro = "D9EAF7"
+    cinza = "E7E6E6"
+    branco = "FFFFFF"
+    borda = Side(style="thin", color="B7B7B7")
+
+    for ws in (ws_base, ws_res):
+        ws.freeze_panes = "I4" if ws.title == "BaseFuncionário" else "C3"
+
+    for cell in ws_base[3]:
+        if cell.value is not None:
+            cell.fill = PatternFill("solid", fgColor=azul)
+            cell.font = Font(color=branco, bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = Border(bottom=borda)
+    for c in range(9, 9 + dias_mes):
+        ws_base.cell(2, c).fill = PatternFill("solid", fgColor=azul_claro)
+        ws_base.cell(2, c).alignment = Alignment(horizontal="center")
+        ws_base.cell(3, c).number_format = "dd/mm"
+        ws_base.column_dimensions[get_column_letter(c)].width = 6
+    ws_base.column_dimensions["A"].width = 20
+    ws_base.column_dimensions["B"].width = 12
+    ws_base.column_dimensions["C"].width = 38
+    ws_base.column_dimensions["D"].width = 16
+    ws_base.column_dimensions["E"].width = 16
+    ws_base.column_dimensions["F"].width = 28
+    ws_base.column_dimensions["G"].width = 15
+    ws_base.column_dimensions["H"].width = 16
+    ws_base.column_dimensions[get_column_letter(col_falta)].width = 10
+    ws_base.column_dimensions[get_column_letter(col_atestado)].width = 11
+
+    for r in range(1, 25):
+        for c in range(1, 3 + dias_mes):
+            cell = ws_res.cell(r, c)
+            if r in (2, 17):
+                cell.fill = PatternFill("solid", fgColor=azul_claro)
+                cell.font = Font(bold=True)
+            if c >= 3 and r in (2, 17):
+                cell.number_format = "dd/mm"
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws_res.column_dimensions["A"].width = 10
+    ws_res.column_dimensions["B"].width = 25
+    for c in range(3, 3 + dias_mes):
+        ws_res.column_dimensions[get_column_letter(c)].width = 7
+
+    saida = BytesIO()
+    wb.save(saida)
+    saida.seek(0)
+    return saida.getvalue()
 
 def salvar_frequencia(colaborador_id, dia, codigo, observacao=""):
     payload = {
@@ -333,6 +509,19 @@ with resumo_topo:
     k4.metric("Presenças", contagens["OK"])
     k5.metric("Liberados", contagens["LB"])
     k6.metric("Compensações", contagens["COMP"])
+
+# Exportação no mesmo padrão das abas BaseFuncionario e BaseFuncionário usadas no fechamento.
+try:
+    _excel_export = gerar_excel_frequencia(int(ano), mes, colaboradores, freq)
+    st.download_button(
+        "📥 Exportar Excel — BaseFuncionario / BaseFuncionário",
+        data=_excel_export,
+        file_name=f"Frequencia_{int(ano)}_{mes:02d}_BaseFuncionario.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=False,
+    )
+except Exception as e:
+    st.warning(f"Não foi possível preparar a exportação em Excel: {e}")
 
 alteracoes = []
 for i, cid in enumerate(ids):
