@@ -52,11 +52,33 @@ STATUS_PADRAO = [
     {"codigo":"LB", "descricao":"LIBERADO", "ordem":6, "ativo":True, "exige_observacao":True},
 ]
 
+def _campo_nome_colaborador(registro):
+    """Aceita a estrutura atual do banco e também a estrutura antiga."""
+    for campo in ("colaborador", "nome", "nome_colaborador"):
+        if campo in registro:
+            return campo
+    return None
+
+def _nome_colaborador(registro):
+    campo = _campo_nome_colaborador(registro)
+    return str(registro.get(campo) or "") if campo else ""
+
 def sincronizar_seed():
-    regs = [{"nome": n, "funcao": f, "ativo": True} for n, f in SEED_COLABORADORES]
-    for i in range(0, len(regs), 300):
-        sb("POST", "rh_colaboradores", "on_conflict=nome", regs[i:i+300],
-           "resolution=merge-duplicates,return=minimal")
+    # A tabela atual usa COLABORADOR. Mantemos fallback para bases antigas.
+    tentativas = ("colaborador", "nome", "nome_colaborador")
+    ultimo_erro = None
+
+    for campo_nome in tentativas:
+        regs = [{campo_nome: n, "funcao": f, "ativo": True} for n, f in SEED_COLABORADORES]
+        try:
+            for i in range(0, len(regs), 300):
+                sb("POST", "rh_colaboradores", f"on_conflict={campo_nome}", regs[i:i+300],
+                   "resolution=merge-duplicates,return=minimal")
+            return
+        except Exception as e:
+            ultimo_erro = e
+
+    raise RuntimeError(f"Não foi possível sincronizar colaboradores: {ultimo_erro}")
 
 def garantir_ocorrencias():
     for r in STATUS_PADRAO:
@@ -70,7 +92,9 @@ def garantir_ocorrencias():
                "resolution=merge-duplicates,return=minimal")
 
 def ler_colaboradores():
-    return sb("GET", "rh_colaboradores", "select=*&ativo=eq.true&order=nome.asc") or []
+    # Não ordena pelo Supabase para não depender do nome físico da coluna.
+    rows = sb("GET", "rh_colaboradores", "select=*&ativo=eq.true") or []
+    return sorted(rows, key=lambda r: _nome_colaborador(r).upper())
 
 def ler_ocorrencias():
     rows = sb("GET", "rh_ocorrencias", "select=*&ativo=eq.true") or []
@@ -177,7 +201,7 @@ for c in colaboradores:
     cid = int(c["id"])
     ids.append(cid)
     row = {
-        "COLABORADOR": str(c.get("nome") or ""),
+        "COLABORADOR": _nome_colaborador(c),
         "FUNÇÃO": str(c.get("funcao") or c.get("funcao_padrao") or ""),
     }
     for dia in range(1, ultimo_visivel + 1):
