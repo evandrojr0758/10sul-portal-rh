@@ -231,20 +231,9 @@ else:
 
 freq = ler_frequencia(int(ano), mes)
 
-# Resumo mensal no topo
-contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0}
-for r in freq:
-    codigo = str(r.get("situacao") or "").upper().strip()
-    if codigo in contagens:
-        contagens[codigo] += 1
-
-st.markdown("#### Resumo do mês")
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Faltas", contagens["FA"])
-k2.metric("Atestados", contagens["A"])
-k3.metric("Folgas", contagens["FO"])
-k4.metric("Presenças", contagens["OK"])
-k5.metric("Liberados", contagens["LB"])
+# Reserva o espaço do resumo no topo. Ele será preenchido depois da grade,
+# usando inclusive os lançamentos que o RH acabou de selecionar e ainda não salvou.
+resumo_topo = st.container()
 
 mapa = {}
 obs_mapa = {}
@@ -290,6 +279,23 @@ editado = st.data_editor(
     height=min(820, 72 + max(1, len(df))*35),
 )
 
+# Conta diretamente o que está aparecendo na grade, inclusive alterações ainda não salvas.
+contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0}
+for coluna in colunas_dia:
+    for valor in editado[coluna].tolist():
+        codigo = str(valor or "").upper().strip()
+        if codigo in contagens:
+            contagens[codigo] += 1
+
+with resumo_topo:
+    st.markdown("#### Resumo do mês")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Faltas", contagens["FA"])
+    k2.metric("Atestados", contagens["A"])
+    k3.metric("Folgas", contagens["FO"])
+    k4.metric("Presenças", contagens["OK"])
+    k5.metric("Liberados", contagens["LB"])
+
 alteracoes = []
 for i, cid in enumerate(ids):
     for dia in range(1, ultimo_visivel + 1):
@@ -301,6 +307,7 @@ for i, cid in enumerate(ids):
 
 if alteracoes:
     st.markdown("#### Alterações pendentes")
+    st.caption("Ao selecionar LB, os campos obrigatórios de liberação aparecem logo abaixo.")
     precisa_lb = [(i,cid,d,a,n) for i,cid,d,a,n in alteracoes if n == "LB"]
     observacoes = {}
     for i, cid, dia, antes, depois in precisa_lb:
