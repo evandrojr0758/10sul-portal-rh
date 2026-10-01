@@ -70,7 +70,7 @@ def garantir_ocorrencias():
                "resolution=merge-duplicates,return=minimal")
 
 def ler_colaboradores():
-    return sb("GET", "rh_colaboradores", "select=*&ativo=eq.true&order=nome.asc") or []
+    return sb("GET", "rh_colaboradores", "select=*&ativo=eq.true&order=colaborador.asc") or []
 
 def ler_ocorrencias():
     rows = sb("GET", "rh_ocorrencias", "select=*&ativo=eq.true") or []
