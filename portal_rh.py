@@ -50,6 +50,7 @@ STATUS_PADRAO = [
     {"codigo":"A",  "descricao":"ATESTADO", "ordem":4, "ativo":True, "exige_observacao":False},
     {"codigo":"FE", "descricao":"FÉRIAS", "ordem":5, "ativo":True, "exige_observacao":False},
     {"codigo":"LB", "descricao":"LIBERADO", "ordem":6, "ativo":True, "exige_observacao":True},
+    {"codigo":"COMP", "descricao":"COMPENSAÇÃO", "ordem":7, "ativo":True, "exige_observacao":True},
 ]
 
 def _campo_nome_colaborador(registro):
@@ -280,7 +281,7 @@ editado = st.data_editor(
 )
 
 # Conta diretamente o que está aparecendo na grade, inclusive alterações ainda não salvas.
-contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0}
+contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0, "COMP": 0}
 for coluna in colunas_dia:
     for valor in editado[coluna].tolist():
         codigo = str(valor or "").upper().strip()
@@ -289,12 +290,13 @@ for coluna in colunas_dia:
 
 with resumo_topo:
     st.markdown("#### Resumo do mês")
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("Faltas", contagens["FA"])
     k2.metric("Atestados", contagens["A"])
     k3.metric("Folgas", contagens["FO"])
     k4.metric("Presenças", contagens["OK"])
     k5.metric("Liberados", contagens["LB"])
+    k6.metric("Compensações", contagens["COMP"])
 
 alteracoes = []
 for i, cid in enumerate(ids):
@@ -307,49 +309,74 @@ for i, cid in enumerate(ids):
 
 if alteracoes:
     st.markdown("#### Alterações pendentes")
-    st.caption("Ao selecionar LB, os campos obrigatórios de liberação aparecem logo abaixo.")
-    precisa_lb = [(i,cid,d,a,n) for i,cid,d,a,n in alteracoes if n == "LB"]
-    observacoes = {}
-    for i, cid, dia, antes, depois in precisa_lb:
-        nome = editado.iloc[i]["COLABORADOR"]
-        chave = (cid, dia)
-        st.markdown(f"**{nome} • dia {dia:02d} • LIBERADO (LB)**")
-        lb1, lb2 = st.columns(2)
-        valor_anterior = obs_mapa.get(chave, "")
-        liberado_por_anterior = ""
-        motivo_anterior = ""
-        if " | MOTIVO: " in valor_anterior:
-            parte1, motivo_anterior = valor_anterior.split(" | MOTIVO: ", 1)
-            liberado_por_anterior = parte1.replace("LIBERADO POR: ", "", 1)
-        with lb1:
-            liberado_por = st.text_input(
-                "Quem liberou *",
-                value=liberado_por_anterior,
-                key=f"lb_por_{cid}_{ano}_{mes}_{dia}",
-                placeholder="Nome de quem autorizou a liberação"
-            )
-        with lb2:
-            motivo = st.text_input(
-                "Motivo da liberação *",
-                value=motivo_anterior,
-                key=f"lb_motivo_{cid}_{ano}_{mes}_{dia}",
-                placeholder="Informe por que o colaborador foi liberado"
-            )
-        observacoes[chave] = (
-            f"LIBERADO POR: {liberado_por.strip()} | MOTIVO: {motivo.strip()}"
-            if liberado_por.strip() and motivo.strip() else ""
-        )
 
-    pode_salvar = all(str(v).strip() for v in observacoes.values())
-    if precisa_lb and not pode_salvar:
-        st.warning("Para cada LB, informe obrigatoriamente quem liberou e o motivo da liberação.")
+    # LB e COMP exigem observação. Ao selecionar um deles na grade, o modal
+    # abre imediatamente, sem obrigar o usuário a rolar até o fim da página.
+    pendentes_obs = [(i, cid, d, a, n) for i, cid, d, a, n in alteracoes if n in ("LB", "COMP")]
+
+    if "rh_observacoes_pendentes" not in st.session_state:
+        st.session_state.rh_observacoes_pendentes = {}
+
+    # Remove rascunhos de células que deixaram de ser LB/COMP.
+    chaves_validas = {f"{cid}_{int(ano)}_{mes}_{dia}" for _, cid, dia, _, novo in pendentes_obs}
+    for chave_salva in list(st.session_state.rh_observacoes_pendentes.keys()):
+        if chave_salva not in chaves_validas:
+            st.session_state.rh_observacoes_pendentes.pop(chave_salva, None)
+
+    @st.dialog("Observação obrigatória")
+    def modal_observacao(cid, dia, codigo, nome, valor_atual=""):
+        descricao = "LIBERADO (LB)" if codigo == "LB" else "COMPENSAÇÃO (COMP)"
+        st.markdown(f"**{nome}**")
+        st.caption(f"Dia {dia:02d} • {descricao}")
+        observacao = st.text_area(
+            "Observação *",
+            value=valor_atual,
+            key=f"modal_obs_{cid}_{ano}_{mes}_{dia}_{codigo}",
+            placeholder="Informe obrigatoriamente o motivo/observação deste lançamento.",
+            height=130,
+        )
+        if st.button("Confirmar observação", type="primary", use_container_width=True):
+            if not observacao.strip():
+                st.error("A observação é obrigatória para LB e COMP.")
+            else:
+                chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+                st.session_state.rh_observacoes_pendentes[chave] = observacao.strip()
+                st.rerun()
+
+    # Abre automaticamente o primeiro LB/COMP que ainda não recebeu observação.
+    modal_aberto = False
+    for i, cid, dia, antes, depois in pendentes_obs:
+        chave_sessao = f"{cid}_{int(ano)}_{mes}_{dia}"
+        if not str(st.session_state.rh_observacoes_pendentes.get(chave_sessao, "")).strip():
+            nome = str(editado.iloc[i]["COLABORADOR"])
+            valor_anterior = obs_mapa.get((cid, dia), "")
+            modal_observacao(cid, dia, depois, nome, valor_anterior)
+            modal_aberto = True
+            break
+
+    observacoes = {}
+    for _, cid, dia, _, depois in pendentes_obs:
+        chave_sessao = f"{cid}_{int(ano)}_{mes}_{dia}"
+        observacoes[(cid, dia)] = str(st.session_state.rh_observacoes_pendentes.get(chave_sessao, "")).strip()
+
+    pode_salvar = all(observacoes.values()) if pendentes_obs else True
+    if pendentes_obs and not pode_salvar and not modal_aberto:
+        st.warning("LB e COMP exigem observação obrigatória.")
 
     if st.button("💾 Salvar alterações", type="primary", disabled=not pode_salvar):
         try:
             for i, cid, dia, antes, depois in alteracoes:
                 data_dia = date(int(ano), mes, dia)
-                obs = observacoes.get((cid,dia), obs_mapa.get((cid,dia), ""))
+                if depois in ("LB", "COMP"):
+                    obs = observacoes.get((cid, dia), "")
+                else:
+                    # Ao trocar uma célula de LB/COMP para outro status, limpa a observação antiga.
+                    obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
                 salvar_frequencia(cid, data_dia, depois, obs)
+
+            for _, cid, dia, _, _ in pendentes_obs:
+                st.session_state.rh_observacoes_pendentes.pop(f"{cid}_{int(ano)}_{mes}_{dia}", None)
+
             st.success(f"{len(alteracoes)} lançamento(s) salvo(s).")
             st.rerun()
         except Exception as e:
@@ -467,5 +494,29 @@ with st.expander("👥 Cadastro de colaboradores"):
 with st.expander("⚙️ Cadastro de ocorrências"):
     st.caption("Esses códigos alimentam as opções disponíveis na grade.")
     st.dataframe(pd.DataFrame(ocorrencias), use_container_width=True, hide_index=True)
+
+
+st.markdown("#### 📝 Observações de LB / COMP")
+registros_obs = []
+nomes_por_id = {int(c["id"]): _nome_colaborador(c) for c in colaboradores}
+for r in freq:
+    codigo = str(r.get("situacao") or "").upper().strip()
+    observacao = str(r.get("observacao") or "").strip()
+    if codigo in ("LB", "COMP") and observacao:
+        try:
+            data_reg = pd.to_datetime(r.get("data")).strftime("%d/%m/%Y")
+        except Exception:
+            data_reg = str(r.get("data") or "")
+        registros_obs.append({
+            "DATA": data_reg,
+            "COLABORADOR": nomes_por_id.get(int(r.get("colaborador_id")), str(r.get("colaborador_id") or "")),
+            "TIPO": codigo,
+            "OBSERVAÇÃO": observacao,
+        })
+
+if registros_obs:
+    st.dataframe(pd.DataFrame(registros_obs), use_container_width=True, hide_index=True)
+else:
+    st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
