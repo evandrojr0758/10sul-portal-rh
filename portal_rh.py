@@ -122,11 +122,16 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL"):
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
 
-def alterar_status_colaborador(colaborador_id, ativo):
-    """Desativa/reativa sem apagar o histórico do colaborador."""
+def alterar_status_colaborador(colaborador_id, ativo, data_desligamento=None):
+    """Ativa/desativa o colaborador preservando o histórico."""
     payload = {
         "ativo": bool(ativo),
         "status": "ATIVO" if ativo else "INATIVO",
+        "data_desligamento": None if ativo else (
+            data_desligamento.isoformat()
+            if hasattr(data_desligamento, "isoformat")
+            else str(data_desligamento)
+        ),
     }
     sb(
         "PATCH",
@@ -329,8 +334,11 @@ with st.expander("👥 Cadastro de colaboradores"):
                 st.error(f"Não foi possível cadastrar: {e}")
 
     st.markdown("#### Gerenciar colaboradores")
+    st.caption("Altere o status diretamente na tabela. Ao mudar para INATIVO, informe a data de desligamento e confirme.")
+
     mostrar_inativos = st.checkbox("Mostrar colaboradores inativos", value=False)
 
+    # Para permitir reativação, quando marcado traz ativos e inativos.
     params_cadastro = "select=*"
     if not mostrar_inativos:
         params_cadastro += "&ativo=eq.true"
@@ -338,39 +346,78 @@ with st.expander("👥 Cadastro de colaboradores"):
     todos_cadastro = sorted(todos_cadastro, key=lambda r: _nome_colaborador(r).upper())
 
     if todos_cadastro:
-        opcoes = {
-            f"{_nome_colaborador(r)} — {str(r.get('funcao') or 'SEM FUNÇÃO')} — {'ATIVO' if r.get('ativo', True) else 'INATIVO'}": r
+        cadastro_df = pd.DataFrame(todos_cadastro)
+
+        # Garante colunas usadas pela interface.
+        if "status" not in cadastro_df.columns:
+            cadastro_df["status"] = cadastro_df["ativo"].apply(lambda x: "ATIVO" if bool(x) else "INATIVO")
+        cadastro_df["status"] = cadastro_df["status"].fillna("ATIVO").astype(str).str.upper()
+        if "data_desligamento" not in cadastro_df.columns:
+            cadastro_df["data_desligamento"] = None
+
+        cols_editor = [c for c in [
+            "id", "cracha", "colaborador", "funcao", "empresa",
+            "status", "data_desligamento"
+        ] if c in cadastro_df.columns]
+
+        original_status = {
+            str(r["id"]): str(r.get("status") or ("ATIVO" if r.get("ativo", True) else "INATIVO")).upper()
             for r in todos_cadastro
         }
-        escolhido_label = st.selectbox(
-            "Selecione um colaborador",
-            options=list(opcoes.keys()),
-            key="gerenciar_colaborador",
+
+        editado = st.data_editor(
+            cadastro_df[cols_editor],
+            use_container_width=True,
+            hide_index=True,
+            disabled=[c for c in cols_editor if c not in ("status", "data_desligamento")],
+            column_config={
+                "id": st.column_config.NumberColumn("ID"),
+                "cracha": st.column_config.TextColumn("Crachá"),
+                "colaborador": st.column_config.TextColumn("Colaborador"),
+                "funcao": st.column_config.TextColumn("Função"),
+                "empresa": st.column_config.TextColumn("Empresa"),
+                "status": st.column_config.SelectboxColumn(
+                    "Status",
+                    options=["ATIVO", "INATIVO"],
+                    required=True,
+                ),
+                "data_desligamento": st.column_config.DateColumn(
+                    "Data de desligamento",
+                    format="DD/MM/YYYY",
+                ),
+            },
+            key="editor_colaboradores",
         )
-        escolhido = opcoes[escolhido_label]
 
-        a1, a2 = st.columns([1, 3])
-        with a1:
-            if bool(escolhido.get("ativo", True)):
-                if st.button("🚫 Desativar colaborador", type="secondary", use_container_width=True):
-                    try:
-                        alterar_status_colaborador(escolhido["id"], False)
-                        st.success(f"{_nome_colaborador(escolhido)} foi desativado. O histórico foi mantido.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Não foi possível desativar: {e}")
-            else:
-                if st.button("✅ Reativar colaborador", type="primary", use_container_width=True):
-                    try:
-                        alterar_status_colaborador(escolhido["id"], True)
-                        st.success(f"{_nome_colaborador(escolhido)} foi reativado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Não foi possível reativar: {e}")
+        alteracoes = []
+        erros = []
+        for _, linha in editado.iterrows():
+            cid = str(linha["id"])
+            novo_status = str(linha.get("status") or "ATIVO").upper()
+            status_antigo = original_status.get(cid, "ATIVO")
+            if novo_status != status_antigo:
+                data_desl = linha.get("data_desligamento")
+                if novo_status == "INATIVO" and pd.isna(data_desl):
+                    erros.append(str(linha.get("colaborador") or cid))
+                else:
+                    alteracoes.append((linha, novo_status))
 
-        cadastro_df = pd.DataFrame(todos_cadastro)
-        mostrar = [c for c in ["id", "cracha", "colaborador", "funcao", "empresa", "status", "ativo"] if c in cadastro_df.columns]
-        st.dataframe(cadastro_df[mostrar], use_container_width=True, hide_index=True)
+        if erros:
+            st.warning(
+                "Informe a data de desligamento para: " + ", ".join(erros)
+            )
+
+        if alteracoes:
+            if st.button("💾 Confirmar alteração de status", type="primary"):
+                try:
+                    for linha, novo_status in alteracoes:
+                        ativo_novo = novo_status == "ATIVO"
+                        data_desl = None if ativo_novo else linha.get("data_desligamento")
+                        alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
+                    st.success("Status atualizado com sucesso.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Não foi possível atualizar o status: {e}")
     else:
         st.info("Nenhum colaborador encontrado para o filtro selecionado.")
 
