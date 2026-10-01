@@ -270,6 +270,26 @@ config = {
 for c in colunas_dia:
     config[c] = st.column_config.SelectboxColumn(c, options=opcoes, width="small", required=False)
 
+# Se o modal de LB/COMP foi fechado pelo X, desfaz somente aquela seleção
+# na grade. A observação digitada no modal não é considerada/salva.
+_cancelar = st.session_state.pop("rh_cancelar_lb_comp", None)
+if _cancelar:
+    _row = int(_cancelar.get("row", -1))
+    _col = str(_cancelar.get("col", ""))
+    _editor_key = f"rh_grade_{ano}_{mes}"
+    _estado_editor = st.session_state.get(_editor_key)
+    if isinstance(_estado_editor, dict):
+        _edited_rows = _estado_editor.get("edited_rows", {})
+        _row_key = str(_row) if str(_row) in _edited_rows else _row
+        if _row_key in _edited_rows and isinstance(_edited_rows[_row_key], dict):
+            _edited_rows[_row_key].pop(_col, None)
+            if not _edited_rows[_row_key]:
+                _edited_rows.pop(_row_key, None)
+    # Garante que nenhum texto digitado no modal cancelado fique como observação pendente.
+    _obs_key = _cancelar.get("obs_key")
+    if _obs_key:
+        st.session_state.get("rh_observacoes_pendentes", {}).pop(_obs_key, None)
+
 editado = st.data_editor(
     df,
     use_container_width=True,
@@ -323,8 +343,15 @@ if alteracoes:
         if chave_salva not in chaves_validas:
             st.session_state.rh_observacoes_pendentes.pop(chave_salva, None)
 
-    @st.dialog("Observação obrigatória")
-    def modal_observacao(cid, dia, codigo, nome, valor_atual=""):
+    def _modal_dispensado():
+        # Fechar no X = cancelar. Não confirma nem salva a observação.
+        alvo = st.session_state.get("rh_modal_alvo")
+        if alvo:
+            st.session_state.rh_cancelar_lb_comp = dict(alvo)
+        st.session_state.pop("rh_modal_alvo", None)
+
+    @st.dialog("Observação obrigatória", on_dismiss=_modal_dispensado)
+    def modal_observacao(i, cid, dia, codigo, nome, valor_atual=""):
         descricao = "LIBERADO (LB)" if codigo == "LB" else "COMPENSAÇÃO (COMP)"
         st.markdown(f"**{nome}**")
         st.caption(f"Dia {dia:02d} • {descricao}")
@@ -341,6 +368,7 @@ if alteracoes:
             else:
                 chave = f"{cid}_{int(ano)}_{mes}_{dia}"
                 st.session_state.rh_observacoes_pendentes[chave] = observacao.strip()
+                st.session_state.pop("rh_modal_alvo", None)
                 st.rerun()
 
     # Abre automaticamente o primeiro LB/COMP que ainda não recebeu observação.
@@ -350,7 +378,12 @@ if alteracoes:
         if not str(st.session_state.rh_observacoes_pendentes.get(chave_sessao, "")).strip():
             nome = str(editado.iloc[i]["COLABORADOR"])
             valor_anterior = obs_mapa.get((cid, dia), "")
-            modal_observacao(cid, dia, depois, nome, valor_anterior)
+            st.session_state.rh_modal_alvo = {
+                "row": i,
+                "col": f"{dia:02d}",
+                "obs_key": chave_sessao,
+            }
+            modal_observacao(i, cid, dia, depois, nome, valor_anterior)
             modal_aberto = True
             break
 
