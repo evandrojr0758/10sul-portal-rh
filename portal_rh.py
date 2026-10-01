@@ -270,49 +270,51 @@ config = {
 for c in colunas_dia:
     config[c] = st.column_config.SelectboxColumn(c, options=opcoes, width="small", required=False)
 
-# Se havia um modal de LB/COMP aberto e o app voltou a executar sem que
-# "Confirmar observação" tivesse sido clicado, isso significa cancelamento
-# pelo X. Nesse caso, desfaz imediatamente a seleção na grade.
-_cancelar = st.session_state.pop("rh_modal_alvo", None)
+# A grade usa um rascunho em session_state. Isso permite desfazer SOMENTE a célula
+# LB/COMP quando o modal é fechado no X, sem perder outras alterações pendentes.
+_periodo_key = f"{int(ano)}_{mes}"
+_draft_key = f"rh_grade_draft_{_periodo_key}"
+_nonce_key = f"rh_grade_nonce_{_periodo_key}"
+if _nonce_key not in st.session_state:
+    st.session_state[_nonce_key] = 0
+
+# Se o modal foi fechado no X, o callback deixou uma solicitação de cancelamento.
+_cancelar = st.session_state.pop("rh_cancelar_modal", None)
 if _cancelar:
-    _row = int(_cancelar.get("row", -1))
-    _col = str(_cancelar.get("col", ""))
-    _editor_key = f"rh_grade_{ano}_{mes}"
-    _estado_editor = st.session_state.get(_editor_key)
-    if isinstance(_estado_editor, dict):
-        # Dependendo da versão do Streamlit, edited_rows pode existir como None.
-        # Nunca usamos setdefault diretamente porque ele preserva o None.
-        _edited_rows = _estado_editor.get("edited_rows")
-        if not isinstance(_edited_rows, dict):
-            _edited_rows = {}
-            _estado_editor["edited_rows"] = _edited_rows
+    _draft = st.session_state.get(_draft_key)
+    if isinstance(_draft, pd.DataFrame):
+        _draft = _draft.copy()
+        _row = int(_cancelar["row"])
+        _col = str(_cancelar["col"])
+        # Volta exatamente ao valor que existia antes da seleção de LB/COMP.
+        _draft.at[_row, _col] = _cancelar.get("antes", "")
+        st.session_state[_draft_key] = _draft
+    st.session_state.get("rh_observacoes_pendentes", {}).pop(_cancelar.get("obs_key", ""), None)
+    st.session_state.get("rh_responsaveis_pendentes", {}).pop(_cancelar.get("obs_key", ""), None)
+    _txt = _cancelar.get("modal_text_key")
+    _resp = _cancelar.get("modal_resp_key")
+    if _txt:
+        st.session_state.pop(_txt, None)
+    if _resp:
+        st.session_state.pop(_resp, None)
 
-        _row_key = str(_row) if str(_row) in _edited_rows else _row
-        if _row_key in _edited_rows and isinstance(_edited_rows[_row_key], dict):
-            # Remove apenas a alteração LB/COMP desta célula; o data_editor
-            # volta a mostrar o valor original (vazio/None ou o status anterior).
-            _edited_rows[_row_key].pop(_col, None)
-            if not _edited_rows[_row_key]:
-                _edited_rows.pop(_row_key, None)
-
-    _obs_key = _cancelar.get("obs_key")
-    if _obs_key:
-        st.session_state.get("rh_observacoes_pendentes", {}).pop(_obs_key, None)
-
-    # O texto digitado sem confirmação também é descartado.
-    _modal_text_key = _cancelar.get("modal_text_key")
-    if _modal_text_key:
-        st.session_state.pop(_modal_text_key, None)
+# Fonte exibida pelo editor: rascunho atual ou a base salva.
+_base_editor = st.session_state.get(_draft_key)
+if not isinstance(_base_editor, pd.DataFrame) or list(_base_editor.columns) != list(df.columns) or len(_base_editor) != len(df):
+    _base_editor = df.copy()
+    st.session_state[_draft_key] = _base_editor.copy()
 
 editado = st.data_editor(
-    df,
+    _base_editor,
     use_container_width=True,
     hide_index=True,
     disabled=["COLABORADOR","FUNÇÃO"],
     column_config=config,
-    key=f"rh_grade_{ano}_{mes}",
+    key=f"rh_grade_{ano}_{mes}_{st.session_state[_nonce_key]}",
     height=min(820, 72 + max(1, len(df))*35),
 )
+# Mantém o que está visualmente na grade como rascunho oficial.
+st.session_state[_draft_key] = editado.copy()
 
 # Conta diretamente o que está aparecendo na grade, inclusive alterações ainda não salvas.
 contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0, "COMP": 0}
@@ -343,58 +345,84 @@ for i, cid in enumerate(ids):
 
 if alteracoes:
     st.markdown("#### Alterações pendentes")
-
-    # LB e COMP exigem observação. Ao selecionar um deles na grade, o modal
-    # abre imediatamente, sem obrigar o usuário a rolar até o fim da página.
     pendentes_obs = [(i, cid, d, a, n) for i, cid, d, a, n in alteracoes if n in ("LB", "COMP")]
 
     if "rh_observacoes_pendentes" not in st.session_state:
         st.session_state.rh_observacoes_pendentes = {}
+    if "rh_responsaveis_pendentes" not in st.session_state:
+        st.session_state.rh_responsaveis_pendentes = {}
 
-    # Remove rascunhos de células que deixaram de ser LB/COMP.
     chaves_validas = {f"{cid}_{int(ano)}_{mes}_{dia}" for _, cid, dia, _, novo in pendentes_obs}
     for chave_salva in list(st.session_state.rh_observacoes_pendentes.keys()):
         if chave_salva not in chaves_validas:
             st.session_state.rh_observacoes_pendentes.pop(chave_salva, None)
+            st.session_state.rh_responsaveis_pendentes.pop(chave_salva, None)
 
-    @st.dialog("Observação obrigatória", on_dismiss="rerun")
-    def modal_observacao(i, cid, dia, codigo, nome, valor_atual=""):
+    def _fechou_modal_sem_confirmar():
+        """X do modal = cancelamento. Nunca autoriza LB/COMP."""
+        alvo = st.session_state.pop("rh_modal_alvo", None)
+        if alvo:
+            st.session_state.rh_cancelar_modal = alvo
+            # Força recriação do data_editor para refletir imediatamente o valor desfeito.
+            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
+
+    @st.dialog("Autorização obrigatória", on_dismiss=_fechou_modal_sem_confirmar)
+    def modal_observacao(i, cid, dia, antes, codigo, nome, valor_atual=""):
         descricao = "LIBERADO (LB)" if codigo == "LB" else "COMPENSAÇÃO (COMP)"
         st.markdown(f"**{nome}**")
         st.caption(f"Dia {dia:02d} • {descricao}")
+        chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+        modal_resp_key = f"modal_resp_{cid}_{ano}_{mes}_{dia}_{codigo}"
         modal_text_key = f"modal_obs_{cid}_{ano}_{mes}_{dia}_{codigo}"
+
+        responsavel = st.text_input(
+            "Responsável pela autorização *",
+            value=str(st.session_state.rh_responsaveis_pendentes.get(chave, "")),
+            key=modal_resp_key,
+            placeholder="Informe quem autorizou a liberação/compensação",
+        )
         observacao = st.text_area(
             "Observação *",
-            value=valor_atual,
+            value=str(st.session_state.rh_observacoes_pendentes.get(chave, valor_atual or "")),
             key=modal_text_key,
-            placeholder="Informe obrigatoriamente o motivo/observação deste lançamento.",
+            placeholder="Informe obrigatoriamente o motivo deste lançamento.",
             height=130,
         )
         if st.button("Confirmar observação", type="primary", use_container_width=True):
-            if not observacao.strip():
+            if not responsavel.strip():
+                st.error("Informe obrigatoriamente o responsável pela autorização.")
+            elif not observacao.strip():
                 st.error("A observação é obrigatória para LB e COMP.")
             else:
-                chave = f"{cid}_{int(ano)}_{mes}_{dia}"
-                st.session_state.rh_observacoes_pendentes[chave] = observacao.strip()
-                # Somente este botão confirma. Removemos o marcador antes do rerun
-                # para que o retorno não seja interpretado como cancelamento pelo X.
+                st.session_state.rh_responsaveis_pendentes[chave] = responsavel.strip()
+                # Salva responsável + motivo em um único campo, preservando o banco atual.
+                st.session_state.rh_observacoes_pendentes[chave] = (
+                    f"RESPONSÁVEL: {responsavel.strip()} | OBSERVAÇÃO: {observacao.strip()}"
+                )
+                # SOMENTE este botão confirma. Retira o alvo para o callback do X não cancelar.
                 st.session_state.pop("rh_modal_alvo", None)
                 st.rerun()
 
-    # Abre automaticamente o primeiro LB/COMP que ainda não recebeu observação.
+    # Abre automaticamente o primeiro LB/COMP ainda não confirmado.
     modal_aberto = False
     for i, cid, dia, antes, depois in pendentes_obs:
         chave_sessao = f"{cid}_{int(ano)}_{mes}_{dia}"
-        if not str(st.session_state.rh_observacoes_pendentes.get(chave_sessao, "")).strip():
+        confirmado = (
+            str(st.session_state.rh_observacoes_pendentes.get(chave_sessao, "")).strip()
+            and str(st.session_state.rh_responsaveis_pendentes.get(chave_sessao, "")).strip()
+        )
+        if not confirmado:
             nome = str(editado.iloc[i]["COLABORADOR"])
             valor_anterior = obs_mapa.get((cid, dia), "")
             st.session_state.rh_modal_alvo = {
                 "row": i,
                 "col": f"{dia:02d}",
+                "antes": antes,
                 "obs_key": chave_sessao,
                 "modal_text_key": f"modal_obs_{cid}_{ano}_{mes}_{dia}_{depois}",
+                "modal_resp_key": f"modal_resp_{cid}_{ano}_{mes}_{dia}_{depois}",
             }
-            modal_observacao(i, cid, dia, depois, nome, valor_anterior)
+            modal_observacao(i, cid, dia, antes, depois, nome, valor_anterior)
             modal_aberto = True
             break
 
@@ -403,24 +431,39 @@ if alteracoes:
         chave_sessao = f"{cid}_{int(ano)}_{mes}_{dia}"
         observacoes[(cid, dia)] = str(st.session_state.rh_observacoes_pendentes.get(chave_sessao, "")).strip()
 
-    pode_salvar = all(observacoes.values()) if pendentes_obs else True
+    # Segurança dupla: LB/COMP só pode ser salvo se houver confirmação explícita
+    # com responsável E observação.
+    pode_salvar = True
+    for _, cid, dia, _, _ in pendentes_obs:
+        chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+        if not str(st.session_state.rh_responsaveis_pendentes.get(chave, "")).strip():
+            pode_salvar = False
+        if not str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip():
+            pode_salvar = False
+
     if pendentes_obs and not pode_salvar and not modal_aberto:
-        st.warning("LB e COMP exigem observação obrigatória.")
+        st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
     if st.button("💾 Salvar alterações", type="primary", disabled=not pode_salvar):
         try:
             for i, cid, dia, antes, depois in alteracoes:
                 data_dia = date(int(ano), mes, dia)
                 if depois in ("LB", "COMP"):
-                    obs = observacoes.get((cid, dia), "")
+                    chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+                    responsavel = str(st.session_state.rh_responsaveis_pendentes.get(chave, "")).strip()
+                    obs = str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip()
+                    if not responsavel or not obs:
+                        raise ValueError("LB/COMP sem autorização confirmada. Operação bloqueada.")
                 else:
-                    # Ao trocar uma célula de LB/COMP para outro status, limpa a observação antiga.
                     obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
                 salvar_frequencia(cid, data_dia, depois, obs)
 
             for _, cid, dia, _, _ in pendentes_obs:
-                st.session_state.rh_observacoes_pendentes.pop(f"{cid}_{int(ano)}_{mes}_{dia}", None)
-
+                chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+                st.session_state.rh_observacoes_pendentes.pop(chave, None)
+                st.session_state.rh_responsaveis_pendentes.pop(chave, None)
+            st.session_state.pop(_draft_key, None)
+            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
             st.success(f"{len(alteracoes)} lançamento(s) salvo(s).")
             st.rerun()
         except Exception as e:
