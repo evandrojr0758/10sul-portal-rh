@@ -1710,6 +1710,102 @@ def abrir_ficha_colaborador(colaborador):
 # ==========================================================
 # FECHAMENTO CMC BAHIA
 # ==========================================================
+# Cadastro de referência — CMC Bahia
+_FUNCOES_CMC = {
+    "ALEHANDRO SOARES DA CONCEICAO":"SOLDADOR", "CARLOS GABRIEL ALVES GONCALVES":"MECANICO II",
+    "DAVI CARVALHO PEDRO CASTRO":"MECANICO II", "EDUARDO FRANCISCO SILVA":"MECANICO II",
+    "EZEQUIEL ALMEIDA BONIFACIO":"SOLDADOR", "GLEISSON DANIEL NEVES MORAES":"MECANICO II",
+    "HELIO DE SOUZA SILVA":"MECANICO II", "JHONAS CORREIA ROSARIO":"BORRACHEIRO",
+    "JUNIOR SAUDE DO NASCIMENTO":"MECANICO II", "KLEIRTOM DE OLIVEIRA SOARES":"MECANICO II",
+    "MARIO EVERTON GONÇALVES BRITO":"MECANICO I", "MATEUS OLIVEIRA SILVA":"BORRACHEIRO",
+    "RICARDO HERMENEGILDO SILVA":"MECANICO I", "RICARDO TIAGO FERNANDES":"MECANICO I",
+    "UELDES SOUZA":"MECANICO II", "WARLEI MARCELINO DE OLIVEIRA":"MECANICO II",
+    "WILLYAN VICTOR RIBEIRO ALMEIDA":"MECANICO I", "HERICLIS HENRIQUE DOS SANTOS ALMEIDA":"MECANICO II",
+    "JOSE MARCOS ALVES ROQUE":"MECANICO I", "ELIAS OLIVEIRA DE JESUS":"MECANICO II",
+    "HENRIQUE SILVA DOS SANTOS":"MECANICO II", "MAGDISLEI ANDRADE DE JESUS":"MECANICO II",
+    "PAULO EDUARDO FERREIRA ELIAS":"ELETRICISTA", "PEDRO IVAN LOPES GALVÃO":"MECANICO I",
+    "WALACE CONCEIÇÃO DERCILIO":"SOLDADOR", "JOSIVAN DE JESUS ARRUDA":"MECANICO II",
+    "GUILHERME NEVES DOS SANTOS":"ELETRICISTA", "MARCOS VINICIUS C. DOS SANTOS FILHO":"MECANICO I",
+    "ALDENI SILVA":"MECANICO II", "ANTONIO DOS SANTOS RODRIGUES":"MECANICO II",
+    "DERIC EDUARDO MELO LOPES":"BORRACHEIRO", "JOAO PEDRO SANTANA ANDRADE":"MECANICO II",
+    "LUTI DE JESUS":"MECANICO II", "WELLINGTON MOREIRA DA SILVA":"MECANICO II",
+    "ALBERTINO DE FREITAS COSTA NETO":"MECANICO II", "MANUEL JOSE ABREU DE JESUS":"MECANICO II",
+    "NICOLAS BRITO LOUREIRO":"MECANICO I", "WALDEM ALVES DOS SANTOS":"MECANICO II",
+    "WESLEY SANTOS NASCIMENTO":"MECANICO II", "GUILHERME SANTOS DE OLIVEIRA":"MECANICO II",
+    "RAFAEL OLIVEIRA DE JESUS":"MECANICO I", "VINICIUS NASCIMENTO DE AZEVEDO":"SOLDADOR",
+    "JULIO TOME MANTOVANI":"MECANICO II", "BENJAMIM FRANKLIN DE JESUS SOBRINHO":"MECANICO I",
+    "GEFERSON DE JESUS DOS SANTOS":"MECANICO I", "IAN FELIPE SILVA ARAUJO":"SOLDADOR",
+    "IVANILDO DIAS GONCALVES":"SOLDADOR", "JOSIVALDO BATISTA ROCHA":"MECANICO I",
+    "KAUA SILVA DIAS":"MECANICO I", "MARCOS VINICIUS CONCEICAO SANTOS":"MECANICO I",
+    "THIAGO DE OLIVEIRA SANTOS":"MECANICO I",
+}
+_VALORES_CMC = {"MECANICO I":10476.96, "MECANICO II":11680.00, "SOLDADOR":11680.00, "BORRACHEIRO":9902.00, "ELETRICISTA":11680.00}
+
+def _nome_cmc(txt):
+    import re
+    return re.sub(r"\s+", " ", str(txt or "").strip().upper())
+
+def _fmt_brl(v):
+    return "R$ " + f"{float(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
+
+def _fmt_qtd(v):
+    return f"{float(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
+
+def _horas_decimal(hhmm):
+    try:
+        t=str(hhmm or "0").strip().replace(";",":")
+        if not t: return 0.0
+        if ":" in t:
+            h,m=t.split(":",1); return float(h or 0)+float(m or 0)/60
+        return float(t)
+    except Exception:
+        return 0.0
+
+def _resumo_financeiro_cmc(resumo):
+    r=resumo.copy()
+    r["FUNÇÃO"] = r["COLABORADOR"].map(lambda x: _FUNCOES_CMC.get(_nome_cmc(x), "NÃO CADASTRADA"))
+    g=r.groupby("FUNÇÃO", dropna=False)["MÉDIA CONTABILIZADA"].sum().to_dict()
+    ordem=["MECANICO I","MECANICO II","SOLDADOR","BORRACHEIRO","ELETRICISTA"]
+    return [(f, float(g.get(f,0)), _VALORES_CMC[f], float(g.get(f,0))*_VALORES_CMC[f]) for f in ordem]
+
+def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
+    @st.dialog("Resumo Financeiro — CMC Bahia", width="large")
+    def _abrir():
+        import calendar
+        linhas=_resumo_financeiro_cmc(resumo)
+        mes_nome=["","JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"][mes]
+        st.markdown(f"<div style='background:#2f7d1f;color:white;text-align:center;font-weight:800;padding:8px;font-size:20px'>FECHAMENTO {mes_nome} - {ano} 01/{mes:02d} A {dias_contabilizados:02d}/{mes:02d}</div>", unsafe_allow_html=True)
+        html="<table style='width:100%;border-collapse:collapse;font-size:16px'><tr><th style='border:1px solid #222;padding:7px'>Função</th><th style='border:1px solid #222;padding:7px'>Quantidade de<br>Colaboradores</th><th style='border:1px solid #222;padding:7px'>Valor Mensal por<br>Colaborador (R$)</th><th style='border:1px solid #222;padding:7px'>Total Mensal por<br>Função (R$)</th></tr>"
+        total=0
+        for f,q,v,t in linhas:
+            total+=t
+            html+=f"<tr><td style='border:1px solid #222;padding:6px'>{f}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_qtd(q)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t)}</td></tr>"
+        html+="</table>"
+        st.markdown(html, unsafe_allow_html=True)
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+        c1,c2,c3=st.columns(3)
+        he50=c1.text_input("Quantidade Hora Extra 50%", value="00:00", key=f"cmc_he50_{ano}_{mes}")
+        he50apos=c2.text_input("Hora Extra 50% após 01:28", value="00:00", key=f"cmc_he50apos_{ano}_{mes}")
+        he100=c3.text_input("Quantidade Hora Extra 100%", value="00:00", key=f"cmc_he100_{ano}_{mes}")
+        v50=96.54; v100=135.80
+        t50=_horas_decimal(he50)*v50; t50a=_horas_decimal(he50apos)*v50; t100=_horas_decimal(he100)*v100
+        faltas=int(resumo["FALTAS"].sum()) if "FALTAS" in resumo else 0
+        valor_falta=st.number_input("Valor por falta (R$)", min_value=0.0, value=307.21, step=0.01, format="%.2f", key=f"cmc_vfalta_{ano}_{mes}")
+        total_geral=total+t50+t50a+t100
+        html2=f"""<table style='width:100%;border-collapse:collapse;font-size:16px'>
+        <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50)}</td></tr>
+        <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50% APÓS 01:28</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50apos}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50a)}</td></tr>
+        <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 100%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he100}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v100)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t100)}</td></tr>
+        </table><br>
+        <div style='display:flex;justify-content:space-between;font-size:20px;font-weight:800;padding:8px 0'><span>TOTAL COLABORADOR</span><span>{_fmt_qtd(sum(x[1] for x in linhas))}</span><span>{_fmt_brl(total_geral)}</span></div>
+        <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;color:red;padding:8px 0'><span>FALTAS</span><span>{faltas}</span><span>{_fmt_brl(valor_falta)}</span><span>({_fmt_brl(faltas*valor_falta)})</span></div>
+        """
+        st.markdown(html2, unsafe_allow_html=True)
+        faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _FUNCOES_CMC]
+        if faltantes:
+            st.warning("Função não cadastrada para: " + ", ".join(faltantes))
+    _abrir()
+
 def _normalizar_status_cmc(valor):
     if pd.isna(valor):
         return ""
@@ -1901,8 +1997,12 @@ def tela_fechamento_cmc_bahia():
         c3.metric("Média de colaboradores", f"{media_colaboradores:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
         st.caption("TOTAL CONTABILIZADO = OK + FA + A + FO. MÉDIA CONTABILIZADA = TOTAL CONTABILIZADO ÷ dias contabilizados no arquivo. A Média de Colaboradores é a soma dessas médias individuais. FÉRIAS não entra na conta.")
 
+        b1, b2 = st.columns([1, 1])
+        if b1.button("💰 Gerar Resumo Financeiro", key=f"gerar_resumo_fin_cmc_{ano}_{mes}", type="primary", use_container_width=True):
+            _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados)
+
         excel=_excel_cmc(edit,ano,mes)
-        st.download_button("📥 Exportar fechamento CMC Bahia", data=excel, file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+        b2.download_button("📥 Exportar fechamento CMC Bahia", data=excel, file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         st.caption("Legenda: OK = Presença • FO = Folga • FA = Falta • A = Atestado • FE = Férias • LB = Liberado • COMP = Compensação")
     except Exception as e:
         st.error(f"Não foi possível processar o ponto eletrônico: {e}")
