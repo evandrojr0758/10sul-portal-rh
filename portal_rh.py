@@ -390,7 +390,7 @@ def ler_colaboradores():
     return sorted(rows, key=lambda r: _nome_colaborador(r).upper())
 
 
-def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None, destra=None):
+def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None, destra=None, equipe_revisao=None):
     nome = str(nome or "").strip().upper()
     if not nome:
         raise ValueError("Informe o nome do colaborador.")
@@ -413,6 +413,7 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_
         "salario_base": salario_base,
         "frente": str(frente or "").strip().upper() or None,
         "destra": str(destra or "").strip() or None,
+        "equipe_revisao": str(equipe_revisao or "").strip().upper() or None,
     }
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
@@ -1001,6 +1002,41 @@ def tela_apuracao_gratificacao():
     cod_por_id={int(o["id"]):str(o.get("codigo") or "").upper() for o in ocorr_status if o.get("id") is not None}
     dna_por={int(r["colaborador_id"]):int(r.get("quantidade") or 0) for r in dna_regs if r.get("colaborador_id") is not None}
     ap_por={int(r["colaborador_id"]):r for r in ap_regs if r.get("colaborador_id") is not None}
+
+    # Médias mensais da REVISÃO são informadas em lote, uma vez por equipe.
+    def _media_salva_equipe(nome_equipe):
+        vals=[]
+        for c in colabs:
+            if str(c.get("frente") or "").upper().strip()=="REVISÃO" and str(c.get("equipe_revisao") or "").upper().strip()==nome_equipe:
+                reg=ap_por.get(int(c["id"]), {})
+                v=reg.get("media_tempo_entrega_horas")
+                if v not in (None, ""):
+                    try: vals.append(float(v))
+                    except Exception: pass
+        return vals[0] if vals else 0.0
+
+    st.markdown("#### ⏱️ Média mensal por equipe — Revisão")
+    st.caption("Informe a média uma única vez para cada equipe. O sistema aplica automaticamente a todos os colaboradores conforme a equipe cadastrada.")
+    _mc1,_mc2,_mc3=st.columns([1,1,1.2])
+    media_eq1=_mc1.number_input("Média EQUIPE 1 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 1")), format="%.2f", key=f"media_eq1_{ano_g}_{mes_g}")
+    media_eq2=_mc2.number_input("Média EQUIPE 2 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 2")), format="%.2f", key=f"media_eq2_{ano_g}_{mes_g}")
+    if _mc3.button("💾 Aplicar médias às equipes", type="primary", key=f"aplicar_medias_{ano_g}_{mes_g}"):
+        try:
+            usuario=usr.get("nome") or usr.get("usuario")
+            qtd=0
+            for c in colabs:
+                if str(c.get("frente") or "").upper().strip() != "REVISÃO":
+                    continue
+                eq=str(c.get("equipe_revisao") or "").upper().strip()
+                if eq not in ("EQUIPE 1","EQUIPE 2"):
+                    continue
+                med=media_eq1 if eq=="EQUIPE 1" else media_eq2
+                salvar_apuracao_manual(int(c["id"]),ano_g,mes_g,eq,med,None,usuario)
+                qtd+=1
+            st.success(f"Médias aplicadas a {qtd} colaborador(es) da Revisão.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível aplicar as médias: {e}")
     # A gratificação SEMPRE usa somente a frequência já persistida no Supabase.
     # Se existir rascunho/alteração pendente na tela de frequência desta mesma competência,
     # deixa isso explícito para evitar interpretar a grade editada como dado já salvo.
@@ -1038,14 +1074,19 @@ def tela_apuracao_gratificacao():
         if dd and str(dd) < ini: continue
         sal=float(c.get("salario_base") or 0); fa=faltas.get(cid,0); at=atest.get(cid,0); dna=dna_por.get(cid,0); des=desvios.get(cid,0)
         manual=ap_por.get(cid,{})
-        equipe=str(manual.get("equipe_revisao") or "") if frente=="REVISÃO" else ""
-        media=manual.get("media_tempo_entrega_horas") if frente=="REVISÃO" else None
+        equipe=str(c.get("equipe_revisao") or "").upper().strip() if frente=="REVISÃO" else ""
+        if frente=="REVISÃO" and equipe=="EQUIPE 1": media=media_eq1
+        elif frente=="REVISÃO" and equipe=="EQUIPE 2": media=media_eq2
+        else: media=None
         integral=(sal*float(rev.get("percentual_salario") or 35)/100) if frente=="REVISÃO" else float(demais.get("valor_fixo") or 360)
         valor=integral; motivos=[]; pct_tempo=None
         regra=rev if frente=="REVISÃO" else demais
         if fa>0 and bool(regra.get("falta_zera_tudo",True)): valor=0; motivos.append(f"{fa} falta(s)")
         if des>0 and bool(regra.get("desvio_comportamental_zera",True)): valor=0; motivos.append(f"{des} desvio(s)")
         if dna < int(regra.get("dna_minimo") or 2) and bool(regra.get("dna_abaixo_minimo_zera",True)): valor=0; motivos.append(f"DNA {dna}/{int(regra.get('dna_minimo') or 2)}")
+        if valor>0 and frente=="REVISÃO" and media is not None and float(media) > 24:
+            valor=0
+            motivos.append("Tempo de entrega > 24h")
         if valor>0 and frente=="REVISÃO":
             abs_parcela=integral*float(rev.get("peso_absenteismo") or 20)/100
             tempo_parcela=integral*float(rev.get("peso_tempo_entrega") or 80)/100
@@ -1065,43 +1106,15 @@ def tela_apuracao_gratificacao():
     if not linhas:
         st.info("Nenhum colaborador com frente de gratificação definida para esta competência."); return
     df=pd.DataFrame(linhas)
-    st.caption("Edite somente **EQUIPE REVISÃO** e **MÉDIA TEMPO (h)**. Os demais campos são calculados pelo sistema.")
-    _grat_key=f"grat_editor_{ano_g}_{mes_g}"
-
-    def _salvar_edicao_gratificacao_imediata():
-        estado=st.session_state.get(_grat_key) or {}
-        alteradas=estado.get("edited_rows") or {}
-        if not alteradas:
-            return
-        usuario=usr.get("nome") or usr.get("usuario")
-        for idx_txt, mudancas in alteradas.items():
-            try:
-                idx=int(idx_txt)
-                base=df.iloc[idx]
-                if str(base["FRENTE"]).upper() != "REVISÃO":
-                    continue
-                equipe=mudancas.get("EQUIPE REVISÃO", base["EQUIPE REVISÃO"])
-                media=mudancas.get("MÉDIA TEMPO (h)", base["MÉDIA TEMPO (h)"])
-                salvar_apuracao_manual(ids[base["COLABORADOR"]],ano_g,mes_g,equipe,media,None,usuario)
-            except Exception:
-                continue
-
-    edit=st.data_editor(df,use_container_width=True,hide_index=True,height=min(760,90+len(df)*35),
-        disabled=[c for c in df.columns if c not in ("EQUIPE REVISÃO","MÉDIA TEMPO (h)")],
+    st.caption("**EQUIPE REVISÃO** vem do Cadastro do Colaborador e **MÉDIA TEMPO** é aplicada em lote acima. Os demais campos são calculados pelo sistema.")
+    st.data_editor(df,use_container_width=True,hide_index=True,height=min(760,90+len(df)*35),
+        disabled=True,
         column_config={
             "SALÁRIO":st.column_config.NumberColumn("SALÁRIO",format="R$ %.2f"),
             "INTEGRAL":st.column_config.NumberColumn("INTEGRAL",format="R$ %.2f"),
             "GRATIFICAÇÃO":st.column_config.NumberColumn("GRATIFICAÇÃO",format="R$ %.2f"),
-            "EQUIPE REVISÃO":st.column_config.SelectboxColumn("EQUIPE REVISÃO",options=["","EQUIPE 1","EQUIPE 2"],required=False),
-            "MÉDIA TEMPO (h)":st.column_config.NumberColumn("MÉDIA TEMPO (h)",min_value=0.0,step=0.1,format="%.2f"),
-        },key=_grat_key,on_change=_salvar_edicao_gratificacao_imediata)
-    if st.button("💾 Salvar dados manuais da apuração",type="primary",key=f"grat_salvar_{ano_g}_{mes_g}"):
-        try:
-            for _,r in edit.iterrows():
-                if str(r["FRENTE"]).upper()=="REVISÃO":
-                    salvar_apuracao_manual(ids[r["COLABORADOR"]],ano_g,mes_g,r["EQUIPE REVISÃO"],r["MÉDIA TEMPO (h)"],None,usr.get("nome") or usr.get("usuario"))
-            st.success("Dados da Revisão salvos. Recalculando a apuração..."); st.rerun()
-        except Exception as e: st.error(f"Não foi possível salvar: {e}")
+            "MÉDIA TEMPO (h)":st.column_config.NumberColumn("MÉDIA TEMPO (h)",format="%.2f"),
+        },key=f"grat_view_{ano_g}_{mes_g}")
     validos=df["GRATIFICAÇÃO"].dropna()
     k1,k2,k3,k4=st.columns(4)
     k1.metric("Colaboradores",len(df)); k2.metric("Elegíveis",int((df["GRATIFICAÇÃO"].fillna(0)>0).sum())); k3.metric("Zerados",int((df["GRATIFICAÇÃO"]==0).sum())); k4.metric("Total previsto",f"R$ {validos.sum():,.2f}".replace(",","X").replace(".",",").replace("X","."))
@@ -2052,11 +2065,12 @@ with st.expander("👥 Cadastro de colaboradores"):
             nova_funcao = st.text_input("Função")
             nova_empresa = st.text_input("Empresa", value="10 SUL")
             nova_frente = st.selectbox("Frente", ["", "REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"])
+            nova_equipe = st.selectbox("Equipe da Revisão", ["", "EQUIPE 1", "EQUIPE 2"], help="Preencha somente para colaboradores da frente REVISÃO.")
 
         incluir = st.form_submit_button("➕ Cadastrar colaborador", type="primary")
         if incluir:
             try:
-                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None, novo_destra or None)
+                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None, novo_destra or None, nova_equipe or None)
                 st.success("Colaborador cadastrado com sucesso.")
                 st.rerun()
             except Exception as e:
@@ -2091,9 +2105,11 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df["frente"] = None
         if "destra" not in cadastro_df.columns:
             cadastro_df["destra"] = None
+        if "equipe_revisao" not in cadastro_df.columns:
+            cadastro_df["equipe_revisao"] = None
 
         cols_editor = [c for c in [
-            "id", "cracha", "destra", "colaborador", "funcao", "empresa", "salario_base", "frente",
+            "id", "cracha", "destra", "colaborador", "funcao", "empresa", "salario_base", "frente", "equipe_revisao",
             "status", "data_desligamento"
         ] if c in cadastro_df.columns]
 
@@ -2104,6 +2120,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         original_salario = {str(r["id"]): (float(r.get("salario_base")) if r.get("salario_base") not in (None, "") else None) for r in todos_cadastro}
         original_frente = {str(r["id"]): str(r.get("frente") or "").strip().upper() for r in todos_cadastro}
         original_destra = {str(r["id"]): str(r.get("destra") or "").strip() for r in todos_cadastro}
+        original_equipe = {str(r["id"]): str(r.get("equipe_revisao") or "").strip().upper() for r in todos_cadastro}
         original_desligamento = {}
         for r in todos_cadastro:
             _dd = pd.to_datetime(r.get("data_desligamento"), errors="coerce")
@@ -2113,7 +2130,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("status", "data_desligamento", "salario_base", "frente", "destra")],
+            disabled=[c for c in cols_editor if c not in ("status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
@@ -2123,6 +2140,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "empresa": st.column_config.TextColumn("Empresa"),
                 "salario_base": st.column_config.NumberColumn("Salário base (R$)", min_value=0.0, step=0.01, format="R$ %.2f"),
                 "frente": st.column_config.SelectboxColumn("Frente", options=["REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"], required=False),
+                "equipe_revisao": st.column_config.SelectboxColumn("Equipe Revisão", options=["EQUIPE 1", "EQUIPE 2"], required=False),
                 "status": st.column_config.SelectboxColumn(
                     "Status",
                     options=["ATIVO", "INATIVO"],
@@ -2160,15 +2178,19 @@ with st.expander("👥 Cadastro de colaboradores"):
             frente_antiga = original_frente.get(cid, "")
             nova_destra = str(linha.get("destra") or "").strip()
             destra_antiga = original_destra.get(cid, "")
+            nova_equipe = str(linha.get("equipe_revisao") or "").strip().upper()
+            equipe_antiga = original_equipe.get(cid, "")
+            if nova_frente != "REVISÃO":
+                nova_equipe = ""
             # Informar data de desligamento torna o colaborador INATIVO automaticamente.
             if nova_dd is not None:
                 novo_status = "INATIVO"
-            mudou = (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga)
+            mudou = (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
             if mudou:
                 if novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
                 else:
-                    alteracoes.append((linha, novo_status, nova_dd, novo_salario, nova_frente, nova_destra))
+                    alteracoes.append((linha, novo_status, nova_dd, novo_salario, nova_frente, nova_destra, nova_equipe))
 
         if erros:
             st.warning(
@@ -2178,10 +2200,10 @@ with st.expander("👥 Cadastro de colaboradores"):
         if alteracoes:
             if st.button("💾 Salvar alterações do colaborador", type="primary"):
                 try:
-                    for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra in alteracoes:
+                    for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None}, "return=minimal")
+                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None}, "return=minimal")
                     st.success("Cadastro atualizado com sucesso.")
                     st.rerun()
                 except Exception as e:
