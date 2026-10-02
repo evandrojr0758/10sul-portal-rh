@@ -1010,7 +1010,7 @@ with _rankings_topo:
             xOffset=alt.XOffset(
                 "TIPO:N",
                 sort=["FALTAS", "ATESTADOS"],
-                scale=alt.Scale(paddingInner=0.02, paddingOuter=0.02),
+                scale=alt.Scale(paddingInner=0, paddingOuter=0),
             ),
             y=alt.Y(
                 "QTD:Q",
@@ -1034,7 +1034,7 @@ with _rankings_topo:
             ],
         )
 
-        _barras_rank = _base_rank.mark_bar(size=34)
+        _barras_rank = _base_rank.mark_bar()
         _rotulos_rank = _base_rank.mark_text(
             dy=-8,
             fontSize=13,
