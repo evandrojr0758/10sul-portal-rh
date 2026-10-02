@@ -1725,19 +1725,59 @@ def _normalizar_status_cmc(valor):
     }
     return mapa.get(txt, txt)
 
+def _codigo_ponto_prestadora(row):
+    """Interpreta uma linha do relatório Ponto Diário da Prestadora."""
+    marc_cols = [c for c in row.index if str(c).startswith("Entrada") or str(c).startswith("Saída")]
+    valores = []
+    for c in marc_cols:
+        v = row.get(c)
+        if pd.notna(v):
+            valores.append(str(v).strip())
+    textos = " | ".join(valores).upper()
+
+    # Ocorrências explícitas do ponto têm prioridade sobre horários.
+    if "ATEST" in textos:
+        return "A"
+    if "FALTA" in textos:
+        return "FA"
+    if "FERIAS" in textos or "FÉRIAS" in textos:
+        return "FE"
+    # DSR, DUNT e feriado são dias de folga/descanso para esta apuração.
+    if any(x in textos for x in ["DSR", "DUNT", "FERIADO", "FOLGA"]):
+        return "FO"
+
+    # Havendo marcação de horário ou horas trabalhadas, conta como presença.
+    for v in valores:
+        if ":" in v and any(ch.isdigit() for ch in v):
+            return "OK"
+    htrab = row.get("H. Trab.")
+    if pd.notna(htrab) and str(htrab).strip() not in ["", "0", "00:00", "00:00:00"]:
+        return "OK"
+    return ""
+
 def _ler_ponto_cmc(arquivo):
     xls = pd.ExcelFile(arquivo)
     candidatas = [x for x in xls.sheet_names if "PONTO" in str(x).upper() and "DI" in str(x).upper()]
     aba = candidatas[0] if candidatas else xls.sheet_names[0]
     df = pd.read_excel(xls, sheet_name=aba)
-    obrig = {"Dt. Ponto", "Nome", "STATUS"}
-    if not obrig.issubset(set(df.columns)):
-        raise ValueError(f"A aba {aba} não possui as colunas obrigatórias: Dt. Ponto, Nome e STATUS.")
+
+    basicas = {"Dt. Ponto", "Nome"}
+    if not basicas.issubset(set(df.columns)):
+        raise ValueError(f"A aba {aba} não possui as colunas obrigatórias: Dt. Ponto e Nome.")
+
     df = df.copy()
     df["Dt. Ponto"] = pd.to_datetime(df["Dt. Ponto"], errors="coerce")
     df = df[df["Dt. Ponto"].notna() & df["Nome"].notna()].copy()
     df["Nome"] = df["Nome"].astype(str).str.strip().str.upper()
-    df["CODIGO"] = df["STATUS"].apply(_normalizar_status_cmc)
+
+    # Compatível com o formato antigo (STATUS) e com o Ponto Diário real da Prestadora.
+    if "STATUS" in df.columns:
+        df["CODIGO"] = df["STATUS"].apply(_normalizar_status_cmc)
+    else:
+        marcacoes = [c for c in df.columns if str(c).startswith("Entrada") or str(c).startswith("Saída")]
+        if not marcacoes:
+            raise ValueError("Não encontrei STATUS nem colunas Entrada/Saída para interpretar o ponto.")
+        df["CODIGO"] = df.apply(_codigo_ponto_prestadora, axis=1)
     return df, aba
 
 def _montar_matriz_cmc(df):
@@ -1745,12 +1785,15 @@ def _montar_matriz_cmc(df):
         return pd.DataFrame(), None, None
     periodo = df["Dt. Ponto"].dt.to_period("M").mode().iloc[0]
     ano, mes = int(periodo.year), int(periodo.month)
-    dias = calendar.monthrange(ano, mes)[1]
     base = df[(df["Dt. Ponto"].dt.year == ano) & (df["Dt. Ponto"].dt.month == mes)].copy()
     base["DIA"] = base["Dt. Ponto"].dt.day
+
+    # O fechamento considera somente os dias efetivamente existentes no arquivo.
+    # Ex.: arquivo 01/09 a 29/09 => 29 dias contabilizados.
+    dias_presentes = sorted(int(x) for x in base["DIA"].dropna().unique())
     p = base.pivot_table(index="Nome", columns="DIA", values="CODIGO", aggfunc="first", fill_value="")
-    p = p.reindex(columns=range(1, dias + 1), fill_value="")
-    p.columns = [f"{d:02d}" for d in range(1, dias + 1)]
+    p = p.reindex(columns=dias_presentes, fill_value="")
+    p.columns = [f"{d:02d}" for d in dias_presentes]
     p = p.reset_index().rename(columns={"Nome":"COLABORADOR"})
     return p, ano, mes
 
@@ -1761,17 +1804,15 @@ def _resumo_matriz_cmc(matriz):
     r = matriz.copy()
     for cod, nome in [("OK","PRESENTES"),("FA","FALTAS"),("A","ATESTADOS"),("FO","FOLGAS"),("FE","FÉRIAS")]:
         r[nome] = (r[dias_cols] == cod).sum(axis=1)
-    # Para a média mensal do efetivo entram somente OK + FALTA + ATESTADO + FOLGA.
-    # Férias e demais códigos não entram nessa conta.
     r["TOTAL CONTABILIZADO"] = r[["PRESENTES","FALTAS","ATESTADOS","FOLGAS"]].sum(axis=1)
-    # A média individual representa a fração de 1 colaborador no mês:
-    # (FO + FA + A + OK) / quantidade de dias da competência.
-    dias_mes = len(dias_cols)
-    r["MÉDIA CONTABILIZADA"] = (r["TOTAL CONTABILIZADO"] / dias_mes).round(2) if dias_mes else 0.0
+    dias_contabilizados = len(dias_cols)
+    r["MÉDIA CONTABILIZADA"] = (r["TOTAL CONTABILIZADO"] / dias_contabilizados).round(2) if dias_contabilizados else 0.0
     return r
 
 def _excel_cmc(matriz, ano, mes):
     resumo = _resumo_matriz_cmc(matriz)
+    dias_cols = [c for c in matriz.columns if str(c).isdigit()]
+    dias_contabilizados = len(dias_cols)
     wb = Workbook()
     ws = wb.active
     ws.title = "EFETIVO"
@@ -1792,12 +1833,10 @@ def _excel_cmc(matriz, ano, mes):
     ws2.append(["INDICADOR","TOTAL"])
     for col in ["PRESENTES","FALTAS","ATESTADOS","FOLGAS","FÉRIAS","TOTAL CONTABILIZADO"]:
         ws2.append([col, int(resumo[col].sum()) if col in resumo else 0])
-    dias_mes = calendar.monthrange(ano, mes)[1]
     total_contabilizado = int(resumo["TOTAL CONTABILIZADO"].sum()) if "TOTAL CONTABILIZADO" in resumo else 0
-    media_colaboradores = total_contabilizado / dias_mes if dias_mes else 0
-    ws2.append(["DIAS DO MÊS", dias_mes])
+    media_colaboradores = total_contabilizado / dias_contabilizados if dias_contabilizados else 0
+    ws2.append(["DIAS CONTABILIZADOS", dias_contabilizados])
     ws2.append(["MÉDIA DE COLABORADORES", media_colaboradores])
-    # Formata a linha da média sem depender de posição fixa.
     ws2.cell(ws2.max_row, 2).number_format = "0.00"
     ws2.column_dimensions["A"].width = 28
     ws2.column_dimensions["B"].width = 18
@@ -1853,14 +1892,14 @@ def tela_fechamento_cmc_bahia():
             },
         )
 
-        dias_mes = calendar.monthrange(ano, mes)[1]
+        dias_contabilizados = len(dias_cols)
         total_contabilizado = int(resumo["TOTAL CONTABILIZADO"].sum())
-        media_colaboradores = total_contabilizado / dias_mes if dias_mes else 0
+        media_colaboradores = total_contabilizado / dias_contabilizados if dias_contabilizados else 0
         c1, c2, c3 = st.columns(3)
         c1.metric("Registros considerados", f"{total_contabilizado}")
-        c2.metric("Dias do mês", f"{dias_mes}")
+        c2.metric("Dias contabilizados", f"{dias_contabilizados}")
         c3.metric("Média de colaboradores", f"{media_colaboradores:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        st.caption("TOTAL CONTABILIZADO = OK + FA + A + FO. MÉDIA CONTABILIZADA = TOTAL CONTABILIZADO ÷ dias da competência. A Média de Colaboradores é a soma dessas médias individuais. FÉRIAS não entra na conta.")
+        st.caption("TOTAL CONTABILIZADO = OK + FA + A + FO. MÉDIA CONTABILIZADA = TOTAL CONTABILIZADO ÷ dias contabilizados no arquivo. A Média de Colaboradores é a soma dessas médias individuais. FÉRIAS não entra na conta.")
 
         excel=_excel_cmc(edit,ano,mes)
         st.download_button("📥 Exportar fechamento CMC Bahia", data=excel, file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
