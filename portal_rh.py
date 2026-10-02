@@ -1095,9 +1095,21 @@ def tela_apuracao_gratificacao():
             cid=int(o.get("colaborador_id") or 0)
             desvios[cid]=desvios.get(cid,0)+1
     linhas=[]; ids={}
+    # Somente colaboradores com uma FRENTE válida cadastrada participam da apuração.
+    # Valores vazios vindos do banco/DataFrame (None, NaN, "nan", etc.) não são elegíveis.
+    frentes_validas={"REVISÃO","ITR","SOS","CNP","BORRACHARIA","CAPD","FABRICAÇÃO","CRAVEJAMENTO"}
     for c in colabs:
-        cid=int(c["id"]); nome=_nome_colaborador(c); frente=str(c.get("frente") or "").upper().strip()
-        if frente=="FABRICAÇÃO" or not frente: continue
+        cid=int(c["id"]); nome=_nome_colaborador(c)
+        frente_raw=c.get("frente")
+        if frente_raw is None or pd.isna(frente_raw):
+            continue
+        frente=str(frente_raw).upper().strip()
+        if frente not in frentes_validas:
+            continue
+        # FABRICAÇÃO já fica identificada pelo cadastro, mas seu cálculo específico
+        # será implementado na etapa própria; por enquanto não entra no fechamento.
+        if frente=="FABRICAÇÃO":
+            continue
         dd=c.get("data_desligamento")
         if dd and str(dd) < ini: continue
         sal=float(c.get("salario_base") or 0); fa=faltas.get(cid,0); at=atest.get(cid,0); dna=dna_por.get(cid,0); des=desvios.get(cid,0)
