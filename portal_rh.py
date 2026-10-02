@@ -1153,7 +1153,7 @@ def tela_apuracao_gratificacao():
                 desc=float(demais.get("desconto_1_atestado_percentual") or 20); valor=integral*(1-desc/100); motivos.append(f"1 dia de atestado (-{desc:.0f}%)")
         status="⏳ PENDENTE" if valor is None else ("❌ ZERADA" if valor<=0 else ("✅ INTEGRAL" if abs(float(valor)-float(integral)) < 0.01 else "🟠 PARCIAL"))
         ids[nome]=cid
-        linhas.append({"COLABORADOR":nome,"FRENTE":frente,"SALÁRIO":sal,"EQUIPE REVISÃO":equipe,"MÉDIA TEMPO (h)":media,"FALTAS":fa,"ATESTADOS (dias)":at,"DNA":dna,"DESVIOS":des,"INTEGRAL":integral,"GRATIFICAÇÃO":valor,"STATUS":status,"MOTIVO / CÁLCULO":" • ".join(motivos) if motivos else "Requisitos atendidos"})
+        linhas.append({"COLABORADOR":nome,"EMPRESA":_empresa_colaborador(c, visual=False),"FUNÇÃO":str(c.get("funcao") or "").strip(),"FRENTE":frente,"SALÁRIO":sal,"EQUIPE REVISÃO":equipe,"MÉDIA TEMPO (h)":media,"FALTAS":fa,"ATESTADOS (dias)":at,"DNA":dna,"DESVIOS":des,"INTEGRAL":integral,"GRATIFICAÇÃO":valor,"STATUS":status,"MOTIVO / CÁLCULO":" • ".join(motivos) if motivos else "Requisitos atendidos"})
     if not linhas:
         st.info("Nenhum colaborador com frente de gratificação definida para esta competência."); return
     df=pd.DataFrame(linhas)
@@ -1205,7 +1205,7 @@ def tela_apuracao_gratificacao():
 
     # Edição individual diretamente na própria linha.
     # Apenas MÉDIA TEMPO (h) fica editável; os demais campos continuam protegidos.
-    df_editor = df_view.copy()
+    df_editor = df_view.drop(columns=["EMPRESA", "FUNÇÃO"], errors="ignore").copy()
     df_editor["VER DESVIOS"] = False
     # Deixa a ação de visualizar os desvios junto do motivo/cálculo, no fim da linha.
     cols_editor = [c for c in df_editor.columns if c != "VER DESVIOS"]
@@ -1292,6 +1292,71 @@ def tela_apuracao_gratificacao():
     validos=df["GRATIFICAÇÃO"].dropna()
     k1,k2,k3,k4=st.columns(4)
     k1.metric("Colaboradores",len(df)); k2.metric("Elegíveis",int((df["GRATIFICAÇÃO"].fillna(0)>0).sum())); k3.metric("Zerados",int((df["GRATIFICAÇÃO"]==0).sum())); k4.metric("Total previsto",f"R$ {validos.sum():,.2f}".replace(",","X").replace(".",",").replace("X","."))
+
+    # Relatório de fechamento para a Contabilidade
+    st.markdown("---")
+    st.markdown("#### 📄 Relatório para Contabilidade")
+    st.caption("Escolha a empresa e gere o fechamento da gratificação desta competência em Excel.")
+    rc1, rc2 = st.columns([1, 2], vertical_alignment="bottom")
+    empresa_rel = rc1.selectbox(
+        "Empresa", ["SERVICE", "PRESTADORA"],
+        key=f"grat_rel_empresa_{ano_g}_{mes_g}"
+    )
+
+    def _gerar_relatorio_contabilidade(df_base, empresa):
+        dfr = df_base[df_base["EMPRESA"].astype(str).str.upper().str.strip() == empresa].copy()
+        cols = ["COLABORADOR","EMPRESA","FUNÇÃO","FRENTE","SALÁRIO","INTEGRAL","GRATIFICAÇÃO","STATUS","MOTIVO / CÁLCULO","EQUIPE REVISÃO","MÉDIA TEMPO (h)"]
+        dfr = dfr[cols].copy()
+        dfr = dfr.rename(columns={
+            "SALÁRIO":"SALÁRIO BASE",
+            "INTEGRAL":"GRATIFICAÇÃO INTEGRAL",
+            "GRATIFICAÇÃO":"GRATIFICAÇÃO APURADA",
+            "EQUIPE REVISÃO":"EQUIPE",
+            "MÉDIA TEMPO (h)":"MÉDIA TEMPO (h)"
+        })
+        wb = Workbook(); ws = wb.active; ws.title = "Gratificação"
+        titulo = f"RELATÓRIO DE GRATIFICAÇÃO - {empresa} - {meses_g[mes_g-1].upper()} / {ano_g}"
+        ws.merge_cells(start_row=1,start_column=1,end_row=1,end_column=len(dfr.columns))
+        c=ws.cell(1,1,titulo); c.font=Font(bold=True,size=14,color="FFFFFF"); c.fill=PatternFill("solid",fgColor="1F4E78"); c.alignment=Alignment(horizontal="center")
+        for j,col in enumerate(dfr.columns,1):
+            cell=ws.cell(3,j,col); cell.font=Font(bold=True,color="FFFFFF"); cell.fill=PatternFill("solid",fgColor="4472C4"); cell.alignment=Alignment(horizontal="center")
+        for i,row in enumerate(dfr.itertuples(index=False,name=None),4):
+            for j,val in enumerate(row,1):
+                if pd.isna(val): val=None
+                ws.cell(i,j,val)
+        total_row=4+len(dfr)
+        ws.cell(total_row,1,"TOTAL").font=Font(bold=True)
+        grat_col=list(dfr.columns).index("GRATIFICAÇÃO APURADA")+1
+        ws.cell(total_row,grat_col,float(pd.to_numeric(dfr["GRATIFICAÇÃO APURADA"],errors="coerce").fillna(0).sum())).font=Font(bold=True)
+        for row in range(4,total_row+1):
+            for nome_col in ["SALÁRIO BASE","GRATIFICAÇÃO INTEGRAL","GRATIFICAÇÃO APURADA"]:
+                idx=list(dfr.columns).index(nome_col)+1; ws.cell(row,idx).number_format='R$ #,##0.00'
+        if len(dfr)>0:
+            ref=f"A3:{get_column_letter(len(dfr.columns))}{3+len(dfr)}"
+            tab=Table(displayName="TabelaGratificacao",ref=ref)
+            tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium2",showFirstColumn=False,showLastColumn=False,showRowStripes=True,showColumnStripes=False)
+            ws.add_table(tab)
+        widths={1:34,2:15,3:24,4:18,5:16,6:22,7:22,8:16,9:42,10:18,11:18}
+        for col,w in widths.items(): ws.column_dimensions[get_column_letter(col)].width=w
+        ws.freeze_panes="A4"
+        bio=BytesIO(); wb.save(bio); bio.seek(0)
+        return bio.getvalue(), len(dfr)
+
+    chave_rel=f"grat_rel_bytes_{ano_g}_{mes_g}_{empresa_rel}"
+    if rc2.button("📊 Gerar relatório de gratificação", type="primary", key=f"gerar_rel_{ano_g}_{mes_g}"):
+        try:
+            dados_rel, qtd_rel = _gerar_relatorio_contabilidade(df, empresa_rel)
+            st.session_state[chave_rel]=dados_rel
+            st.session_state[chave_rel+"_qtd"]=qtd_rel
+        except Exception as e:
+            st.error(f"Não foi possível gerar o relatório: {e}")
+    if st.session_state.get(chave_rel):
+        qtd_rel=st.session_state.get(chave_rel+"_qtd",0)
+        if qtd_rel==0:
+            st.warning(f"Nenhum colaborador elegível para apuração encontrado na empresa {empresa_rel} nesta competência.")
+        else:
+            nome_arq=f"GRATIFICACAO_{empresa_rel}_{meses_g[mes_g-1].upper()}_{ano_g}.xlsx"
+            st.download_button("⬇️ Baixar relatório para Contabilidade", data=st.session_state[chave_rel], file_name=nome_arq, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"baixar_rel_{ano_g}_{mes_g}_{empresa_rel}")
 
 def tela_dna_seguranca():
     usr=st.session_state.get("usuario_logado") or {}
