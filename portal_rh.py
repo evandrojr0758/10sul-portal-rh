@@ -1134,15 +1134,82 @@ def tela_apuracao_gratificacao():
     if not linhas:
         st.info("Nenhum colaborador com frente de gratificação definida para esta competência."); return
     df=pd.DataFrame(linhas)
-    st.caption("**EQUIPE REVISÃO** vem do Cadastro do Colaborador e **MÉDIA TEMPO** é aplicada em lote acima. Os demais campos são calculados pelo sistema.")
-    st.data_editor(df,use_container_width=True,hide_index=True,height=min(760,90+len(df)*35),
-        disabled=True,
+
+    # Busca rápida na apuração para evitar rolagem em listas grandes.
+    busca_grat = st.text_input(
+        "🔎 Buscar colaborador",
+        placeholder="Digite parte do nome...",
+        key=f"grat_busca_{ano_g}_{mes_g}",
+    ).strip()
+    df_view = df.copy()
+    if busca_grat:
+        df_view = df_view[df_view["COLABORADOR"].astype(str).str.contains(busca_grat, case=False, na=False)]
+
+    st.caption(
+        "**EQUIPE REVISÃO** vem do Cadastro do Colaborador e **MÉDIA TEMPO** é aplicada em lote acima. "
+        "Os demais campos são calculados pelo sistema. Para conferir os desvios, clique na linha do colaborador que possui valor em **DESVIOS**."
+    )
+
+    def _abrir_modal_desvios_grat(nome_colaborador, cid_colaborador, ocorrencias_impactantes):
+        @st.dialog(f"⚠️ Desvios — {nome_colaborador}", width="large")
+        def _modal():
+            regs = [o for o in ocorrencias_impactantes if int(o.get("colaborador_id") or 0) == int(cid_colaborador)]
+            if not regs:
+                st.info("Não há ocorrência que retire a bonificação nesta competência.")
+                return
+            dados=[]
+            for r in sorted(regs, key=lambda x: str(x.get("data") or ""), reverse=True):
+                data_txt = ""
+                if r.get("data"):
+                    try: data_txt = pd.to_datetime(r.get("data")).strftime("%d/%m/%Y")
+                    except Exception: data_txt = str(r.get("data"))
+                dados.append({
+                    "DATA": data_txt,
+                    "TIPO": str(r.get("tipo") or ""),
+                    "DESCRIÇÃO / MOTIVO": str(r.get("descricao") or ""),
+                    "REGISTRADO POR": str(r.get("registrado_por") or ""),
+                })
+            st.dataframe(pd.DataFrame(dados), use_container_width=True, hide_index=True)
+            st.caption("ADVERTÊNCIA VERBAL, ORIENTAÇÃO e ELOGIO / RECONHECIMENTO não aparecem aqui porque não retiram a bonificação.")
+        _modal()
+
+    # Somente ocorrências que efetivamente impactam a gratificação entram no detalhamento.
+    oc_impactantes = [
+        o for o in oc_mes
+        if str(o.get("tipo") or "").upper().strip()
+        and str(o.get("tipo") or "").upper().strip() not in tipos_nao_penalizam
+    ]
+
+    evento_tabela = st.dataframe(
+        df_view,
+        use_container_width=True,
+        hide_index=True,
+        height=min(760,90+max(1,len(df_view))*35),
+        on_select="rerun",
+        selection_mode="single-row",
         column_config={
             "SALÁRIO":st.column_config.NumberColumn("SALÁRIO",format="R$ %.2f"),
             "INTEGRAL":st.column_config.NumberColumn("INTEGRAL",format="R$ %.2f"),
             "GRATIFICAÇÃO":st.column_config.NumberColumn("GRATIFICAÇÃO",format="R$ %.2f"),
             "MÉDIA TEMPO (h)":st.column_config.NumberColumn("MÉDIA TEMPO (h)",format="%.2f"),
-        },key=f"grat_view_{ano_g}_{mes_g}")
+        },
+        key=f"grat_view_{ano_g}_{mes_g}",
+    )
+
+    selecionadas = []
+    try:
+        selecionadas = list(evento_tabela.selection.rows)
+    except Exception:
+        try: selecionadas = list(evento_tabela.get("selection", {}).get("rows", []))
+        except Exception: selecionadas = []
+    if selecionadas:
+        idx_sel = int(selecionadas[0])
+        if 0 <= idx_sel < len(df_view):
+            linha_sel = df_view.iloc[idx_sel]
+            nome_sel = str(linha_sel["COLABORADOR"])
+            if int(linha_sel.get("DESVIOS", 0) or 0) > 0:
+                _abrir_modal_desvios_grat(nome_sel, ids.get(nome_sel), oc_impactantes)
+
     validos=df["GRATIFICAÇÃO"].dropna()
     k1,k2,k3,k4=st.columns(4)
     k1.metric("Colaboradores",len(df)); k2.metric("Elegíveis",int((df["GRATIFICAÇÃO"].fillna(0)>0).sum())); k3.metric("Zerados",int((df["GRATIFICAÇÃO"]==0).sum())); k4.metric("Total previsto",f"R$ {validos.sum():,.2f}".replace(",","X").replace(".",",").replace("X","."))
