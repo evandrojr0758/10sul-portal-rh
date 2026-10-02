@@ -504,6 +504,56 @@ def salvar_frequencia(colaborador_id, dia, codigo, ocorrencia_id_por_codigo, obs
     sb("POST", "rh_frequencia", "on_conflict=colaborador_id,data", payload,
        "resolution=merge-duplicates,return=minimal")
 
+
+
+# ==========================================================
+# FICHA DO COLABORADOR / OCORRÊNCIAS INDIVIDUAIS
+# ==========================================================
+TIPOS_OCORRENCIA_COLABORADOR = [
+    "ADVERTÊNCIA VERBAL",
+    "ADVERTÊNCIA ESCRITA",
+    "SUSPENSÃO",
+    "ORIENTAÇÃO",
+    "ELOGIO / RECONHECIMENTO",
+    "SEGURANÇA",
+    "QUALIDADE",
+    "COMPORTAMENTO",
+    "OUTROS",
+]
+
+def ler_ocorrencias_colaborador(colaborador_id):
+    params = (
+        "select=id,colaborador_id,data,tipo,descricao,registrado_por,criado_em"
+        f"&colaborador_id=eq.{int(colaborador_id)}"
+        "&order=data.desc,criado_em.desc"
+    )
+    return sb("GET", "rh_colaborador_ocorrencias", params) or []
+
+
+def salvar_ocorrencia_colaborador(colaborador_id, data_ocorrencia, tipo, descricao, registrado_por):
+    descricao = str(descricao or "").strip()
+    registrado_por = str(registrado_por or "").strip()
+    if not descricao:
+        raise ValueError("Informe a descrição/motivo da ocorrência.")
+    if not registrado_por:
+        raise ValueError("Informe quem está registrando a ocorrência.")
+    payload = {
+        "colaborador_id": int(colaborador_id),
+        "data": data_ocorrencia.isoformat(),
+        "tipo": str(tipo or "OUTROS").strip().upper(),
+        "descricao": descricao,
+        "registrado_por": registrado_por.upper(),
+    }
+    sb("POST", "rh_colaborador_ocorrencias", "", payload, "return=minimal")
+
+
+def _tabela_ocorrencias_disponivel():
+    try:
+        sb("GET", "rh_colaborador_ocorrencias", "select=id&limit=1")
+        return True
+    except Exception:
+        return False
+
 st.markdown("""
 <style>
 .block-container{padding-top:1.25rem;max-width:98%}
@@ -543,13 +593,79 @@ Use **Salvar alterações** para gravar o que foi preenchido. É permitido salva
 ### 6. Análises de Frequência
 Abra **📊 Análises de Frequência** para consultar o resumo por função e o gráfico comparativo de **Faltas x Atestados por colaborador**.
 
-### 7. Exportação
+### 7. Ficha e ocorrências do colaborador
+Use **Ficha / ocorrências do colaborador** para registrar advertências, suspensões, orientações, ocorrências de segurança/qualidade, reconhecimentos ou outros fatos relacionados ao colaborador. Esses registros ficam em um histórico separado e **não alteram a frequência nem a Média de Colaboradores**.
+
+### 8. Exportação
 O botão **Exportar Excel — BaseFuncionário / BaseFuncionário** gera o arquivo no modelo utilizado pelo RH com os lançamentos do período.
 
 **Dica:** se estiver procurando uma pessoa específica, use a busca por nome antes de lançar. Ao apagar o texto da busca, a grade volta automaticamente a exibir todos os colaboradores permitidos pelo filtro de STATUS.
     """)
     if st.button("Entendi", use_container_width=True, type="primary"):
         st.rerun()
+
+
+
+@st.dialog("👤 Ficha do Colaborador", width="large")
+def abrir_ficha_colaborador(colaborador):
+    cid = int(colaborador["id"])
+    nome = _nome_colaborador(colaborador)
+    st.markdown(f"### {nome}")
+    _f1, _f2, _f3 = st.columns(3)
+    _f1.caption(f"**Status:** {_classificacao_colaborador(colaborador)}")
+    _f2.caption(f"**Função:** {str(colaborador.get('funcao') or colaborador.get('funcao_padrao') or '-')}")
+    _f3.caption(f"**Empresa:** {_empresa_colaborador(colaborador, visual=True) or '-'}")
+
+    if not _tabela_ocorrencias_disponivel():
+        st.error(
+            "A tabela de ocorrências individuais ainda não existe no Supabase. "
+            "Execute uma única vez o arquivo SQL enviado junto com esta versão."
+        )
+        return
+
+    st.markdown("#### ➕ Registrar ocorrência")
+    _c1, _c2 = st.columns([1, 2])
+    with _c1:
+        _data_oc = st.date_input("Data da ocorrência", value=date.today(), key=f"oc_data_{cid}")
+    with _c2:
+        _tipo_oc = st.selectbox("Tipo", TIPOS_OCORRENCIA_COLABORADOR, key=f"oc_tipo_{cid}")
+    _descricao_oc = st.text_area(
+        "Descrição / motivo *",
+        placeholder="Descreva de forma objetiva o que ocorreu...",
+        key=f"oc_desc_{cid}",
+        height=110,
+    )
+    _registrado_por = st.text_input(
+        "Registrado por *",
+        placeholder="Nome do responsável pelo registro",
+        key=f"oc_resp_{cid}",
+    )
+    if st.button("💾 Registrar ocorrência", type="primary", use_container_width=True, key=f"oc_salvar_{cid}"):
+        try:
+            salvar_ocorrencia_colaborador(cid, _data_oc, _tipo_oc, _descricao_oc, _registrado_por)
+            st.success("Ocorrência registrada com sucesso.")
+            st.session_state[f"oc_desc_{cid}"] = ""
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível registrar: {e}")
+
+    st.divider()
+    st.markdown("#### 📚 Histórico de ocorrências")
+    try:
+        _hist = ler_ocorrencias_colaborador(cid)
+    except Exception as e:
+        st.error(f"Não foi possível carregar o histórico: {e}")
+        _hist = []
+    if _hist:
+        _hist_df = pd.DataFrame([{
+            "DATA": pd.to_datetime(r.get("data"), errors="coerce").strftime("%d/%m/%Y") if r.get("data") else "",
+            "TIPO": str(r.get("tipo") or ""),
+            "DESCRIÇÃO": str(r.get("descricao") or ""),
+            "REGISTRADO POR": str(r.get("registrado_por") or ""),
+        } for r in _hist])
+        st.dataframe(_hist_df, use_container_width=True, hide_index=True)
+    else:
+        st.caption("Nenhuma ocorrência individual registrada para este colaborador.")
 
 _titulo, _ajuda = st.columns([8.8, 1.2], vertical_alignment="center")
 with _titulo:
@@ -684,6 +800,24 @@ if _busca_colaborador:
 colaboradores = _colaboradores_filtrados
 if _busca_colaborador and not colaboradores:
     st.info(f'Nenhum colaborador encontrado para "{_busca_colaborador}" com o filtro selecionado.')
+
+
+# Acesso rápido à ficha individual. O campo é pesquisável e não interfere no filtro da grade.
+_ficha_col1, _ficha_col2 = st.columns([4, 1], gap="medium")
+with _ficha_col1:
+    _mapa_ficha = {_nome_colaborador(c): c for c in _colaboradores_todos}
+    _nome_ficha = st.selectbox(
+        "👤 Ficha / ocorrências do colaborador",
+        options=list(_mapa_ficha.keys()),
+        index=None,
+        placeholder="Selecione ou digite o nome do colaborador...",
+        key=f"rh_ficha_colaborador_{int(ano)}_{mes}",
+    )
+with _ficha_col2:
+    st.write("")
+    st.write("")
+    if st.button("Abrir ficha", use_container_width=True, disabled=not bool(_nome_ficha), key=f"rh_abrir_ficha_{int(ano)}_{mes}"):
+        abrir_ficha_colaborador(_mapa_ficha[_nome_ficha])
 
 # Área de análises recolhível para manter a tela principal compacta.
 _analises_expander = st.expander("📊 Análises de Frequência", expanded=False)
