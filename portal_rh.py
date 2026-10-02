@@ -679,8 +679,14 @@ for c in colunas_dia:
 # A grade usa um rascunho em session_state. Isso permite desfazer SOMENTE a célula
 # LB/COMP quando o modal é fechado no X, sem perder outras alterações pendentes.
 _periodo_key = f"{int(ano)}_{mes}"
-_draft_key = f"rh_grade_draft_{_periodo_key}"
-_nonce_key = f"rh_grade_nonce_{_periodo_key}"
+# A grade filtrada precisa ter estado próprio. Caso contrário, ao pesquisar um nome,
+# o rascunho da grade completa pode ser reutilizado com índices diferentes e o
+# salvamento deixa de identificar corretamente a célula alterada.
+import hashlib
+_escopo_visual = ",".join(str(x) for x in ids)
+_escopo_hash = hashlib.sha1(_escopo_visual.encode("utf-8")).hexdigest()[:12]
+_draft_key = f"rh_grade_draft_{_periodo_key}_{_escopo_hash}"
+_nonce_key = f"rh_grade_nonce_{_periodo_key}_{_escopo_hash}"
 if _nonce_key not in st.session_state:
     st.session_state[_nonce_key] = 0
 
@@ -707,7 +713,6 @@ if _cancelar:
 # Fonte exibida pelo editor: rascunho atual ou a base salva.
 # O fingerprint da base garante que, após F5/salvamento, o Supabase volte a ser
 # a fonte de verdade. Assim, registro já persistido nunca perde a trava de edição.
-import hashlib
 _base_serializada = df.fillna("").astype(str).to_csv(index=False)
 _base_fingerprint = hashlib.sha256(_base_serializada.encode("utf-8")).hexdigest()
 _fp_key = f"rh_grade_base_fp_{_periodo_key}"
@@ -728,7 +733,7 @@ editado = st.data_editor(
     hide_index=True,
     disabled=["COLABORADOR","STATUS","FUNÇÃO","EMPRESA"],
     column_config=config,
-    key=f"rh_grade_{ano}_{mes}_{st.session_state[_nonce_key]}",
+    key=f"rh_grade_{ano}_{mes}_{_escopo_hash}_{st.session_state[_nonce_key]}",
     height=min(820, 72 + max(1, len(df))*35),
 )
 # Mantém o que está visualmente na grade como rascunho oficial.
