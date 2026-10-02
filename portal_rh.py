@@ -873,6 +873,12 @@ for c in colaboradores:
 df = pd.DataFrame(linhas)
 colunas_dia = [f"{d:02d}" for d in range(1, ultimo_visivel + 1)]
 
+# Mapa estável de nomes por ID. Modais não devem depender da posição/colunas
+# do data_editor, pois o Streamlit pode reconstruir o editor durante um rerun.
+_nomes_grade_por_id = {int(c["id"]): _nome_colaborador(c) for c in colaboradores}
+def _nome_grade_por_cid(cid, fallback=""):
+    return str(_nomes_grade_por_id.get(int(cid), fallback or "")).strip()
+
 config = {
     "COLABORADOR": st.column_config.TextColumn("COLABORADOR", width="large", disabled=True),
     "STATUS": st.column_config.TextColumn("STATUS", width="small", disabled=True),
@@ -957,7 +963,7 @@ for coluna in colunas_dia:
 # Obedece ao filtro TODOS / OPERACIONAL / OUTROS e considera também alterações ainda não salvas.
 _rank_ocorrencias = []
 for _i in range(len(editado)):
-    _nome = str(editado.iloc[_i]["COLABORADOR"] or "").strip()
+    _nome = _nome_grade_por_cid(ids[_i], df.iloc[_i]["COLABORADOR"] if "COLABORADOR" in df.columns else "")
     _qtd_fa = 0
     _qtd_a = 0
     for _col in colunas_dia:
@@ -990,41 +996,38 @@ with _rankings_topo:
     if _rank_ocorrencias.empty:
         st.caption("Nenhuma falta ou atestado registrado no período.")
     else:
-        # Barras verticais agrupadas: FALTAS e ATESTADOS lado a lado, com rótulos de dados.
+        # Barras verticais realmente coladas por colaborador.
+        # Usamos coordenadas contínuas (x/x2) para eliminar o espaço entre FALTA e ATESTADO.
         _ordem_rank = _rank_ocorrencias["COLABORADOR"].tolist()
-        _grafico_rank = _rank_ocorrencias[["COLABORADOR", "FALTAS", "ATESTADOS"]].melt(
-            id_vars="COLABORADOR",
-            var_name="TIPO",
-            value_name="QTD",
+        _linhas_chart = []
+        for _idx, _r in _rank_ocorrencias.reset_index(drop=True).iterrows():
+            _centro = float(_idx)
+            _falta = int(_r["FALTAS"])
+            _atestado = int(_r["ATESTADOS"])
+            if _falta > 0:
+                _linhas_chart.append({
+                    "COLABORADOR": _r["COLABORADOR"], "TIPO": "FALTAS", "QTD": _falta,
+                    "X0": _centro - 0.28, "X1": _centro, "XC": _centro - 0.14,
+                })
+            if _atestado > 0:
+                _linhas_chart.append({
+                    "COLABORADOR": _r["COLABORADOR"], "TIPO": "ATESTADOS", "QTD": _atestado,
+                    "X0": _centro, "X1": _centro + 0.28, "XC": _centro + 0.14,
+                })
+        _grafico_rank = pd.DataFrame(_linhas_chart)
+        _tick_vals = [float(i) for i in range(len(_ordem_rank))]
+        _label_expr = "datum.value >= 0 && datum.value < %d ? %s[datum.value] : ''" % (
+            len(_ordem_rank), repr(_ordem_rank).replace("'", '"')
         )
-        # Não desenha barra/rótulo para valores zero.
-        _grafico_rank = _grafico_rank[_grafico_rank["QTD"] > 0].copy()
+        _xscale = alt.Scale(domain=[-0.5, max(0.5, len(_ordem_rank) - 0.5)], nice=False)
 
-        _base_rank = alt.Chart(_grafico_rank).encode(
-            x=alt.X(
-                "COLABORADOR:N",
-                sort=_ordem_rank,
-                title=None,
-                axis=alt.Axis(labelAngle=-35, labelLimit=150),
-            ),
-            xOffset=alt.XOffset(
-                "TIPO:N",
-                sort=["FALTAS", "ATESTADOS"],
-                scale=alt.Scale(paddingInner=0, paddingOuter=0),
-            ),
-            y=alt.Y(
-                "QTD:Q",
-                title="Quantidade",
-                axis=alt.Axis(tickMinStep=1, format="d"),
-            ),
+        _barras_rank = alt.Chart(_grafico_rank).mark_bar().encode(
+            x=alt.X("X0:Q", scale=_xscale, axis=alt.Axis(values=_tick_vals, labelExpr=_label_expr, labelAngle=-35, labelLimit=160, title=None)),
+            x2="X1:Q",
+            y=alt.Y("QTD:Q", title="Quantidade", axis=alt.Axis(tickMinStep=1, format="d")),
             color=alt.Color(
-                "TIPO:N",
-                title=None,
-                sort=["FALTAS", "ATESTADOS"],
-                scale=alt.Scale(
-                    domain=["FALTAS", "ATESTADOS"],
-                    range=["#E53935", "#FB8C00"],
-                ),
+                "TIPO:N", title=None,
+                scale=alt.Scale(domain=["FALTAS", "ATESTADOS"], range=["#E53935", "#FB8C00"]),
                 legend=alt.Legend(orient="bottom"),
             ),
             tooltip=[
@@ -1033,20 +1036,14 @@ with _rankings_topo:
                 alt.Tooltip("QTD:Q", title="Quantidade", format="d"),
             ],
         )
-
-        _barras_rank = _base_rank.mark_bar()
-        _rotulos_rank = _base_rank.mark_text(
-            dy=-8,
-            fontSize=13,
-            fontWeight="bold",
+        _rotulos_rank = alt.Chart(_grafico_rank).mark_text(
+            dy=-8, fontSize=13, fontWeight="bold", color="#333333"
         ).encode(
+            x=alt.X("XC:Q", scale=_xscale, axis=None),
+            y=alt.Y("QTD:Q"),
             text=alt.Text("QTD:Q", format="d"),
-            color=alt.value("#333333"),
         )
-
-        _chart_rank = (
-            _barras_rank + _rotulos_rank
-        ).properties(height=300).configure_view(strokeWidth=0)
+        _chart_rank = (_barras_rank + _rotulos_rank).properties(height=300).configure_view(strokeWidth=0)
         st.altair_chart(_chart_rank, use_container_width=True)
 
 # Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
@@ -1168,7 +1165,7 @@ if alteracoes:
 
     @st.dialog("🔒 Alteração de lançamento salvo", on_dismiss=_cancelar_edicao_salva)
     def modal_senha_edicao(i, cid, dia, antes, depois, chave_reg):
-        nome = str(editado.iloc[i]["COLABORADOR"] or "")
+        nome = _nome_grade_por_cid(cid)
         st.markdown(f"**{nome}**")
         st.caption(f"Dia {dia:02d} • {antes} → {depois or 'VAZIO'}")
         st.warning("Este lançamento já foi salvo. A alteração exige senha e motivo obrigatório.")
@@ -1266,7 +1263,7 @@ if alteracoes:
             and str(st.session_state.rh_responsaveis_pendentes.get(chave_sessao, "")).strip()
         )
         if not confirmado:
-            nome = str(editado.iloc[i]["COLABORADOR"])
+            nome = _nome_grade_por_cid(cid)
             valor_anterior = obs_mapa.get((cid, dia), "")
             st.session_state.rh_modal_alvo = {
                 "row": i,
