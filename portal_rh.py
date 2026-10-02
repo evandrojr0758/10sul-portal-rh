@@ -1706,6 +1706,115 @@ def abrir_ficha_colaborador(colaborador):
     else:
         st.caption("Nenhuma ocorrência individual registrada para este colaborador.")
 
+
+# ==========================================================
+# FECHAMENTO CMC BAHIA
+# ==========================================================
+def _normalizar_status_cmc(valor):
+    if pd.isna(valor):
+        return ""
+    txt = str(valor).strip().upper()
+    mapa = {
+        "1": "OK", "1.0": "OK", "PRESENÇA": "OK", "PRESENCA": "OK", "OK": "OK",
+        "FOLGA": "FO", "FO": "FO",
+        "FALTA": "FA", "FA": "FA",
+        "ATESTADO": "A", "A": "A",
+        "FÉRIAS": "FE", "FERIAS": "FE", "FE": "FE",
+        "LIBERADO": "LB", "LB": "LB",
+        "COMPENSAÇÃO": "COMP", "COMPENSACAO": "COMP", "COMP": "COMP",
+    }
+    return mapa.get(txt, txt)
+
+def _ler_ponto_cmc(arquivo):
+    xls = pd.ExcelFile(arquivo)
+    candidatas = [x for x in xls.sheet_names if "PONTO" in str(x).upper() and "DI" in str(x).upper()]
+    aba = candidatas[0] if candidatas else xls.sheet_names[0]
+    df = pd.read_excel(xls, sheet_name=aba)
+    obrig = {"Dt. Ponto", "Nome", "STATUS"}
+    if not obrig.issubset(set(df.columns)):
+        raise ValueError(f"A aba {aba} não possui as colunas obrigatórias: Dt. Ponto, Nome e STATUS.")
+    df = df.copy()
+    df["Dt. Ponto"] = pd.to_datetime(df["Dt. Ponto"], errors="coerce")
+    df = df[df["Dt. Ponto"].notna() & df["Nome"].notna()].copy()
+    df["Nome"] = df["Nome"].astype(str).str.strip().str.upper()
+    df["CODIGO"] = df["STATUS"].apply(_normalizar_status_cmc)
+    return df, aba
+
+def _montar_matriz_cmc(df):
+    if df.empty:
+        return pd.DataFrame(), None, None
+    periodo = df["Dt. Ponto"].dt.to_period("M").mode().iloc[0]
+    ano, mes = int(periodo.year), int(periodo.month)
+    dias = calendar.monthrange(ano, mes)[1]
+    base = df[(df["Dt. Ponto"].dt.year == ano) & (df["Dt. Ponto"].dt.month == mes)].copy()
+    base["DIA"] = base["Dt. Ponto"].dt.day
+    p = base.pivot_table(index="Nome", columns="DIA", values="CODIGO", aggfunc="first", fill_value="")
+    p = p.reindex(columns=range(1, dias + 1), fill_value="")
+    p.columns = [f"{d:02d}" for d in range(1, dias + 1)]
+    p = p.reset_index().rename(columns={"Nome":"COLABORADOR"})
+    return p, ano, mes
+
+def _resumo_matriz_cmc(matriz):
+    if matriz.empty:
+        return matriz.copy()
+    dias_cols = [c for c in matriz.columns if str(c).isdigit()]
+    r = matriz.copy()
+    for cod, nome in [("OK","PRESENTES"),("FA","FALTAS"),("A","ATESTADOS"),("FO","FOLGAS"),("FE","FÉRIAS")]:
+        r[nome] = (r[dias_cols] == cod).sum(axis=1)
+    return r
+
+def _excel_cmc(matriz, ano, mes):
+    resumo = _resumo_matriz_cmc(matriz)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "EFETIVO"
+    headers = list(resumo.columns)
+    for j,h in enumerate(headers,1):
+        c=ws.cell(1,j,h); c.font=Font(bold=True,color="FFFFFF"); c.fill=PatternFill("solid",fgColor="1F4E78"); c.alignment=Alignment(horizontal="center")
+    for i,row in enumerate(resumo.itertuples(index=False, name=None),2):
+        for j,v in enumerate(row,1): ws.cell(i,j,v)
+    ws.freeze_panes="B2"
+    ws.column_dimensions["A"].width=38
+    for j in range(2,len(headers)+1): ws.column_dimensions[get_column_letter(j)].width=10
+    if len(resumo):
+        tab=Table(displayName="TabelaFechamentoCMCBahia", ref=f"A1:{get_column_letter(len(headers))}{len(resumo)+1}")
+        tab.tableStyleInfo=TableStyleInfo(name="TableStyleMedium2", showRowStripes=True, showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        ws.add_table(tab)
+    ws2=wb.create_sheet("RESUMO")
+    ws2.append(["FECHAMENTO CMC BAHIA", f"{mes:02d}/{ano}"])
+    ws2.append(["INDICADOR","TOTAL"])
+    for col in ["PRESENTES","FALTAS","ATESTADOS","FOLGAS","FÉRIAS"]:
+        ws2.append([col, int(resumo[col].sum()) if col in resumo else 0])
+    bio=BytesIO(); wb.save(bio); bio.seek(0); return bio.getvalue()
+
+def tela_fechamento_cmc_bahia():
+    st.markdown("### 🏭 Fechamento CMC Bahia")
+    st.caption("Importe a planilha do ponto eletrônico. O Portal monta automaticamente a matriz mensal por colaborador e dia, sem PROCV/PROCX.")
+    arq = st.file_uploader("Planilha do ponto eletrônico — CMC Bahia", type=["xlsx","xls"], key="upload_ponto_cmc_bahia")
+    if not arq:
+        st.info("Envie a planilha do ponto eletrônico para iniciar a apuração.")
+        return
+    try:
+        df, aba = _ler_ponto_cmc(arq)
+        matriz, ano, mes = _montar_matriz_cmc(df)
+        if matriz.empty:
+            st.warning("Nenhum registro válido foi encontrado na planilha.")
+            return
+        st.success(f"{aba} lida com sucesso • Competência {mes:02d}/{ano} • {len(matriz)} colaboradores")
+        dias_cols=[c for c in matriz.columns if str(c).isdigit()]
+        opcoes=["", "OK", "FO", "FA", "A", "FE", "LB", "COMP"]
+        cfg={"COLABORADOR": st.column_config.TextColumn("COLABORADOR", disabled=True)}
+        for c in dias_cols: cfg[c]=st.column_config.SelectboxColumn(c, options=opcoes, required=False, width="small")
+        edit = st.data_editor(matriz, use_container_width=True, hide_index=True, disabled=["COLABORADOR"], column_config=cfg, key=f"cmc_editor_{ano}_{mes}")
+        resumo=_resumo_matriz_cmc(edit)
+        st.markdown("#### Resumo do fechamento")
+        st.dataframe(resumo[["COLABORADOR","PRESENTES","FALTAS","ATESTADOS","FOLGAS","FÉRIAS"]], use_container_width=True, hide_index=True)
+        excel=_excel_cmc(edit,ano,mes)
+        st.download_button("📥 Exportar fechamento CMC Bahia", data=excel, file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+        st.caption("Legenda: OK = Presença • FO = Folga • FA = Falta • A = Atestado • FE = Férias • LB = Liberado • COMP = Compensação")
+    except Exception as e:
+        st.error(f"Não foi possível processar o ponto eletrônico: {e}")
+
 # ==========================================================
 # LOGIN / ROTEAMENTO POR PERFIL
 # ==========================================================
@@ -1744,6 +1853,9 @@ with st.expander("💰 Regras de Gratificação", expanded=False):
 
 with st.expander("🧮 :red-background[**APURAÇÃO DE GRATIFICAÇÃO**]", expanded=False):
     tela_apuracao_gratificacao()
+
+with st.expander("🏭 **FECHAMENTO CMC BAHIA**", expanded=False):
+    tela_fechamento_cmc_bahia()
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
