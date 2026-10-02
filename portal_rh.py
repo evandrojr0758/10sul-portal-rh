@@ -9,6 +9,11 @@ from io import BytesIO
 
 import pandas as pd
 import streamlit as st
+
+try:
+    from st_keyup import st_keyup
+except ImportError:
+    st_keyup = None
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
@@ -582,12 +587,27 @@ for r in freq:
 _colaboradores_todos = list(colaboradores)
 _col_busca, _col_status = st.columns([2, 1], gap="medium")
 with _col_busca:
-    _busca_colaborador = st.text_input(
-        "🔎 Buscar colaborador",
-        value="",
-        placeholder="Digite parte do nome...",
-        key=f"rh_busca_colaborador_{int(ano)}_{mes}",
-    ).strip()
+    # Busca em tempo real: atualiza a grade a cada digitação (debounce curto),
+    # sem exigir Enter. Ao apagar o texto, a lista completa volta automaticamente.
+    if st_keyup is not None:
+        _busca_colaborador = (st_keyup(
+            "🔎 Buscar colaborador",
+            value="",
+            placeholder="Digite parte do nome...",
+            key=f"rh_busca_colaborador_{int(ano)}_{mes}",
+            debounce=180,
+        ) or "").strip()
+    else:
+        st.error(
+            "A busca instantânea precisa do pacote streamlit-keyup. "
+            "Adicione `streamlit-keyup` ao requirements.txt do projeto."
+        )
+        _busca_colaborador = st.text_input(
+            "🔎 Buscar colaborador",
+            value="",
+            placeholder="Digite parte do nome...",
+            key=f"rh_busca_colaborador_{int(ano)}_{mes}_fallback",
+        ).strip()
 with _col_status:
     _filtro_status = st.selectbox(
         "Filtrar por STATUS",
