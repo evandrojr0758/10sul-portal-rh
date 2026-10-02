@@ -843,9 +843,9 @@ def cabecalho_sessao(mostrar_ajuda=False):
 
 def tela_dna_seguranca():
     usr=st.session_state.get("usuario_logado") or {}
-    cabecalho_sessao()
     st.title("🦺 Controle de DNA — Segurança do Trabalho")
     st.caption("Informe somente a quantidade de DNAs realizados por colaborador em cada competência.")
+    cabecalho_sessao()
     hoje=date.today(); meses=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
     a,b,c=st.columns([1.2,.7,2.5])
     with a: mes_d=st.selectbox("Mês", range(1,13), index=hoje.month-1, format_func=lambda x: meses[x-1], key="dna_mes_seg")
@@ -1033,10 +1033,12 @@ if _perfil_atual not in ("RH", "ADMIN"):
     st.error("Seu perfil não possui acesso a este portal.")
     st.stop()
 
-cabecalho_sessao(mostrar_ajuda=True)
 st.title("👥 Portal RH — Aracruz")
-
 st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorrências</div>', unsafe_allow_html=True)
+
+# Controles da sessão ficam DEPOIS do título/subtítulo.
+# Assim não são capturados/empurrados pela área superior do Streamlit.
+cabecalho_sessao(mostrar_ajuda=True)
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
