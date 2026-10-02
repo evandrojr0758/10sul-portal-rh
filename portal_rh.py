@@ -514,7 +514,7 @@ div[data-testid="stDataEditor"] [role="columnheader"]{font-weight:700!important}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("👥 Portal RH — Frequência")
+st.title("👥 Portal RH — Aracruz")
 st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorrências</div>', unsafe_allow_html=True)
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
@@ -560,10 +560,18 @@ ocorrencia_id_por_codigo = {str(x.get("codigo") or "").upper().strip(): int(x["i
 ocorrencia_codigo_por_id = {v: k for k, v in ocorrencia_id_por_codigo.items()}
 codigos = [str(x.get("codigo","")).upper().strip() for x in ocorrencias if x.get("codigo")]
 codigos = list(dict.fromkeys(codigos))
-if "" not in codigos:
-    opcoes = [""] + codigos
-else:
-    opcoes = codigos
+# Marcador visual para células ainda não preenchidas.
+# O valor é apenas visual: internamente continua sendo tratado como vazio.
+PENDENTE_VISUAL = "🟧 PENDENTE"
+
+def _codigo_grade(valor):
+    texto = str(valor or "").strip()
+    if texto.lower() in ("none", "nan") or texto == PENDENTE_VISUAL:
+        return ""
+    return texto.upper()
+
+# O marcador laranja aparece como primeira opção nas células pendentes.
+opcoes = [PENDENTE_VISUAL] + codigos
 
 freq = ler_frequencia(int(ano), mes)
 
@@ -681,7 +689,7 @@ for c in colaboradores:
         "EMPRESA": _empresa_colaborador(c, visual=True),
     }
     for dia in range(1, ultimo_visivel + 1):
-        row[f"{dia:02d}"] = mapa.get((cid, dia), "")
+        row[f"{dia:02d}"] = mapa.get((cid, dia), "") or PENDENTE_VISUAL
     linhas.append(row)
 
 df = pd.DataFrame(linhas)
@@ -719,7 +727,7 @@ if _cancelar:
         _row = int(_cancelar["row"])
         _col = str(_cancelar["col"])
         # Volta exatamente ao valor que existia antes da seleção de LB/COMP.
-        _draft.at[_row, _col] = _cancelar.get("antes", "")
+        _draft.at[_row, _col] = _cancelar.get("antes", "") or PENDENTE_VISUAL
         st.session_state[_draft_key] = _draft
     st.session_state.get("rh_observacoes_pendentes", {}).pop(_cancelar.get("obs_key", ""), None)
     st.session_state.get("rh_responsaveis_pendentes", {}).pop(_cancelar.get("obs_key", ""), None)
@@ -763,7 +771,7 @@ st.session_state[_draft_key] = editado.copy()
 contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0, "COMP": 0}
 for coluna in colunas_dia:
     for valor in editado[coluna].tolist():
-        codigo = str(valor or "").upper().strip()
+        codigo = _codigo_grade(valor)
         if codigo in contagens:
             contagens[codigo] += 1
 
@@ -775,7 +783,7 @@ for _i in range(len(editado)):
     _qtd_fa = 0
     _qtd_a = 0
     for _col in colunas_dia:
-        _codigo = str(editado.iloc[_i][_col] or "").upper().strip()
+        _codigo = _codigo_grade(editado.iloc[_i][_col])
         if _codigo == "FA":
             _qtd_fa += 1
         elif _codigo == "A":
@@ -816,13 +824,13 @@ _total_recebiveis = 0
 _mapa_media = dict(mapa)
 for i, cid in enumerate(ids):
     for dia in range(1, ultimo_visivel + 1):
-        _mapa_media[(cid, dia)] = str(editado.iloc[i][f"{dia:02d}"] or "").upper().strip()
+        _mapa_media[(cid, dia)] = _codigo_grade(editado.iloc[i][f"{dia:02d}"])
 for _c in _colaboradores_todos:
     if _classificacao_colaborador(_c) != "OPERACIONAL":
         continue
     _cid = int(_c["id"])
     for _dia in range(1, ultimo_visivel + 1):
-        if str(_mapa_media.get((_cid, _dia), "") or "").upper().strip() in _codigos_recebiveis:
+        if _codigo_grade(_mapa_media.get((_cid, _dia), "")) in _codigos_recebiveis:
             _total_recebiveis += 1
 _media_diaria = (_total_recebiveis / ultimo_visivel) if ultimo_visivel else 0
 
@@ -891,8 +899,8 @@ alteracoes = []
 for i, cid in enumerate(ids):
     for dia in range(1, ultimo_visivel + 1):
         col = f"{dia:02d}"
-        antes = str(df.iloc[i][col] or "")
-        depois = str(editado.iloc[i][col] or "")
+        antes = _codigo_grade(df.iloc[i][col])
+        depois = _codigo_grade(editado.iloc[i][col])
         if antes != depois:
             alteracoes.append((i, cid, dia, antes, depois))
 
@@ -921,7 +929,7 @@ if alteracoes:
             _draft = st.session_state.get(_draft_key)
             if isinstance(_draft, pd.DataFrame):
                 _draft = _draft.copy()
-                _draft.at[int(alvo["row"]), str(alvo["col"])] = alvo.get("antes", "")
+                _draft.at[int(alvo["row"]), str(alvo["col"])] = alvo.get("antes", "") or PENDENTE_VISUAL
                 st.session_state[_draft_key] = _draft
             st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
 
@@ -1066,8 +1074,8 @@ if alteracoes:
             empresa_colab = str(editado.iloc[i].get("EMPRESA", "") or "").strip()
             for dia_check in range(1, ultimo_visivel + 1):
                 col_check = f"{dia_check:02d}"
-                valor_check = str(editado.iloc[i][col_check] or "").strip()
-                if not valor_check or valor_check.lower() in ("none", "nan"):
+                valor_check = _codigo_grade(editado.iloc[i][col_check])
+                if not valor_check:
                     celulas_vazias.append({
                         "COLABORADOR": nome_colab,
                         "EMPRESA": empresa_colab,
