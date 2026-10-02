@@ -841,6 +841,96 @@ def cabecalho_sessao(mostrar_ajuda=False):
         with st.expander("🔐 Alteração de senha", expanded=True):
             modal_alterar_senha(False)
 
+
+# ==========================================================
+# REGRAS DE GRATIFICAÇÃO
+# ==========================================================
+def ler_regras_gratificacao():
+    return sb("GET", "rh_regras_gratificacao", "select=*&order=id.asc") or []
+
+
+def salvar_regra_gratificacao(regra_id, dados, atualizado_por):
+    payload = dict(dados)
+    payload["atualizado_por"] = str(atualizado_por or "").strip() or None
+    payload["atualizado_em"] = datetime.now().isoformat(timespec="seconds")
+    sb("PATCH", "rh_regras_gratificacao", f"id=eq.{int(regra_id)}", payload, "return=minimal")
+
+
+def tela_regras_gratificacao():
+    usr = st.session_state.get("usuario_logado") or {}
+    st.markdown("### 💰 Cadastro de Regras de Gratificação")
+    st.caption("As regras abaixo ficam salvas no banco e podem ser alteradas pelo RH/Administrador. FABRICAÇÃO será configurada em uma etapa separada.")
+    try:
+        regras = ler_regras_gratificacao()
+    except Exception as e:
+        st.error("A estrutura das regras ainda não está disponível. Execute o SQL desta versão no Supabase.")
+        st.caption(str(e))
+        return
+    if not regras:
+        st.warning("Nenhuma regra cadastrada. Execute o SQL desta versão no Supabase para carregar as regras iniciais.")
+        return
+
+    rotulos = {"REVISAO": "REVISÃO", "ITR_DEMAIS": "ITR E DEMAIS FRENTES"}
+    for r in regras:
+        codigo = str(r.get("codigo") or "")
+        titulo = rotulos.get(codigo, str(r.get("nome") or codigo))
+        with st.container(border=True):
+            st.markdown(f"#### {titulo}")
+            if codigo == "REVISAO":
+                st.caption("Bonificação integral calculada sobre o salário-base do colaborador.")
+                c1,c2,c3 = st.columns(3)
+                pct_integral = c1.number_input("Bonificação integral (% do salário)", min_value=0.0, max_value=100.0, value=float(r.get("percentual_salario") or 35), step=0.5, key=f"rg_pct_{r['id']}")
+                peso_abs = c2.number_input("Peso Absenteísmo (%)", min_value=0.0, max_value=100.0, value=float(r.get("peso_absenteismo") or 20), step=1.0, key=f"rg_abs_{r['id']}")
+                peso_tempo = c3.number_input("Peso Tempo de entrega (%)", min_value=0.0, max_value=100.0, value=float(r.get("peso_tempo_entrega") or 80), step=1.0, key=f"rg_tmp_{r['id']}")
+                c4,c5,c6 = st.columns(3)
+                desc_1_at = c4.number_input("1 dia de atestado — desconto no Absenteísmo (R$)", min_value=0.0, value=float(r.get("desconto_1_atestado_valor") or 100), step=10.0, key=f"rg_atv_{r['id']}")
+                atest_zera = c5.number_input("Dias de atestado para zerar Absenteísmo", min_value=1, value=int(r.get("atestados_zera_categoria") or 2), step=1, key=f"rg_atz_{r['id']}")
+                dna_min = c6.number_input("DNA mínimo no mês", min_value=0, value=int(r.get("dna_minimo") or 2), step=1, key=f"rg_dna_{r['id']}")
+                st.info("FALTA = zera a gratificação inteira • Desvio comportamental/advertência = zera a gratificação inteira • DNA abaixo do mínimo = zera a gratificação inteira.")
+                if abs((peso_abs + peso_tempo) - 100) > 0.001:
+                    st.warning("Absenteísmo + Tempo de entrega deve totalizar 100%.")
+                dados = {
+                    "percentual_salario": pct_integral, "valor_fixo": None,
+                    "peso_absenteismo": peso_abs, "peso_tempo_entrega": peso_tempo,
+                    "falta_zera_tudo": True, "desconto_1_atestado_valor": desc_1_at,
+                    "desconto_1_atestado_percentual": None, "atestados_zera_categoria": int(atest_zera),
+                    "atestados_zera_tudo": None, "dna_minimo": int(dna_min),
+                    "dna_abaixo_minimo_zera": True, "desvio_comportamental_zera": True,
+                    "atraso_habilitado": False,
+                }
+            else:
+                st.caption("Regra-base para ITR, SOS, CNP, BORRACHARIA, CAPD e CRAVEJAMENTO. FABRICAÇÃO não entra nesta regra.")
+                c1,c2,c3 = st.columns(3)
+                valor = c1.number_input("Bonificação integral (R$)", min_value=0.0, value=float(r.get("valor_fixo") or 360), step=10.0, key=f"rg_vlr_{r['id']}")
+                desc_at = c2.number_input("1 dia de atestado — desconto (%)", min_value=0.0, max_value=100.0, value=float(r.get("desconto_1_atestado_percentual") or 20), step=1.0, key=f"rg_atp_{r['id']}")
+                atest_tudo = c3.number_input("Dias de atestado para zerar tudo", min_value=1, value=int(r.get("atestados_zera_tudo") or 2), step=1, key=f"rg_att_{r['id']}")
+                c4,c5 = st.columns(2)
+                dna_min = c4.number_input("DNA mínimo no mês", min_value=0, value=int(r.get("dna_minimo") or 2), step=1, key=f"rg_dna_{r['id']}")
+                atraso_hab = c5.checkbox("Ativar regra de atraso acumulado", value=bool(r.get("atraso_habilitado", False)), key=f"rg_atraso_{r['id']}", help="Deixe desativado por enquanto. Depois vamos calcular automaticamente a soma dos atrasos.")
+                limite_atraso = None
+                if atraso_hab:
+                    limite_atraso = st.number_input("Limite de atraso acumulado para zerar bônus (minutos)", min_value=0, value=int(r.get("limite_atraso_minutos") or 0), step=5, key=f"rg_atlim_{r['id']}")
+                st.info("FALTA = zera tudo • Desvio comportamental/advertência = zera tudo • DNA abaixo do mínimo = zera tudo.")
+                dados = {
+                    "percentual_salario": None, "valor_fixo": valor,
+                    "peso_absenteismo": None, "peso_tempo_entrega": None,
+                    "falta_zera_tudo": True, "desconto_1_atestado_valor": None,
+                    "desconto_1_atestado_percentual": desc_at, "atestados_zera_categoria": None,
+                    "atestados_zera_tudo": int(atest_tudo), "dna_minimo": int(dna_min),
+                    "dna_abaixo_minimo_zera": True, "desvio_comportamental_zera": True,
+                    "atraso_habilitado": bool(atraso_hab), "limite_atraso_minutos": limite_atraso,
+                }
+            if st.button("💾 Salvar esta regra", type="primary", key=f"salvar_regra_{r['id']}"):
+                if codigo == "REVISAO" and abs((peso_abs + peso_tempo) - 100) > 0.001:
+                    st.error("Não foi salvo: os pesos de Absenteísmo e Tempo de entrega precisam totalizar 100%.")
+                else:
+                    try:
+                        salvar_regra_gratificacao(r["id"], dados, usr.get("nome") or usr.get("usuario"))
+                        st.success("Regra atualizada com sucesso.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível salvar a regra: {e}")
+
 def tela_dna_seguranca():
     usr=st.session_state.get("usuario_logado") or {}
     st.title("🦺 Controle de DNA — Segurança do Trabalho")
@@ -1039,6 +1129,9 @@ st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorr
 # Controles da sessão ficam DEPOIS do título/subtítulo.
 # Assim não são capturados/empurrados pela área superior do Streamlit.
 cabecalho_sessao(mostrar_ajuda=True)
+
+with st.expander("💰 Regras de Gratificação", expanded=False):
+    tela_regras_gratificacao()
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
