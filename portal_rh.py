@@ -1062,35 +1062,8 @@ def tela_apuracao_gratificacao():
         except Exception as e:
             st.error(f"Não foi possível aplicar as médias: {e}")
 
-    # Lançamento individual: permite exceção à média aplicada em lote.
-    # O valor individual salvo prevalece na apuração até que uma nova aplicação em lote
-    # substitua novamente os integrantes daquela equipe.
-    revisao_colabs = [c for c in colabs if str(c.get("frente") or "").upper().strip()=="REVISÃO"]
-    if revisao_colabs:
-        with st.expander("✏️ Lançar / alterar média individual"):
-            _nomes_rev = sorted([_nome_colaborador(c) for c in revisao_colabs])
-            _ic1,_ic2,_ic3 = st.columns([2.2,1,.65], vertical_alignment="bottom")
-            _nome_ind = _ic1.selectbox("Colaborador", _nomes_rev, key=f"grat_ind_nome_{ano_g}_{mes_g}")
-            _c_ind = next(c for c in revisao_colabs if _nome_colaborador(c)==_nome_ind)
-            _cid_ind = int(_c_ind["id"])
-            _eq_ind = str(_c_ind.get("equipe_revisao") or "").upper().strip()
-            _reg_ind = ap_por.get(_cid_ind,{})
-            _v_ind = _reg_ind.get("media_tempo_entrega_horas")
-            if _v_ind in (None, ""):
-                if _eq_ind=="EQUIPE 1": _v_ind=media_eq1
-                elif _eq_ind=="EQUIPE 2": _v_ind=media_eq2
-                else: _v_ind=0.0
-            try: _v_ind=float(_v_ind)
-            except Exception: _v_ind=0.0
-            _media_ind = _ic2.number_input("Média individual (h)", min_value=0.0, step=0.1, value=_v_ind, format="%.2f", key=f"grat_ind_media_{ano_g}_{mes_g}_{_cid_ind}")
-            if _ic3.button("💾 Salvar", type="primary", use_container_width=True, key=f"grat_ind_salvar_{ano_g}_{mes_g}_{_cid_ind}"):
-                try:
-                    usuario=usr.get("nome") or usr.get("usuario")
-                    salvar_apuracao_manual(_cid_ind,ano_g,mes_g,_eq_ind or None,_media_ind,None,usuario)
-                    st.success(f"Média individual de {_nome_ind} salva: {_media_ind:.2f} h.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Não foi possível salvar a média individual: {e}")
+    # A média individual agora é editada diretamente na linha da apuração.
+    # O lançamento em lote acima continua disponível e pode ser usado normalmente.
 
     # A gratificação SEMPRE usa somente a frequência já persistida no Supabase.
     # Se existir rascunho/alteração pendente na tela de frequência desta mesma competência,
@@ -1195,8 +1168,8 @@ def tela_apuracao_gratificacao():
         df_view = df_view[df_view["COLABORADOR"].astype(str).str.contains(busca_grat, case=False, na=False)]
 
     st.caption(
-        "**EQUIPE REVISÃO** vem do Cadastro do Colaborador e **MÉDIA TEMPO** é aplicada em lote acima. "
-        "Os demais campos são calculados pelo sistema. Para conferir os desvios, clique na linha do colaborador que possui valor em **DESVIOS**."
+        "**EQUIPE REVISÃO** vem do Cadastro do Colaborador. **MÉDIA TEMPO** pode ser aplicada em lote acima ou alterada individualmente direto na linha. "
+        "Os demais campos são calculados pelo sistema. Para conferir os desvios, marque **DESVIOS 🔎** na linha do colaborador."
     )
 
     def _abrir_modal_desvios_grat(nome_colaborador, cid_colaborador, ocorrencias_impactantes):
@@ -1229,35 +1202,70 @@ def tela_apuracao_gratificacao():
         and str(o.get("tipo") or "").upper().strip() not in tipos_nao_penalizam
     ]
 
-    evento_tabela = st.dataframe(
-        df_view,
+    # Edição individual diretamente na própria linha.
+    # Apenas MÉDIA TEMPO (h) fica editável; os demais campos continuam protegidos.
+    df_editor = df_view.copy()
+    df_editor.insert(0, "VER DESVIOS", False)
+    editado_grat = st.data_editor(
+        df_editor,
         use_container_width=True,
         hide_index=True,
-        height=min(760,90+max(1,len(df_view))*35),
-        on_select="rerun",
-        selection_mode="single-row",
+        height=min(760,90+max(1,len(df_editor))*35),
+        disabled=[c for c in df_editor.columns if c not in ("MÉDIA TEMPO (h)", "VER DESVIOS")],
         column_config={
+            "VER DESVIOS": st.column_config.CheckboxColumn("DESVIOS 🔎", help="Marque para abrir o detalhamento das ocorrências."),
             "SALÁRIO":st.column_config.NumberColumn("SALÁRIO",format="R$ %.2f"),
             "INTEGRAL":st.column_config.NumberColumn("INTEGRAL",format="R$ %.2f"),
             "GRATIFICAÇÃO":st.column_config.NumberColumn("GRATIFICAÇÃO",format="R$ %.2f"),
-            "MÉDIA TEMPO (h)":st.column_config.NumberColumn("MÉDIA TEMPO (h)",format="%.2f"),
+            "MÉDIA TEMPO (h)":st.column_config.NumberColumn(
+                "MÉDIA TEMPO (h)", min_value=0.0, step=0.1, format="%.2f",
+                help="Na REVISÃO, altere aqui para lançar uma média individual."
+            ),
         },
-        key=f"grat_view_{ano_g}_{mes_g}",
+        key=f"grat_editor_{ano_g}_{mes_g}",
     )
 
-    selecionadas = []
-    try:
-        selecionadas = list(evento_tabela.selection.rows)
-    except Exception:
-        try: selecionadas = list(evento_tabela.get("selection", {}).get("rows", []))
-        except Exception: selecionadas = []
-    if selecionadas:
-        idx_sel = int(selecionadas[0])
-        if 0 <= idx_sel < len(df_view):
-            linha_sel = df_view.iloc[idx_sel]
+    # Salva automaticamente qualquer alteração individual feita na coluna MÉDIA TEMPO.
+    # Para frentes diferentes de REVISÃO, a média não se aplica e a edição é descartada.
+    alterou_media = False
+    for pos in range(min(len(df_editor), len(editado_grat))):
+        antes = df_editor.iloc[pos]
+        depois = editado_grat.iloc[pos]
+        nome_ed = str(antes["COLABORADOR"])
+        frente_ed = str(antes["FRENTE"] or "").upper().strip()
+        va = antes.get("MÉDIA TEMPO (h)")
+        vd = depois.get("MÉDIA TEMPO (h)")
+        va_cmp = None if pd.isna(va) else float(va)
+        vd_cmp = None if pd.isna(vd) else float(vd)
+        if va_cmp != vd_cmp:
+            if frente_ed != "REVISÃO":
+                st.warning(f"Média de tempo individual é utilizada somente para REVISÃO. Alteração de {nome_ed} ignorada.")
+                alterou_media = True
+                continue
+            try:
+                cid_ed = int(ids[nome_ed])
+                colab_ed = next(c for c in colabs if int(c["id"]) == cid_ed)
+                equipe_ed = str(colab_ed.get("equipe_revisao") or "").upper().strip() or None
+                usuario_ed = usr.get("nome") or usr.get("usuario")
+                salvar_apuracao_manual(cid_ed, ano_g, mes_g, equipe_ed, vd_cmp, None, usuario_ed)
+                st.toast(f"Média de {nome_ed} salva: {vd_cmp:.2f} h" if vd_cmp is not None else f"Média de {nome_ed} removida.")
+                alterou_media = True
+            except Exception as e:
+                st.error(f"Não foi possível salvar a média individual de {nome_ed}: {e}")
+
+    # A caixa DESVIOS 🔎 mantém o detalhamento disponível mesmo com a grade editável.
+    for pos in range(len(editado_grat)):
+        if bool(editado_grat.iloc[pos].get("VER DESVIOS", False)):
+            linha_sel = editado_grat.iloc[pos]
             nome_sel = str(linha_sel["COLABORADOR"])
             if int(linha_sel.get("DESVIOS", 0) or 0) > 0:
                 _abrir_modal_desvios_grat(nome_sel, ids.get(nome_sel), oc_impactantes)
+            else:
+                st.info(f"{nome_sel} não possui desvio que retire a bonificação nesta competência.")
+            break
+
+    if alterou_media:
+        st.rerun()
 
     validos=df["GRATIFICAÇÃO"].dropna()
     k1,k2,k3,k4=st.columns(4)
