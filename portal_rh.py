@@ -19,6 +19,7 @@ except ImportError:
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 st.set_page_config(page_title="Portal RH | 10 Sul", page_icon="👥", layout="wide")
 
@@ -1380,25 +1381,46 @@ def tela_dna_seguranca():
     # Exportação no mesmo padrão da planilha de DNA: DESTRA | COLABORADOR | DNA em X.
     # Ex.: quantidade 2 = XX; quantidade 4 = XXXX.
     def _excel_dna_bytes(df_origem):
+        # Exporta como TABELA do Excel, no mesmo padrão visual da planilha de DNA enviada.
         out = BytesIO()
         wb = Workbook()
         ws = wb.active
         ws.title = "DNA"
         ws.append(["DESTRA", "COLABORADOR", "DNA"])
+
         for _, r in df_origem.iterrows():
             try:
-                qtd = max(0, int(pd.to_numeric(r.get("DNA"), errors="coerce") or 0))
+                valor = pd.to_numeric(r.get("DNA"), errors="coerce")
+                qtd = 0 if pd.isna(valor) else max(0, int(valor))
             except Exception:
                 qtd = 0
             ws.append([r.get("DESTRA", ""), r.get("COLABORADOR", ""), "X" * qtd])
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        ws.column_dimensions["A"].width = 18
-        ws.column_dimensions["B"].width = 44
-        ws.column_dimensions["C"].width = 18
-        for row in ws.iter_rows(min_row=2):
-            row[2].alignment = Alignment(horizontal="left", vertical="center")
+
+        # Tabela estruturada do Excel: cabeçalho azul, filtros e linhas alternadas.
+        ultima_linha = max(2, ws.max_row)
+        tabela = Table(displayName="TabelaDNA", ref=f"A1:C{ultima_linha}")
+        estilo = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        tabela.tableStyleInfo = estilo
+        ws.add_table(tabela)
+
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = f"A1:C{ultima_linha}"
+        ws.column_dimensions["A"].width = 14.5546875
+        ws.column_dimensions["B"].width = 58.21875
+        ws.column_dimensions["C"].width = 13.77734375
+
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=3):
+            for cell in row:
+                cell.alignment = Alignment(vertical="center")
+        for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+            row[0].alignment = Alignment(horizontal="left", vertical="center")
+
         wb.save(out)
         out.seek(0)
         return out.getvalue()
