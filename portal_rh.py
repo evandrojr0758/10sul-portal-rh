@@ -1848,14 +1848,25 @@ st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorr
 # Assim não são capturados/empurrados pela área superior do Streamlit.
 cabecalho_sessao(mostrar_ajuda=True)
 
+# Módulo CMC Bahia: página exclusiva e disponível somente para ADMIN.
+if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "CMC_BAHIA":
+    if st.button("← Voltar ao Portal RH", key="voltar_portal_cmc_bahia"):
+        st.session_state["pagina_portal_rh"] = "PRINCIPAL"
+        st.rerun()
+    st.markdown("---")
+    tela_fechamento_cmc_bahia()
+    st.stop()
+
+if _perfil_atual == "ADMIN":
+    if st.button("🏭 Fechamento CMC Bahia", key="abrir_cmc_bahia", type="primary"):
+        st.session_state["pagina_portal_rh"] = "CMC_BAHIA"
+        st.rerun()
+
 with st.expander("💰 Regras de Gratificação", expanded=False):
     tela_regras_gratificacao()
 
 with st.expander("🧮 :red-background[**APURAÇÃO DE GRATIFICAÇÃO**]", expanded=False):
     tela_apuracao_gratificacao()
-
-with st.expander("🏭 **FECHAMENTO CMC BAHIA**", expanded=False):
-    tela_fechamento_cmc_bahia()
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
