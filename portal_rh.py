@@ -1428,13 +1428,37 @@ def abrir_ficha_colaborador(colaborador):
         st.error(f"Não foi possível carregar o histórico: {e}")
         _hist = []
     if _hist:
-        _hist_df = pd.DataFrame([{
-            "DATA": pd.to_datetime(r.get("data"), errors="coerce").strftime("%d/%m/%Y") if r.get("data") else "",
-            "TIPO": str(r.get("tipo") or ""),
-            "DESCRIÇÃO": str(r.get("descricao") or ""),
-            "REGISTRADO POR": str(r.get("registrado_por") or ""),
-        } for r in _hist])
-        st.dataframe(_hist_df, use_container_width=True, hide_index=True)
+        for _oc in _hist:
+            _oc_id = int(_oc.get("id") or 0)
+            _data_txt = pd.to_datetime(_oc.get("data"), errors="coerce")
+            _data_txt = _data_txt.strftime("%d/%m/%Y") if not pd.isna(_data_txt) else ""
+            _tipo_txt = str(_oc.get("tipo") or "")
+            _desc_txt = str(_oc.get("descricao") or "")
+            _resp_txt = str(_oc.get("registrado_por") or "")
+
+            _h1, _h2, _h3, _h4, _h5 = st.columns([1.0, 1.25, 2.2, 1.25, 0.65])
+            _h1.write(_data_txt)
+            _h2.write(_tipo_txt)
+            _h3.write(_desc_txt)
+            _h4.write(_resp_txt)
+            if _h5.button("🗑️", key=f"excluir_oc_{cid}_{_oc_id}", help="Excluir ocorrência"):
+                st.session_state[f"confirmar_exclusao_oc_{cid}"] = _oc_id
+
+            if st.session_state.get(f"confirmar_exclusao_oc_{cid}") == _oc_id:
+                st.warning(f"Excluir a ocorrência {_tipo_txt} de {_data_txt}? Esta ação também atualizará a apuração da gratificação.")
+                _cf1, _cf2, _cf3 = st.columns([1, 1, 4])
+                if _cf1.button("Sim, excluir", type="primary", key=f"conf_excluir_oc_{cid}_{_oc_id}"):
+                    try:
+                        sb("DELETE", "rh_colaborador_ocorrencias", f"id=eq.{_oc_id}", None, "return=minimal")
+                        st.session_state.pop(f"confirmar_exclusao_oc_{cid}", None)
+                        st.success("Ocorrência excluída com sucesso.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível excluir a ocorrência: {e}")
+                if _cf2.button("Cancelar", key=f"cancel_excluir_oc_{cid}_{_oc_id}"):
+                    st.session_state.pop(f"confirmar_exclusao_oc_{cid}", None)
+                    st.rerun()
+            st.divider()
     else:
         st.caption("Nenhuma ocorrência individual registrada para este colaborador.")
 
