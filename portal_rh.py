@@ -491,8 +491,17 @@ def gerar_excel_frequencia(ano, mes, colaboradores, freq, ocorrencia_codigo_por_
 
 def salvar_frequencia(colaborador_id, dia, codigo, ocorrencia_id_por_codigo, observacao="", autorizado_por=""):
     codigo = str(codigo or "").strip().upper()
+    # PENDENTE não é ocorrência: significa ausência de lançamento.
+    # Se um registro salvo voltar para PENDENTE, removemos a linha do banco.
+    if not codigo:
+        params = (
+            "colaborador_id=eq." + urllib.parse.quote(str(int(colaborador_id))) +
+            "&data=eq." + urllib.parse.quote(dia.isoformat())
+        )
+        sb("DELETE", "rh_frequencia", params)
+        return
     ocorrencia_id = ocorrencia_id_por_codigo.get(codigo)
-    if codigo and ocorrencia_id is None:
+    if ocorrencia_id is None:
         raise ValueError(f"Ocorrência {codigo} não encontrada em rh_ocorrencias.")
     payload = {
         "colaborador_id": int(colaborador_id),
@@ -581,6 +590,7 @@ O quadro **Colaboradores** mostra o total de pessoas cadastradas e a divisão en
 Cada coluna numerada representa um **dia do mês**. Selecione a ocorrência correspondente para cada colaborador.
 
 - 🟧 **PENDENTE**: dia já disponível e ainda sem lançamento.
+- **DEM**: colaborador demitido; aplicado automaticamente a partir do dia seguinte à data de desligamento e não entra nos indicadores.
 - 🟧 **Alterado / não salvo**: lançamento feito na tela, mas ainda aguardando o botão **Salvar alterações**.
 - 🟦 **Salvo**: lançamento já gravado no sistema.
 - Dias futuros permanecem sem cobrança de preenchimento.
@@ -715,6 +725,24 @@ if ultimo_visivel == 0:
     st.info("Este mês ainda não começou. As colunas dos dias serão liberadas automaticamente conforme a data.")
     st.stop()
 
+# Inclui também colaboradores desligados que ainda pertenciam ao quadro em algum
+# momento do mês selecionado. Após a data de desligamento, a grade mostra DEM.
+try:
+    _todos_cad = sb("GET", "rh_colaboradores", "select=*") or []
+    _fim_mes_ref = date(int(ano), mes, calendar.monthrange(int(ano), mes)[1])
+    _ids_ativos = {int(c["id"]) for c in colaboradores if c.get("id") is not None}
+    for _c in _todos_cad:
+        if _c.get("id") is None or int(_c["id"]) in _ids_ativos:
+            continue
+        _dd = pd.to_datetime(_c.get("data_desligamento"), errors="coerce")
+        if pd.notna(_dd) and _dd.date() <= _fim_mes_ref:
+            # Só é necessário exibir no mês em que ocorreu o desligamento.
+            if _dd.year == int(ano) and _dd.month == mes:
+                colaboradores.append(_c)
+    colaboradores = sorted(colaboradores, key=lambda r: _nome_colaborador(r).upper())
+except Exception:
+    pass
+
 ocorrencias = ler_ocorrencias()
 ocorrencia_id_por_codigo = {str(x.get("codigo") or "").upper().strip(): int(x["id"]) for x in ocorrencias if x.get("codigo") and x.get("id") is not None}
 ocorrencia_codigo_por_id = {v: k for k, v in ocorrencia_id_por_codigo.items()}
@@ -723,6 +751,7 @@ codigos = list(dict.fromkeys(codigos))
 # Marcador visual para células ainda não preenchidas.
 # O valor é apenas visual: internamente continua sendo tratado como vazio.
 PENDENTE_VISUAL = "🟧 PENDENTE"
+DEM_VISUAL = "DEM"
 
 def _codigo_grade(valor):
     texto = str(valor or "").strip()
@@ -731,7 +760,9 @@ def _codigo_grade(valor):
     return texto.upper()
 
 # O marcador laranja aparece como primeira opção nas células pendentes.
-opcoes = [PENDENTE_VISUAL] + codigos
+# DEM aparece apenas quando o sistema o aplica automaticamente.
+# A validação abaixo impede que DEM seja usado manualmente em qualquer outra data.
+opcoes = [PENDENTE_VISUAL] + codigos + [DEM_VISUAL]
 
 freq = ler_frequencia(int(ano), mes)
 
@@ -866,8 +897,14 @@ for c in colaboradores:
         # Na grade usa a empresa real da BaseFuncionário e exibe o nome abreviado.
         "EMPRESA": _empresa_colaborador(c, visual=True),
     }
+    _deslig = pd.to_datetime(c.get("data_desligamento"), errors="coerce")
+    _deslig = _deslig.date() if pd.notna(_deslig) else None
     for dia in range(1, ultimo_visivel + 1):
-        row[f"{dia:02d}"] = mapa.get((cid, dia), "") or PENDENTE_VISUAL
+        _data_cel = date(int(ano), mes, dia)
+        if _deslig and _data_cel > _deslig:
+            row[f"{dia:02d}"] = DEM_VISUAL
+        else:
+            row[f"{dia:02d}"] = mapa.get((cid, dia), "") or PENDENTE_VISUAL
     linhas.append(row)
 
 df = pd.DataFrame(linhas)
@@ -876,6 +913,10 @@ colunas_dia = [f"{d:02d}" for d in range(1, ultimo_visivel + 1)]
 # Mapa estável de nomes por ID. Modais não devem depender da posição/colunas
 # do data_editor, pois o Streamlit pode reconstruir o editor durante um rerun.
 _nomes_grade_por_id = {int(c["id"]): _nome_colaborador(c) for c in colaboradores}
+_desligamento_por_id = {}
+for _c in colaboradores:
+    _dd = pd.to_datetime(_c.get("data_desligamento"), errors="coerce")
+    _desligamento_por_id[int(_c["id"])] = _dd.date() if pd.notna(_dd) else None
 def _nome_grade_por_cid(cid, fallback=""):
     return str(_nomes_grade_por_id.get(int(cid), fallback or "")).strip()
 
@@ -1131,6 +1172,18 @@ for i, cid in enumerate(ids):
         col = f"{dia:02d}"
         antes = _codigo_grade(df.iloc[i][col])
         depois = _codigo_grade(editado.iloc[i][col])
+        _data_cel = date(int(ano), mes, dia)
+        _dd = _desligamento_por_id.get(int(cid))
+        _deve_ser_dem = bool(_dd and _data_cel > _dd)
+        if _deve_ser_dem:
+            # DEM é automático e imutável.
+            if depois != DEM_VISUAL:
+                editado.at[i, col] = DEM_VISUAL
+            continue
+        if depois == DEM_VISUAL:
+            # DEM nunca pode ser lançado manualmente.
+            editado.at[i, col] = df.iloc[i][col]
+            continue
         if antes != depois:
             alteracoes.append((i, cid, dia, antes, depois))
 
@@ -1167,7 +1220,7 @@ if alteracoes:
     def modal_senha_edicao(i, cid, dia, antes, depois, chave_reg):
         nome = _nome_grade_por_cid(cid)
         st.markdown(f"**{nome}**")
-        st.caption(f"Dia {dia:02d} • {antes} → {depois or 'VAZIO'}")
+        st.caption(f"Dia {dia:02d} • {antes} → {depois or 'PENDENTE'}")
         st.warning("Este lançamento já foi salvo. A alteração exige senha e motivo obrigatório.")
         senha = st.text_input("Senha de autorização *", type="password", key=f"senha_edicao_{chave_reg}")
         motivo_alt = st.text_area(
@@ -1330,7 +1383,7 @@ if alteracoes:
                 chave_ed = f"{cid}_{int(ano)}_{mes}_{dia}"
                 motivo_ed = str(st.session_state.rh_motivos_edicao.get(chave_ed, "")).strip()
                 if str(antes or "").strip() and antes != depois and motivo_ed:
-                    trilha = f"ALTERAÇÃO {antes or 'VAZIO'} -> {depois or 'VAZIO'} | MOTIVO: {motivo_ed}"
+                    trilha = f"ALTERAÇÃO {antes or 'PENDENTE'} -> {depois or 'PENDENTE'} | MOTIVO: {motivo_ed}"
                     obs = f"{obs} | {trilha}".strip(" |") if obs else trilha
                 salvar_frequencia(cid, data_dia, depois, ocorrencia_id_por_codigo, obs, responsavel)
 
