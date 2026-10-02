@@ -593,23 +593,34 @@ else:
         if _classificacao_colaborador(c) == _filtro_status
     ]
 
-# Pequeno quadro de quantidade de colaboradores por função, obedecendo ao filtro.
-_resumo_funcoes = (
-    pd.DataFrame({"FUNÇÃO": [str(c.get("funcao") or c.get("funcao_padrao") or "SEM FUNÇÃO").strip() or "SEM FUNÇÃO" for c in colaboradores]})
-    .value_counts("FUNÇÃO")
-    .reset_index(name="QTD")
-    .sort_values(["QTD", "FUNÇÃO"], ascending=[False, True])
-    .reset_index(drop=True)
-)
 # Área de análises recolhível para manter a tela principal compacta.
-# O resumo por função e os dois rankings ficam juntos e fechados por padrão.
 _analises_expander = st.expander("📊 Análises de Frequência", expanded=False)
 with _analises_expander:
-    # Duas colunas para aproveitar melhor o espaço horizontal:
-    # resumo compacto à esquerda e gráfico de Faltas x Atestados à direita.
+    # Duas colunas: resumo compacto à esquerda e gráfico à direita.
     _col_resumo, _col_grafico = st.columns([1, 4], gap="large")
     with _col_resumo:
         st.markdown("##### Resumo por Função")
+        # Este filtro é independente do filtro geral da grade. Por padrão, mostra OPERACIONAL.
+        _filtro_status_resumo = st.selectbox(
+            "Status do resumo",
+            ["OPERACIONAL", "OUTROS", "TODOS"],
+            index=0,
+            key=f"rh_filtro_status_resumo_{int(ano)}_{mes}",
+        )
+        if _filtro_status_resumo == "TODOS":
+            _colaboradores_resumo = _colaboradores_todos
+        else:
+            _colaboradores_resumo = [
+                c for c in _colaboradores_todos
+                if _classificacao_colaborador(c) == _filtro_status_resumo
+            ]
+        _resumo_funcoes = (
+            pd.DataFrame({"FUNÇÃO": [str(c.get("funcao") or c.get("funcao_padrao") or "SEM FUNÇÃO").strip() or "SEM FUNÇÃO" for c in _colaboradores_resumo]})
+            .value_counts("FUNÇÃO")
+            .reset_index(name="QTD")
+            .sort_values(["QTD", "FUNÇÃO"], ascending=[False, True])
+            .reset_index(drop=True)
+        )
         st.dataframe(_resumo_funcoes, use_container_width=True, hide_index=True, height=500)
     with _col_grafico:
         # O gráfico é preenchido depois da grade para considerar também alterações ainda não salvas.
