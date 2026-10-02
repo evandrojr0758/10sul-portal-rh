@@ -9,6 +9,7 @@ from io import BytesIO
 
 import pandas as pd
 import streamlit as st
+import altair as alt
 
 try:
     from st_keyup import st_keyup
@@ -989,9 +990,56 @@ with _rankings_topo:
     if _rank_ocorrencias.empty:
         st.caption("Nenhuma falta ou atestado registrado no período.")
     else:
-        # Um único gráfico: para cada colaborador, duas séries lado a lado quando houver.
-        _grafico_rank = _rank_ocorrencias.set_index("COLABORADOR")[["FALTAS", "ATESTADOS"]]
-        st.bar_chart(_grafico_rank, height=300, use_container_width=True)
+        # Barras verticais agrupadas: FALTAS e ATESTADOS lado a lado, com rótulos de dados.
+        _ordem_rank = _rank_ocorrencias["COLABORADOR"].tolist()
+        _grafico_rank = _rank_ocorrencias[["COLABORADOR", "FALTAS", "ATESTADOS"]].melt(
+            id_vars="COLABORADOR",
+            var_name="TIPO",
+            value_name="QTD",
+        )
+        # Não desenha barra/rótulo para valores zero.
+        _grafico_rank = _grafico_rank[_grafico_rank["QTD"] > 0].copy()
+
+        _base_rank = alt.Chart(_grafico_rank).encode(
+            x=alt.X(
+                "COLABORADOR:N",
+                sort=_ordem_rank,
+                title=None,
+                axis=alt.Axis(labelAngle=-35, labelLimit=150),
+            ),
+            xOffset=alt.XOffset("TIPO:N", sort=["FALTAS", "ATESTADOS"]),
+            y=alt.Y(
+                "QTD:Q",
+                title="Quantidade",
+                axis=alt.Axis(tickMinStep=1, format="d"),
+            ),
+            color=alt.Color(
+                "TIPO:N",
+                title=None,
+                sort=["FALTAS", "ATESTADOS"],
+                legend=alt.Legend(orient="bottom"),
+            ),
+            tooltip=[
+                alt.Tooltip("COLABORADOR:N", title="Colaborador"),
+                alt.Tooltip("TIPO:N", title="Tipo"),
+                alt.Tooltip("QTD:Q", title="Quantidade", format="d"),
+            ],
+        )
+
+        _barras_rank = _base_rank.mark_bar(size=28)
+        _rotulos_rank = _base_rank.mark_text(
+            dy=-8,
+            fontSize=13,
+            fontWeight="bold",
+        ).encode(
+            text=alt.Text("QTD:Q", format="d"),
+            color=alt.value("#333333"),
+        )
+
+        _chart_rank = (
+            _barras_rank + _rotulos_rank
+        ).properties(height=300).configure_view(strokeWidth=0)
+        st.altair_chart(_chart_rank, use_container_width=True)
 
 # Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
 # Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
