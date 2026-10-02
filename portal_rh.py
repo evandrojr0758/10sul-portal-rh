@@ -1611,7 +1611,7 @@ cabecalho_sessao(mostrar_ajuda=True)
 with st.expander("💰 Regras de Gratificação", expanded=False):
     tela_regras_gratificacao()
 
-with st.expander("🧮 Apuração de Gratificação", expanded=False):
+with st.expander("🧮 :red-background[**APURAÇÃO DE GRATIFICAÇÃO**]", expanded=False):
     tela_apuracao_gratificacao()
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
