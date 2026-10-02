@@ -1017,12 +1017,13 @@ def tela_apuracao_gratificacao():
 
     st.markdown("#### ⏱️ Média mensal por equipe — Revisão")
     st.caption("Informe a média uma única vez para cada equipe. O sistema aplica automaticamente a todos os colaboradores conforme a equipe cadastrada.")
-    _mc1,_mc2,_mc3,_mc4=st.columns([1,1,1.2,1.1])
+    # Controles em lote alinhados e próximos aos campos das médias.
+    _mc1,_mc2,_mc3,_mc4=st.columns([1,1,.58,.48], vertical_alignment="bottom")
     media_eq1=_mc1.number_input("Média EQUIPE 1 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 1")), format="%.2f", key=f"media_eq1_{ano_g}_{mes_g}")
     media_eq2=_mc2.number_input("Média EQUIPE 2 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 2")), format="%.2f", key=f"media_eq2_{ano_g}_{mes_g}")
 
     limpar_key=f"confirmar_limpeza_medias_{ano_g}_{mes_g}"
-    if _mc4.button("🧹 Limpar médias", key=f"limpar_medias_{ano_g}_{mes_g}"):
+    if _mc4.button("🧹 Limpar médias", key=f"limpar_medias_{ano_g}_{mes_g}", use_container_width=True):
         st.session_state[limpar_key]=True
 
     if st.session_state.get(limpar_key, False):
@@ -1043,7 +1044,7 @@ def tela_apuracao_gratificacao():
             st.session_state.pop(limpar_key, None)
             st.rerun()
 
-    if _mc3.button("💾 Aplicar médias às equipes", type="primary", key=f"aplicar_medias_{ano_g}_{mes_g}"):
+    if _mc3.button("💾 Aplicar médias", type="primary", key=f"aplicar_medias_{ano_g}_{mes_g}", use_container_width=True):
         try:
             usuario=usr.get("nome") or usr.get("usuario")
             qtd=0
@@ -1060,6 +1061,37 @@ def tela_apuracao_gratificacao():
             st.rerun()
         except Exception as e:
             st.error(f"Não foi possível aplicar as médias: {e}")
+
+    # Lançamento individual: permite exceção à média aplicada em lote.
+    # O valor individual salvo prevalece na apuração até que uma nova aplicação em lote
+    # substitua novamente os integrantes daquela equipe.
+    revisao_colabs = [c for c in colabs if str(c.get("frente") or "").upper().strip()=="REVISÃO"]
+    if revisao_colabs:
+        with st.expander("✏️ Lançar / alterar média individual"):
+            _nomes_rev = sorted([_nome_colaborador(c) for c in revisao_colabs])
+            _ic1,_ic2,_ic3 = st.columns([2.2,1,.65], vertical_alignment="bottom")
+            _nome_ind = _ic1.selectbox("Colaborador", _nomes_rev, key=f"grat_ind_nome_{ano_g}_{mes_g}")
+            _c_ind = next(c for c in revisao_colabs if _nome_colaborador(c)==_nome_ind)
+            _cid_ind = int(_c_ind["id"])
+            _eq_ind = str(_c_ind.get("equipe_revisao") or "").upper().strip()
+            _reg_ind = ap_por.get(_cid_ind,{})
+            _v_ind = _reg_ind.get("media_tempo_entrega_horas")
+            if _v_ind in (None, ""):
+                if _eq_ind=="EQUIPE 1": _v_ind=media_eq1
+                elif _eq_ind=="EQUIPE 2": _v_ind=media_eq2
+                else: _v_ind=0.0
+            try: _v_ind=float(_v_ind)
+            except Exception: _v_ind=0.0
+            _media_ind = _ic2.number_input("Média individual (h)", min_value=0.0, step=0.1, value=_v_ind, format="%.2f", key=f"grat_ind_media_{ano_g}_{mes_g}_{_cid_ind}")
+            if _ic3.button("💾 Salvar", type="primary", use_container_width=True, key=f"grat_ind_salvar_{ano_g}_{mes_g}_{_cid_ind}"):
+                try:
+                    usuario=usr.get("nome") or usr.get("usuario")
+                    salvar_apuracao_manual(_cid_ind,ano_g,mes_g,_eq_ind or None,_media_ind,None,usuario)
+                    st.success(f"Média individual de {_nome_ind} salva: {_media_ind:.2f} h.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Não foi possível salvar a média individual: {e}")
+
     # A gratificação SEMPRE usa somente a frequência já persistida no Supabase.
     # Se existir rascunho/alteração pendente na tela de frequência desta mesma competência,
     # deixa isso explícito para evitar interpretar a grade editada como dado já salvo.
@@ -1115,7 +1147,12 @@ def tela_apuracao_gratificacao():
         sal=float(c.get("salario_base") or 0); fa=faltas.get(cid,0); at=atest.get(cid,0); dna=dna_por.get(cid,0); des=desvios.get(cid,0)
         manual=ap_por.get(cid,{})
         equipe=str(c.get("equipe_revisao") or "").upper().strip() if frente=="REVISÃO" else ""
-        if frente=="REVISÃO" and equipe=="EQUIPE 1": media=media_eq1
+        # Valor individual salvo prevalece sobre o valor digitado nos campos de lote.
+        _media_manual = manual.get("media_tempo_entrega_horas") if frente=="REVISÃO" else None
+        if _media_manual not in (None, ""):
+            try: media=float(_media_manual)
+            except Exception: media=None
+        elif frente=="REVISÃO" and equipe=="EQUIPE 1": media=media_eq1
         elif frente=="REVISÃO" and equipe=="EQUIPE 2": media=media_eq2
         else: media=None
         integral=(sal*float(rev.get("percentual_salario") or 35)/100) if frente=="REVISÃO" else float(demais.get("valor_fixo") or 360)
