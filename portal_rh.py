@@ -1320,42 +1320,89 @@ def tela_dna_seguranca():
     else:
         st.caption(f"Prazo para lançamento desta competência: até {limite.strftime('%d/%m/%Y')}.")
     pode=(not fechado) or liberado
+
     colabs=sb("GET","rh_colaboradores","select=*&order=colaborador.asc") or []
+    ativos=[c for c in colabs if bool(c.get("ativo", True))]
     regs=ler_dna_mensal(int(ano_d),mes_d)
     qtd_por={int(r['colaborador_id']):int(r.get('quantidade') or 0) for r in regs if r.get('colaborador_id') is not None}
-    linhas=[]
-    id_por_nome={}
-    editor_key=f"dna_editor_seg_{ano_d}_{mes_d}"
-
-    # O STATUS é apenas visual e reage imediatamente ao valor digitado no editor.
-    # O banco continua sendo alterado somente quando o usuário clicar em Salvar DNA.
-    estado_editor = st.session_state.get(editor_key, {}) or {}
-    edits_pendentes = estado_editor.get("edited_rows", {}) or {}
-
-    for idx, col in enumerate([c for c in colabs if bool(c.get("ativo", True))]):
+    linhas=[]; id_por_nome={}
+    for col in ativos:
         cid=int(col['id']); nome=_nome_colaborador(col); id_por_nome[nome]=cid
-        q=qtd_por.get(cid,0)
-        pend = edits_pendentes.get(idx, edits_pendentes.get(str(idx), {})) or {}
-        if "DNA" in pend:
-            try:
-                q = int(pend.get("DNA") or 0)
-            except (TypeError, ValueError):
-                q = 0
+        q=int(qtd_por.get(cid,0) or 0)
         linhas.append({"DESTRA":str(col.get("destra") or ""),"COLABORADOR":nome,"DNA":q,"STATUS GRATIFICAÇÃO":"✅ APTO" if q>=2 else "❌ NÃO ATENDE"})
-    df=pd.DataFrame(linhas)
-    if df.empty:
+    df_banco=pd.DataFrame(linhas)
+    if df_banco.empty:
         st.info("Nenhum colaborador ativo encontrado."); return
-    edit=st.data_editor(df,use_container_width=True,hide_index=True,disabled=["DESTRA","COLABORADOR","STATUS GRATIFICAÇÃO"] if pode else list(df.columns),column_config={"DNA":st.column_config.NumberColumn("DNA",min_value=0,step=1,format="%d")},key=editor_key,height=min(780,80+len(df)*35))
-    if pode and st.button("💾 Salvar DNA", type="primary", key=f"dna_salvar_seg_{ano_d}_{mes_d}"):
+
+    # Rascunho da competência: alterações ficam na tela sem voltar ao valor do banco.
+    periodo=f"{int(ano_d)}_{int(mes_d):02d}"
+    draft_key=f"dna_draft_seg_{periodo}"
+    nonce_key=f"dna_nonce_seg_{periodo}"
+    fp_key=f"dna_fp_seg_{periodo}"
+    import hashlib
+    base_serial=df_banco[["DESTRA","COLABORADOR","DNA"]].to_json(orient="records", force_ascii=False)
+    base_fp=hashlib.sha256(base_serial.encode("utf-8")).hexdigest()
+    if draft_key not in st.session_state or not isinstance(st.session_state.get(draft_key), pd.DataFrame):
+        st.session_state[draft_key]=df_banco.copy()
+        st.session_state[fp_key]=base_fp
+        st.session_state[nonce_key]=0
+    else:
+        draft=st.session_state[draft_key]
+        # Só recarrega do banco quando não há edição pendente e a base realmente mudou.
+        if list(draft["COLABORADOR"]) != list(df_banco["COLABORADOR"]):
+            st.session_state[draft_key]=df_banco.copy()
+            st.session_state[fp_key]=base_fp
+            st.session_state[nonce_key]=int(st.session_state.get(nonce_key,0))+1
+
+    editor_key=f"dna_editor_seg_{periodo}_{st.session_state.get(nonce_key,0)}"
+
+    def _dna_editor_changed():
+        estado=st.session_state.get(editor_key, {}) or {}
+        edits=estado.get("edited_rows", {}) or {}
+        draft=st.session_state[draft_key].copy()
+        for ridx, mudancas in edits.items():
+            try: i=int(ridx)
+            except Exception: continue
+            if i < 0 or i >= len(draft): continue
+            if "DNA" in mudancas:
+                try: q=max(0,int(mudancas.get("DNA") or 0))
+                except Exception: q=0
+                draft.at[i,"DNA"]=q
+                draft.at[i,"STATUS GRATIFICAÇÃO"]="✅ APTO" if q>=2 else "❌ NÃO ATENDE"
+        st.session_state[draft_key]=draft
+        # recria o editor com o rascunho atualizado; assim o STATUS muda na hora
+        st.session_state[nonce_key]=int(st.session_state.get(nonce_key,0))+1
+
+    draft=st.session_state[draft_key].copy()
+    edit=st.data_editor(
+        draft,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["DESTRA","COLABORADOR","STATUS GRATIFICAÇÃO"] if pode else list(draft.columns),
+        column_config={"DNA":st.column_config.NumberColumn("DNA",min_value=0,step=1,format="%d")},
+        key=editor_key,
+        on_change=_dna_editor_changed if pode else None,
+        height=min(780,80+len(draft)*35),
+    )
+
+    if pode and st.button("💾 Salvar DNA", type="primary", key=f"dna_salvar_seg_{periodo}"):
         try:
+            atual=st.session_state[draft_key].copy()
             alterados=0
-            for i,row in edit.iterrows():
-                nome=row["COLABORADOR"]; novo=int(row["DNA"] or 0); antigo=int(df.loc[i,"DNA"] or 0)
+            banco_por_nome={r["COLABORADOR"]:int(r["DNA"] or 0) for _,r in df_banco.iterrows()}
+            for _,row in atual.iterrows():
+                nome=row["COLABORADOR"]; novo=int(row["DNA"] or 0); antigo=int(banco_por_nome.get(nome,0))
                 if novo!=antigo:
                     salvar_dna_mensal(id_por_nome[nome],int(ano_d),mes_d,novo,usr.get("nome") or usr.get("usuario")); alterados+=1
+            # Após salvar, descarta o rascunho para a próxima execução vir do banco.
+            st.session_state.pop(draft_key,None)
+            st.session_state.pop(fp_key,None)
+            st.session_state[nonce_key]=int(st.session_state.get(nonce_key,0))+1
             st.success(f"{alterados} alteração(ões) salva(s).")
             st.rerun()
-        except Exception as e: st.error(f"Não foi possível salvar: {e}")
+        except Exception as e:
+            st.error(f"Não foi possível salvar: {e}")
+
 st.markdown("""
 <style>
 .block-container{padding-top:1.25rem;max-width:98%}
