@@ -810,21 +810,35 @@ def tela_login():
                 st.error("Não foi possível validar o acesso. Execute o SQL de usuários desta versão no Supabase.")
                 st.caption(str(e))
 
-def cabecalho_sessao():
-    usr=st.session_state.get("usuario_logado") or {}
-    a,b,c=st.columns([7.2,1.5,1.3], vertical_alignment="center")
+def cabecalho_sessao(mostrar_ajuda=False):
+    usr = st.session_state.get("usuario_logado") or {}
+    perfil = str(usr.get("perfil") or "").upper()
+    nome_perfil = {
+        "RH": "RH",
+        "SEGURANCA": "Segurança do Trabalho",
+        "ADMIN": "Administrador",
+    }.get(perfil, perfil or "Usuário")
+
+    # Barra discreta dentro da área útil da página, evitando ficar escondida
+    # sob a barra superior do Streamlit.
+    a, b, c, d = st.columns([6.4, 1.55, 0.95, 0.95], vertical_alignment="center")
     with a:
-        st.caption(f"👤 {usr.get('nome','')} • {usr.get('perfil','')}")
+        st.caption(f"👤 {nome_perfil}")
     with b:
         if st.button("🔐 Alterar senha", key="abrir_alterar_senha", use_container_width=True):
             st.session_state["abrir_troca_senha"] = True
     with c:
-        if st.button("Sair", key="logout_portal", use_container_width=True):
-            st.session_state.pop("usuario_logado",None)
-            st.session_state.pop("abrir_troca_senha",None)
+        if st.button("🚪 Sair", key="logout_portal", use_container_width=True):
+            st.session_state.pop("usuario_logado", None)
+            st.session_state.pop("abrir_troca_senha", None)
             st.rerun()
+    with d:
+        if mostrar_ajuda:
+            if st.button("❔ Ajuda", key="btn_ajuda_portal", help="Ver explicação desta tela", use_container_width=True):
+                abrir_ajuda_portal()
+
     if st.session_state.get("abrir_troca_senha"):
-        with st.expander("Alteração de senha", expanded=True):
+        with st.expander("🔐 Alteração de senha", expanded=True):
             modal_alterar_senha(False)
 
 def tela_dna_seguranca():
@@ -1019,14 +1033,8 @@ if _perfil_atual not in ("RH", "ADMIN"):
     st.error("Seu perfil não possui acesso a este portal.")
     st.stop()
 
-cabecalho_sessao()
-
-_titulo, _ajuda = st.columns([8.8, 1.2], vertical_alignment="center")
-with _titulo:
-    st.title("👥 Portal RH — Aracruz")
-with _ajuda:
-    if st.button("❔ Ajuda", key="btn_ajuda_portal", help="Ver explicação desta tela", use_container_width=True):
-        abrir_ajuda_portal()
+cabecalho_sessao(mostrar_ajuda=True)
+st.title("👥 Portal RH — Aracruz")
 
 st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorrências</div>', unsafe_allow_html=True)
 
