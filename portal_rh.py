@@ -1169,7 +1169,7 @@ def tela_apuracao_gratificacao():
 
     st.caption(
         "**EQUIPE REVISÃO** vem do Cadastro do Colaborador. **MÉDIA TEMPO** pode ser aplicada em lote acima ou alterada individualmente direto na linha. "
-        "Os demais campos são calculados pelo sistema. Para conferir os desvios, marque **DESVIOS 🔎** na linha do colaborador."
+        "Os demais campos são calculados pelo sistema. Para conferir os desvios, clique em **🔎 VER** na própria linha do colaborador."
     )
 
     def _abrir_modal_desvios_grat(nome_colaborador, cid_colaborador, ocorrencias_impactantes):
@@ -1205,7 +1205,15 @@ def tela_apuracao_gratificacao():
     # Edição individual diretamente na própria linha.
     # Apenas MÉDIA TEMPO (h) fica editável; os demais campos continuam protegidos.
     df_editor = df_view.copy()
-    df_editor.insert(0, "VER DESVIOS", False)
+    df_editor["VER DESVIOS"] = False
+    # Deixa a ação de visualizar os desvios junto do motivo/cálculo, no fim da linha.
+    cols_editor = [c for c in df_editor.columns if c != "VER DESVIOS"]
+    try:
+        idx_motivo = cols_editor.index("MOTIVO / CÁLCULO")
+        cols_editor.insert(idx_motivo, "VER DESVIOS")
+    except ValueError:
+        cols_editor.append("VER DESVIOS")
+    df_editor = df_editor[cols_editor]
     editado_grat = st.data_editor(
         df_editor,
         use_container_width=True,
@@ -1213,7 +1221,7 @@ def tela_apuracao_gratificacao():
         height=min(760,90+max(1,len(df_editor))*35),
         disabled=[c for c in df_editor.columns if c not in ("MÉDIA TEMPO (h)", "VER DESVIOS")],
         column_config={
-            "VER DESVIOS": st.column_config.CheckboxColumn("DESVIOS 🔎", help="Marque para abrir o detalhamento das ocorrências."),
+            "VER DESVIOS": st.column_config.CheckboxColumn("🔎 VER", help="Clique aqui para abrir quais ocorrências retiraram a gratificação."),
             "SALÁRIO":st.column_config.NumberColumn("SALÁRIO",format="R$ %.2f"),
             "INTEGRAL":st.column_config.NumberColumn("INTEGRAL",format="R$ %.2f"),
             "GRATIFICAÇÃO":st.column_config.NumberColumn("GRATIFICAÇÃO",format="R$ %.2f"),
@@ -1253,7 +1261,7 @@ def tela_apuracao_gratificacao():
             except Exception as e:
                 st.error(f"Não foi possível salvar a média individual de {nome_ed}: {e}")
 
-    # A caixa DESVIOS 🔎 mantém o detalhamento disponível mesmo com a grade editável.
+    # O botão/checkbox 🔎 VER fica ao lado do MOTIVO / CÁLCULO e abre o detalhamento dos desvios.
     for pos in range(len(editado_grat)):
         if bool(editado_grat.iloc[pos].get("VER DESVIOS", False)):
             linha_sel = editado_grat.iloc[pos]
