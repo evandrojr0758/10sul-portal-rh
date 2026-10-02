@@ -52,6 +52,121 @@ def sb(method, tabela, params="", payload=None, prefer=None):
         raise RuntimeError(f"Supabase HTTP {e.code}: {detalhe}") from e
 
 SEED_COLABORADORES = [('ABRAAO OLIVEIRA DOS SANTOS', 'MECANICO'), ('ADAIR DO ROSARIO FERNANDES', 'SOLDADOR'), ('ADRIANO DOS SANTOS RIBEIRO', 'SOLDADOR'), ('MANOEL LUZ ALVES', 'MECANICO (SOCORRISTA)'), ('ALESSANDRO ROCHA MOREIRA', 'ELETRICISTA'), ('ANDRE GUIMARAES CORDEIRO', 'ENCARREGADO DE MANUTENCAO'), ('ANDRE MIRANDA', 'SOLDADOR'), ('ARTHUR DOS SANTOS DA SILVA', 'PINTOR'), ('BRUNO HENRIQUE ARAUJO DA SILVA', 'RESERVA SAP'), ('CARLOS ALBERTO DE SOUZA', 'LAVADOR'), ('CARLOS HENRIQUE DE SOUZA TESTA DA SILVA', 'MECANICO'), ('CARLOS HENRIQUE NASCIMENTO', 'SOLDADOR'), ('CLAUDINEI AMANCIO JACOB', 'LUBRIFICADOR'), ('CLEBER FRAGA BANDEIRA', 'MECANICO (SOCORRISTA)'), ('CLEBES SANTANA SANTOS', 'MECANICO III'), ('CLEISIMAR NICANOR ESPERANCA', 'MECANICO'), ('CRISTIANO QUIRINO MORAES', 'BARRACHEIRO'), ('DANIEL BERTOLDO RODRIGUES', 'MECANICO'), ('DEIVISON BUENO CUNHA', 'MECANICO'), ('DEMETRIO CORDEIRO FLORINDO', 'MECANICO'), ('DENISIO MAGELA ALVES', 'MECANICO II'), ('DIEGO ATHAYDE SCARDUA', 'MECANICO'), ('DIEGO MONTEIRO SILVA', 'AUX TEC E SEG DO TRABALHO'), ('DIMAS DA SILVA MUNIZ', 'MECANICO'), ('DIONES ALVARENGA DOS SANTOS', 'MECANICO'), ('DIONIS GABRIEL CAMPOS', 'AUXILIAR MECANICO'), ('DOUGLAS PEREIRA SANTOS', 'ELETRICISTA'), ('EDCARLOS FRANCISCO DA SILVA', 'MECANICO IV'), ('EDRICK OLIVIERA ALMEIDA', 'LAVADOR'), ('ELIAS DA SILVA JOVENCIO', 'APROVISIONADOR'), ('ELOISIO COVRE', 'MANOBRISTA 10S'), ('ENOC DE OLIVEIRA SANTOS', 'MECANICO (SOCORRISTA)'), ('EVANDRO DOS SANTOS OLIVEIRA JUNIOR', 'ANALISTA DE MANUTENÇÃO'), ('ERICK ROCHA COCCO', 'MECANICO (SOCORRISTA)'), ('EZEQUIEL ALVES VIEIRA', 'MECANICO'), ('EZEQUIEL DE MOURA PAIXÃO', 'BORRACHEIRO II'), ('EZEQUIEL SANTOS HERCULANO', 'APROVISIONADOR'), ('FABIO CANDEIAS SOUZA', 'MECANICO'), ('FABIO CORDEIRO DOS SANTOS', 'MECANICO III'), ('FABIO OLIVEIRA SILVA NOGUEIRA', 'MECANICO'), ('FABRICIO FANCHIOTTI', 'TORNEIRO MECANICO'), ('FELIPE REIS DE SOUZA', 'MECANICO'), ('FERNANDO FERNANDES COSTA', 'ALMOXARIFE DE MANUTENÇÃO II'), ('FRANCINY GIACOMIN ALBORGHETE MARTINELI', 'ANALISTA DE RH'), ('GABRIEL DA VITÓRIA ALVARENGA', 'ENCARREGADO DE MANUTENÇÃO II'), ('GABRYEL MACIEL PEREIRA', 'RECONDICIONAMENTO DE CUICA'), ('GEAN PEREIRA DE CARLI', 'AUXILIAR DE MECANICO'), ('GILMAR SILVA OLIVEIRA', 'BORRACHEIRO'), ('GILSON MATHIAS DO NASCIMENTO', 'ELETRICISTA'), ('FELIPE SOUZA MEDEIROS', 'MECANICO (SOCORRISTA)'), ('HELDER DA SILVA ROQUE', 'AUXILIAR MECANICO'), ('HORACIO GUILHERME DE SOUZA ALMEIDA', 'AUXILIAR MECANICO'), ('JARDEL SABINO FELIZARDO', 'MECANICO'), ('JEAN CARLOS LOUREIRO BARBOSA', 'MECANICO'), ('JEFFERSON DE SOUZA MONTEIRO', 'MECANICO'), ('JOAO MACHADO FERNANDES', 'AUXILIAR MECANICO'), ('JOCELI LIRIO DOS SANTOS', 'MECANICO II'), ('JORDAN DAS VIRGENS RIBEIRO', 'LUBRIFICADOR'), ('JOSE ANGEL LARA MATUTE', 'SOLDADOR'), ('JOSE ANTONIO DA SILVA ROSA', 'SOLDADOR'), ('JOSE RICARDO SANTOS', 'LAVADOR'), ('JULIANO DOS SANTOS DIOGO', 'MECANICO'), ('JULIO PAES SOUZA', 'MECANICO'), ('JURANDIR FERREIRA NUNES', 'MECANICO'), ('KAROLINA VAZ PEREIRA', 'TECNICO EM SEGURANÇA DO TRABALHO'), ('KELVIN CHAGAS SANTOS', 'MECANICO'), ('KENNEDY SANTOS DE JESUS', 'AUXILIAR MECANICO II'), ('KIERLEN ALMEIDA DOS SANTOS', 'SOLDADOR'), ('LEONARDO SANTOS MOURA', 'MECANICO'), ('LHESLEY GOMES DE OLIVEIRA', 'MECANICO'), ('LUAN GUIDOTI LIMA', 'MECANICO'), ('LUCAS AZEVEDO RUFINO', 'SOLDADOR'), ('LUCAS CORREA SA SILVA', 'APROVISIONADOR'), ('LUCAS DE SOUZA GOMES', 'SOLDADOR'), ('LUZINETE MONTEIRO CRUZ', 'AUXILIAR ADMINISTRATIVO'), ('MAIKO JHONATAN MARTINS LISBOA', 'MECANICO'), ('MARCELO DE OLIVEIRA', 'AUXILIAR DE SERVIÇOS GERAIS II'), ('MARCOS JACOB DE SOUZA', 'BORRACHEIRO'), ('MARCOS VINICIUS BENEDITO LEMOS', ''), ('MARLON PINHEIRO DE MATOS', 'MECANICO'), ('MATEUS GOMES BITI', 'MECANICO'), ('MATHEUS FERREIRA SANTUZZI', 'APROVISIONADOR'), ('MURILO GOMES CARVALHO', 'AUXILIAR MECANICO'), ('OSNIR PASSOS GOMES', 'ENCARREGADO DE MANUTENÇÃO IV'), ('PAULO CESAR DOS REIS', 'MECANICO'), ('PEDRO DE ASSIS JUNIOR', 'ELETRICISTA'), ('PEDRO DE JESUS BARBOSA', 'ELETRICISTA'), ('RAFAEL FRANCISCO DO NASCIMENTO SANTOS', 'MECANICO'), ('RAMON MUNIZ COSER', 'AUXILIAR MECANICO'), ('REGINALDO RIBEIRO DA SILVA', 'SOLDADOR'), ('RENATO DOS SANTOS GONÇALVES', 'MECANICO'), ('RIAN ANTONIO FERNANDES VARGAS', 'AUXILIAR DE ELETRICISTA DE VEICULOS'), ('ROGERIO DA CONCEIÇÃO REBOUÇAS', 'SOLDADOR'), ('ROSIVELTON OLIVEIRA GOMES', 'MECANICO'), ('RUBENS GUILHERME MARINS', 'SUPERVISOR'), ('RUBENS ROCHA CRUZ', 'INSPETOR'), ('SANTINHO PERONI', 'MECANICO'), ('SILAS PASSOS DE SOUSA', 'MECANICO (SOCORRISTA)'), ('SILVIO CARLOS SOUZA', 'CRAVEJAMENTO DE LONA'), ('SOLIMAR NATALI', 'SOLDADOR'), ('TASSIO DOS SANTOS QUARESMA', 'MECANICO'), ('VALTEMI CORREIA DE OLIVEIRA', 'SOLDADOR'), ('VANDER MARCOS DE SOUZA', 'MANOBRISTA'), ('VANILSON DE JESUS', 'MECANICO'), ('VICTOR MARCELINO RAMOS', 'AUXILIAR MECANICO'), ('VINICIUS HENRIQUE SANTOS SILVA', 'BORRACHEIRO'), ('VINICIUS PINTO ROSA', 'BORRACHEIRO'), ('VITOR SANTOS SOUZA', 'SOLDADOR'), ('WAGNER HONORIO DE ALMEIDA', 'SUPERVISOR'), ('WANDERSON SANTOS SOUZA', 'ELETRICISTA'), ('WALLACE RODRIGUES DO NASCIMENTO', 'BORRACHEIRO II'), ('WEBERSON CORDEIRO DOS SANTOS', 'SOLDADOR'), ('WENDRYEL PEREIRA AMORIM PAULUSCENA', 'MECANICO II'), ('WENIO DA PURIFICAÇÃO RIBEIRO', 'MECANICO'), ('WESLEY BRAGA CABRAL', 'MECANICO'), ('WESLEY SOUZA DOS SANTOS', 'MECANICO')]
+SALARIO_REFERENCIA = {
+    'ABRAAO OLIVEIRA DOS SANTOS': 3230.83,
+    'ADAIR DO ROSARIO FERNANDES': 3119.42,
+    'ADRIANO DOS SANTOS RIBEIRO': 2610.01,
+    'ALESSANDRO ROCHA MOREIRA': 2770.37,
+    'ANDRE GUIMARAES CORDEIRO': 6300.00,
+    'ANDRE MIRANDA': 3119.42,
+    'ARTHUR DOS SANTOS DA SILVA': 2117.79,
+    'BRUNO HENRIQUE ARAUJO DA SILVA': 2500.00,
+    'CARLOS ALBERTO DE SOUZA': 1870.52,
+    'CARLOS HENRIQUE DE SOUZA TESTA DA SILVA': 2904.93,
+    'CARLOS HENRIQUE NASCIMENTO': 3119.42,
+    'CLAUDINEI AMANCIO JACOB': 1870.52,
+    'CLEBER FRAGA BANDEIRA': 3230.83,
+    'CLEBES SANTANA SANTOS': 2904.93,
+    'CLEISIMAR NICANOR ESPERANCA': 2610.01,
+    'CRISTIANO QUIRINO MORAES': 2473.87,
+    'DANIEL BERTOLDO RODRIGUES': 2610.01,
+    'DEIVISON BUENO CUNHA': 3230.83,
+    'DEMETRIO CORDEIRO FLORINDO': 2610.01,
+    'DENISIO MAGELA ALVES': 3230.83,
+    'DIEGO ATHAYDE SCARDUA': 2216.28,
+    'DIEGO MONTEIRO SILVA': 2354.81,
+    'DIMAS DA SILVA MUNIZ': 3230.83,
+    'DIONES ALVARENGA DOS SANTOS': 3230.83,
+    'DIONIS GABRIEL CAMPOS': 2216.28,
+    'DOUGLAS PEREIRA SANTOS': 2770.37,
+    'EDCARLOS FRANCISCO DA SILVA': 3230.83,
+    'EDRICK OLIVIERA ALMEIDA': 1870.52,
+    'ELIAS DA SILVA JOVENCIO': 2400.00,
+    'ELOISIO COVRE': 2940.00,
+    'ENOC DE OLIVEIRA SANTOS': 3692.50,
+    'EVANDRO DOS SANTOS OLIVEIRA JUNIOR': 5275.00,
+    'EZEQUIEL ALVES VIEIRA': 2904.93,
+    'EZEQUIEL DE MOURA PAIXÃO': 2473.87,
+    'EZEQUIEL SANTOS HERCULANO': 3400.00,
+    'FABIO CANDEIAS SOUZA': 3230.83,
+    'FABIO CORDEIRO DOS SANTOS': 2610.01,
+    'FABIO OLIVEIRA SILVA NOGUEIRA': 3230.83,
+    'FABRICIO FANCHIOTTI': 5580.95,
+    'FELIPE REIS DE SOUZA': 2216.28,
+    'FERNANDO FERNANDES COSTA': 3047.39,
+    'GABRIEL DA VITÓRIA ALVARENGA': 3748.30,
+    'GABRYEL MACIEL PEREIRA': 3230.83,
+    'GEAN PEREIRA DE CARLI': 1700.00,
+    'GILMAR SILVA OLIVEIRA': 3165.00,
+    'GILSON MATHIAS DO NASCIMENTO': 3119.42,
+    'HELDER DA SILVA ROQUE': 2216.28,
+    'HORACIO GUILHERME DE SOUZA ALMEIDA': 1870.52,
+    'JARDEL SABINO FELIZARDO': 2610.01,
+    'JEAN CARLOS LOUREIRO BARBOSA': 3230.83,
+    'JEFFERSON DE SOUZA MONTEIRO': 3230.83,
+    'JOAO MACHADO FERNANDES': 1700.00,
+    'JOCELI LIRIO DOS SANTOS': 2610.01,
+    'JORDAN DAS VIRGENS RIBEIRO': 1870.52,
+    'JOSE ANGEL LARA MATUTE': 3119.42,
+    'JOSE ANTONIO DA SILVA ROSA': 3119.42,
+    'JOSE RICARDO SANTOS': 1870.52,
+    'JULIANO DOS SANTOS DIOGO': 3230.83,
+    'JULIO PAES SOUZA': 2216.28,
+    'JURANDIR FERREIRA NUNES': 2610.01,
+    'KAROLINA VAZ PEREIRA': 3798.00,
+    'KELVIN CHAGAS SANTOS': 2904.93,
+    'KENNEDY SANTOS DE JESUS': 1779.08,
+    'KIERLEN ALMEIDA DOS SANTOS': 2216.28,
+    'LEONARDO SANTOS MOURA': 3230.83,
+    'LHESLEY GOMES DE OLIVEIRA': 3230.83,
+    'LUAN GUIDOTI LIMA': 3230.83,
+    'LUCAS AZEVEDO RUFINO': 2216.28,
+    'LUCAS CORREA SA SILVA': 2216.28,
+    'LUCAS DE SOUZA GOMES': 3119.42,
+    'LUZINETE MONTEIRO CRUZ': 2354.81,
+    'MAIKO JHONATAN MARTINS LISBOA': 3230.83,
+    'MARCELO DE OLIVEIRA': 1870.52,
+    'MARCOS JACOB DE SOUZA': 2673.79,
+    'MARCOS VINICIUS BENEDITO LEMOS': 3500.00,
+    'MARLON PINHEIRO DE MATOS': 2216.28,
+    'MATEUS GOMES BITI': 3230.83,
+    'MATHEUS FERREIRA SANTUZZI': 2216.28,
+    'MURILO GOMES CARVALHO': 1870.52,
+    'OSNIR PASSOS GOMES': 5200.00,
+    'PAULO CESAR DOS REIS': 3230.83,
+    'PEDRO DE ASSIS JUNIOR': 3119.42,
+    'PEDRO DE JESUS BARBOSA': 3119.42,
+    'RAFAEL FRANCISCO DO NASCIMENTO SANTOS': 3230.83,
+    'RAMON MUNIZ COSER': 1700.00,
+    'REGINALDO RIBEIRO DA SILVA': 3119.42,
+    'RENATO DOS SANTOS GONÇALVES': 3230.83,
+    'RIAN ANTONIO FERNANDES VARGAS': 1700.00,
+    'ROGERIO DA CONCEIÇÃO REBOUÇAS': 3119.42,
+    'ROSIVELTON OLIVEIRA GOMES': 3692.50,
+    'RUBENS GUILHERME MARINS': 7798.56,
+    'RUBENS ROCHA CRUZ': 2904.93,
+    'SANTINHO PERONI': 2904.93,
+    'SILVIO CARLOS SOUZA': 2610.01,
+    'SOLIMAR NATALI': 3119.42,
+    'TASSIO DOS SANTOS QUARESMA': 2610.01,
+    'VALTEMI CORREIA DE OLIVEIRA': 3119.42,
+    'VANDER MARCOS DE SOUZA': 2940.00,
+    'VANILSON DE JESUS': 2904.93,
+    'VICTOR MARCELINO RAMOS': 1870.52,
+    'VINICIUS HENRIQUE SANTOS SILVA': 2473.87,
+    'VINICIUS PINTO ROSA': 2473.87,
+    'VITOR SANTOS SOUZA': 3119.42,
+    'WAGNER HONORIO DE ALMEIDA': 7798.56,
+    'WANDERSON SANTOS SOUZA': 2647.42,
+    'WALLACE RODRIGUES DO NASCIMENTO': 2473.87,
+    'WEBERSON CORDEIRO DOS SANTOS': 3119.42,
+    'WENDRYEL PEREIRA AMORIM PAULUSCENA': 2610.01,
+    'WENIO DA PURIFICAÇÃO RIBEIRO': 2610.01,
+    'WESLEY BRAGA CABRAL': 3230.83,
+    'WESLEY SOUZA DOS SANTOS': 3230.83,
+    'FRANCINY GIACOMIN ALBORGHETE MARTINELI': 3376.00,
+}
+
 
 CLASSIFICACAO_REFERENCIA = {'ABRAAO OLIVEIRA DOS SANTOS': 'OPERACIONAL', 'ADAIR DO ROSARIO FERNANDES': 'OPERACIONAL', 'ADRIANO DOS SANTOS RIBEIRO': 'OPERACIONAL', 'MANOEL LUZ ALVES': 'OPERACIONAL', 'ALESSANDRO ROCHA MOREIRA': 'OPERACIONAL', 'ANDRE GUIMARAES CORDEIRO': 'OUTROS', 'ANDRE MIRANDA': 'OPERACIONAL', 'ARTHUR DOS SANTOS DA SILVA': 'OPERACIONAL', 'BRUNO HENRIQUE ARAUJO DA SILVA': 'OPERACIONAL', 'CARLOS ALBERTO DE SOUZA': 'OPERACIONAL', 'CARLOS HENRIQUE DE SOUZA TESTA DA SILVA': 'OPERACIONAL', 'CARLOS HENRIQUE NASCIMENTO': 'OPERACIONAL', 'CLAUDINEI AMANCIO JACOB': 'OPERACIONAL', 'CLEBER FRAGA BANDEIRA': 'OPERACIONAL', 'CLEBES SANTANA SANTOS': 'OPERACIONAL', 'CLEISIMAR NICANOR ESPERANCA': 'OPERACIONAL', 'CRISTIANO QUIRINO MORAES': 'OPERACIONAL', 'DANIEL BERTOLDO RODRIGUES': 'OPERACIONAL', 'DEIVISON BUENO CUNHA': 'OPERACIONAL', 'DEMETRIO CORDEIRO FLORINDO': 'OPERACIONAL', 'DENISIO MAGELA ALVES': 'OPERACIONAL', 'DIEGO ATHAYDE SCARDUA': 'OPERACIONAL', 'DIEGO MONTEIRO SILVA': 'OUTROS', 'DIMAS DA SILVA MUNIZ': 'OPERACIONAL', 'DIONES ALVARENGA DOS SANTOS': 'OPERACIONAL', 'DIONIS GABRIEL CAMPOS': 'OPERACIONAL', 'DOUGLAS PEREIRA SANTOS': 'OPERACIONAL', 'EDCARLOS FRANCISCO DA SILVA': 'OPERACIONAL', 'EDRICK OLIVIERA ALMEIDA': 'OUTROS', 'ELIAS DA SILVA JOVENCIO': 'OPERACIONAL', 'ELOISIO COVRE': 'OUTROS', 'ENOC DE OLIVEIRA SANTOS': 'OPERACIONAL', 'EVANDRO DOS SANTOS OLIVEIRA JUNIOR': 'OUTROS', 'ERICK ROCHA COCCO': 'OPERACIONAL', 'EZEQUIEL ALVES VIEIRA': 'OPERACIONAL', 'EZEQUIEL DE MOURA PAIXÃO': 'OPERACIONAL', 'EZEQUIEL SANTOS HERCULANO': 'OPERACIONAL', 'FABIO CANDEIAS SOUZA': 'OPERACIONAL', 'FABIO CORDEIRO DOS SANTOS': 'OPERACIONAL', 'FABIO OLIVEIRA SILVA NOGUEIRA': 'OPERACIONAL', 'FABRICIO FANCHIOTTI': 'OUTROS', 'FELIPE REIS DE SOUZA': 'OPERACIONAL', 'FERNANDO FERNANDES COSTA': 'OUTROS', 'FRANCINY GIACOMIN ALBORGHETE MARTINELI': 'OUTROS', 'GABRIEL DA VITÓRIA ALVARENGA': 'OUTROS', 'GABRYEL MACIEL PEREIRA': 'OPERACIONAL', 'GEAN PEREIRA DE CARLI': 'OPERACIONAL', 'GILMAR SILVA OLIVEIRA': 'OPERACIONAL', 'GILSON MATHIAS DO NASCIMENTO': 'OPERACIONAL', 'FELIPE SOUZA MEDEIROS': 'OPERACIONAL', 'HELDER DA SILVA ROQUE': 'OPERACIONAL', 'HORACIO GUILHERME DE SOUZA ALMEIDA': 'OPERACIONAL', 'HUGO ROSSONY RUY': 'OPERACIONAL', 'JARDEL SABINO FELIZARDO': 'OPERACIONAL', 'JEAN CARLOS LOUREIRO BARBOSA': 'OPERACIONAL', 'JEFFERSON DE SOUZA MONTEIRO': 'OPERACIONAL', 'JOAO MACHADO FERNANDES': 'OPERACIONAL', 'JOCELI LIRIO DOS SANTOS': 'OPERACIONAL', 'JORDAN DAS VIRGENS RIBEIRO': 'OPERACIONAL', 'JOSE ANGEL LARA MATUTE': 'OPERACIONAL', 'JOSE ANTONIO DA SILVA ROSA': 'OPERACIONAL', 'JOSE RICARDO SANTOS': 'OPERACIONAL', 'JULIANO DOS SANTOS DIOGO': 'OPERACIONAL', 'JULIO PAES SOUZA': 'OPERACIONAL', 'JURANDIR FERREIRA NUNES': 'OPERACIONAL', 'KAROLINA VAZ PEREIRA': 'OUTROS', 'KELVIN ALEXANDRE RAMOS': 'OPERACIONAL', 'KELVIN CHAGAS SANTOS': 'OPERACIONAL', 'KENNEDY SANTOS DE JESUS': 'OPERACIONAL', 'KIERLEN ALMEIDA DOS SANTOS': 'OPERACIONAL', 'LEONARDO SANTOS MOURA': 'OPERACIONAL', 'LHESLEY GOMES DE OLIVEIRA': 'OPERACIONAL', 'LUAN GUIDOTI LIMA': 'OPERACIONAL', 'LUCAS AZEVEDO RUFINO': 'OPERACIONAL', 'LUCAS CORREA SA SILVA': 'OPERACIONAL', 'LUCAS DE SOUZA GOMES': 'OPERACIONAL', 'LUZINETE MONTEIRO CRUZ': 'OUTROS', 'MAIKO JHONATAN MARTINS LISBOA': 'OPERACIONAL', 'MARCELO DE OLIVEIRA': 'OPERACIONAL', 'MARCOS JACOB DE SOUZA': 'OPERACIONAL', 'MARCOS VINICIUS BENEDITO LEMOS': 'OUTROS', 'MARLON PINHEIRO DE MATOS': 'OPERACIONAL', 'MATEUS GOMES BITI': 'OPERACIONAL', 'MATHEUS FERREIRA SANTUZZI': 'OPERACIONAL', 'MURILO GOMES CARVALHO': 'OPERACIONAL', 'OSNIR PASSOS GOMES': 'OUTROS', 'PAULO CESAR DOS REIS': 'OPERACIONAL', 'PEDRO DE ASSIS JUNIOR': 'OPERACIONAL', 'PEDRO DE JESUS BARBOSA': 'OPERACIONAL', 'RAFAEL FRANCISCO DO NASCIMENTO SANTOS': 'OPERACIONAL', 'RAMON MUNIZ COSER': 'OPERACIONAL', 'REGINALDO RIBEIRO DA SILVA': 'OPERACIONAL', 'RENATO DOS SANTOS GONÇALVES': 'OPERACIONAL', 'RIAN ANTONIO FERNANDES VARGAS': 'OPERACIONAL', 'ROGERIO DA CONCEIÇÃO REBOUÇAS': 'OPERACIONAL', 'ROSIVELTON OLIVEIRA GOMES': 'OPERACIONAL', 'RUBENS BRAGANÇA DA SILVA': 'OPERACIONAL', 'RUBENS GUILHERME MARINS': 'OUTROS', 'RUBENS ROCHA CRUZ': 'OPERACIONAL', 'SANTINHO PERONI': 'OPERACIONAL', 'SILAS PASSOS DE SOUSA': 'OPERACIONAL', 'SILVIO CARLOS SOUZA': 'OPERACIONAL', 'SOLIMAR NATALI': 'OPERACIONAL', 'TASSIO DOS SANTOS QUARESMA': 'OPERACIONAL', 'VALTEMI CORREIA DE OLIVEIRA': 'OPERACIONAL', 'VANDER MARCOS DE SOUZA': 'OUTROS', 'VANILSON DE JESUS': 'OPERACIONAL', 'VICTOR MARCELINO RAMOS': 'OPERACIONAL', 'VINICIUS HENRIQUE SANTOS SILVA': 'OPERACIONAL', 'VINICIUS PINTO ROSA': 'OPERACIONAL', 'VITOR SANTOS SOUZA': 'OPERACIONAL', 'WAGNER HONORIO DE ALMEIDA': 'OUTROS', 'WANDERSON SANTOS SOUZA': 'OPERACIONAL', 'WALLACE RODRIGUES DO NASCIMENTO': 'OPERACIONAL', 'WEBERSON CORDEIRO DOS SANTOS': 'OPERACIONAL', 'WENDRYEL PEREIRA AMORIM PAULUSCENA': 'OPERACIONAL', 'WENIO DA PURIFICAÇÃO RIBEIRO': 'OPERACIONAL', 'WESLEY BRAGA CABRAL': 'OPERACIONAL', 'WESLEY SOUZA DOS SANTOS': 'OPERACIONAL'}
 
@@ -235,9 +350,27 @@ def sincronizar_seed():
             "empresa": "10 SUL",
             "status": "ATIVO",
             "ativo": True,
+            "salario_base": SALARIO_REFERENCIA.get(nome),
         })
 
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
+
+
+def sincronizar_salarios_referencia():
+    """Preenche salário-base a partir da Relação de Empregados - Ativos usada na implantação."""
+    if st.session_state.get("rh_salarios_ref_sincronizados"):
+        return
+    try:
+        rows = sb("GET", "rh_colaboradores", "select=id,colaborador,salario_base") or []
+        for r in rows:
+            nome = _nome_colaborador(r).strip().upper()
+            salario = SALARIO_REFERENCIA.get(nome)
+            atual = r.get("salario_base")
+            if salario is not None and (atual is None or str(atual).strip() == ""):
+                sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(r["id"])), {"salario_base": salario}, "return=minimal")
+        st.session_state["rh_salarios_ref_sincronizados"] = True
+    except Exception as e:
+        st.session_state["rh_salarios_ref_erro"] = str(e)
 
 
 def garantir_ocorrencias():
@@ -256,7 +389,7 @@ def ler_colaboradores():
     return sorted(rows, key=lambda r: _nome_colaborador(r).upper())
 
 
-def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL"):
+def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None):
     nome = str(nome or "").strip().upper()
     if not nome:
         raise ValueError("Informe o nome do colaborador.")
@@ -276,6 +409,8 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL"):
         "empresa": str(empresa or "10 SUL").strip().upper(),
         "status": "ATIVO",
         "ativo": True,
+        "salario_base": salario_base,
+        "frente": str(frente or "").strip().upper() or None,
     }
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
@@ -1425,20 +1560,24 @@ with st.expander("👥 Cadastro de colaboradores"):
         with cc1:
             novo_nome = st.text_input("Colaborador *")
             novo_cracha = st.text_input("Crachá")
+            novo_salario = st.number_input("Salário base (R$)", min_value=0.0, step=0.01, value=0.0)
         with cc2:
             nova_funcao = st.text_input("Função")
             nova_empresa = st.text_input("Empresa", value="10 SUL")
+            nova_frente = st.selectbox("Frente", ["", "REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"])
 
         incluir = st.form_submit_button("➕ Cadastrar colaborador", type="primary")
         if incluir:
             try:
-                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa)
+                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None)
                 st.success("Colaborador cadastrado com sucesso.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Não foi possível cadastrar: {e}")
 
     st.markdown("#### Gerenciar colaboradores")
+    if st.session_state.get("rh_salarios_ref_erro"):
+        st.warning("Salário-base ainda não disponível no banco. Execute o SQL de atualização do Supabase uma única vez e recarregue a página.")
     st.caption("Altere o status e/ou a data de desligamento diretamente na tabela. Se houver data de desligamento, ela prevalece: do dia seguinte em diante a frequência será DEM, mesmo que o status ainda esteja ATIVO.")
 
     mostrar_inativos = st.checkbox("Mostrar colaboradores inativos", value=False)
@@ -1459,9 +1598,13 @@ with st.expander("👥 Cadastro de colaboradores"):
         cadastro_df["status"] = cadastro_df["status"].fillna("ATIVO").astype(str).str.upper()
         if "data_desligamento" not in cadastro_df.columns:
             cadastro_df["data_desligamento"] = None
+        if "salario_base" not in cadastro_df.columns:
+            cadastro_df["salario_base"] = None
+        if "frente" not in cadastro_df.columns:
+            cadastro_df["frente"] = None
 
         cols_editor = [c for c in [
-            "id", "cracha", "colaborador", "funcao", "empresa",
+            "id", "cracha", "colaborador", "funcao", "empresa", "salario_base", "frente",
             "status", "data_desligamento"
         ] if c in cadastro_df.columns]
 
@@ -1469,6 +1612,8 @@ with st.expander("👥 Cadastro de colaboradores"):
             str(r["id"]): str(r.get("status") or ("ATIVO" if r.get("ativo", True) else "INATIVO")).upper()
             for r in todos_cadastro
         }
+        original_salario = {str(r["id"]): (float(r.get("salario_base")) if r.get("salario_base") not in (None, "") else None) for r in todos_cadastro}
+        original_frente = {str(r["id"]): str(r.get("frente") or "").strip().upper() for r in todos_cadastro}
         original_desligamento = {}
         for r in todos_cadastro:
             _dd = pd.to_datetime(r.get("data_desligamento"), errors="coerce")
@@ -1478,13 +1623,15 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("status", "data_desligamento")],
+            disabled=[c for c in cols_editor if c not in ("status", "data_desligamento", "salario_base", "frente")],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
                 "colaborador": st.column_config.TextColumn("Colaborador"),
                 "funcao": st.column_config.TextColumn("Função"),
                 "empresa": st.column_config.TextColumn("Empresa"),
+                "salario_base": st.column_config.NumberColumn("Salário base (R$)", min_value=0.0, step=0.01, format="R$ %.2f"),
+                "frente": st.column_config.SelectboxColumn("Frente", options=["REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"], required=False),
                 "status": st.column_config.SelectboxColumn(
                     "Status",
                     options=["ATIVO", "INATIVO"],
@@ -1512,12 +1659,23 @@ with st.expander("👥 Cadastro de colaboradores"):
 
             # A data também é uma alteração válida mesmo que o status continue ATIVO.
             # Isso permite programar/registrar o desligamento e já aplicar DEM na frequência.
-            mudou = (novo_status != status_antigo) or (nova_dd != dd_antiga)
+            salario_val = linha.get("salario_base")
+            try:
+                novo_salario = None if pd.isna(salario_val) else round(float(salario_val), 2)
+            except Exception:
+                novo_salario = None
+            salario_antigo = original_salario.get(cid)
+            nova_frente = str(linha.get("frente") or "").strip().upper()
+            frente_antiga = original_frente.get(cid, "")
+            # Informar data de desligamento torna o colaborador INATIVO automaticamente.
+            if nova_dd is not None:
+                novo_status = "INATIVO"
+            mudou = (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga)
             if mudou:
                 if novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
                 else:
-                    alteracoes.append((linha, novo_status, nova_dd))
+                    alteracoes.append((linha, novo_status, nova_dd, novo_salario, nova_frente))
 
         if erros:
             st.warning(
@@ -1527,9 +1685,10 @@ with st.expander("👥 Cadastro de colaboradores"):
         if alteracoes:
             if st.button("💾 Salvar alterações do colaborador", type="primary"):
                 try:
-                    for linha, novo_status, data_desl in alteracoes:
+                    for linha, novo_status, data_desl, novo_salario, nova_frente in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
+                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"salario_base": novo_salario, "frente": nova_frente or None}, "return=minimal")
                     st.success("Cadastro atualizado com sucesso.")
                     st.rerun()
                 except Exception as e:
