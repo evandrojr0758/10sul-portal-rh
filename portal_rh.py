@@ -281,15 +281,22 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL"):
 
 
 def alterar_status_colaborador(colaborador_id, ativo, data_desligamento=None):
-    """Ativa/desativa o colaborador preservando o histórico."""
-    payload = {
-        "ativo": bool(ativo),
-        "status": "ATIVO" if ativo else "INATIVO",
-        "data_desligamento": None if ativo else (
+    """Atualiza status e/ou data de desligamento preservando o histórico.
+
+    A data de desligamento é independente do campo ATIVO/INATIVO: se existir,
+    ela prevalece na grade de frequência e gera DEM a partir do dia seguinte.
+    """
+    _data = None
+    if data_desligamento is not None and not pd.isna(data_desligamento):
+        _data = (
             data_desligamento.isoformat()
             if hasattr(data_desligamento, "isoformat")
             else str(data_desligamento)
-        ),
+        )
+    payload = {
+        "ativo": bool(ativo),
+        "status": "ATIVO" if ativo else "INATIVO",
+        "data_desligamento": _data,
     }
     sb(
         "PATCH",
@@ -1432,7 +1439,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                 st.error(f"Não foi possível cadastrar: {e}")
 
     st.markdown("#### Gerenciar colaboradores")
-    st.caption("Altere o status diretamente na tabela. Ao mudar para INATIVO, informe a data de desligamento e confirme.")
+    st.caption("Altere o status e/ou a data de desligamento diretamente na tabela. Se houver data de desligamento, ela prevalece: do dia seguinte em diante a frequência será DEM, mesmo que o status ainda esteja ATIVO.")
 
     mostrar_inativos = st.checkbox("Mostrar colaboradores inativos", value=False)
 
@@ -1462,6 +1469,10 @@ with st.expander("👥 Cadastro de colaboradores"):
             str(r["id"]): str(r.get("status") or ("ATIVO" if r.get("ativo", True) else "INATIVO")).upper()
             for r in todos_cadastro
         }
+        original_desligamento = {}
+        for r in todos_cadastro:
+            _dd = pd.to_datetime(r.get("data_desligamento"), errors="coerce")
+            original_desligamento[str(r["id"])] = _dd.date() if pd.notna(_dd) else None
 
         editado = st.data_editor(
             cadastro_df[cols_editor],
@@ -1493,12 +1504,20 @@ with st.expander("👥 Cadastro de colaboradores"):
             cid = str(linha["id"])
             novo_status = str(linha.get("status") or "ATIVO").upper()
             status_antigo = original_status.get(cid, "ATIVO")
-            if novo_status != status_antigo:
-                data_desl = linha.get("data_desligamento")
-                if novo_status == "INATIVO" and pd.isna(data_desl):
+
+            data_desl = linha.get("data_desligamento")
+            _nova_dd = pd.to_datetime(data_desl, errors="coerce")
+            nova_dd = _nova_dd.date() if pd.notna(_nova_dd) else None
+            dd_antiga = original_desligamento.get(cid)
+
+            # A data também é uma alteração válida mesmo que o status continue ATIVO.
+            # Isso permite programar/registrar o desligamento e já aplicar DEM na frequência.
+            mudou = (novo_status != status_antigo) or (nova_dd != dd_antiga)
+            if mudou:
+                if novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
                 else:
-                    alteracoes.append((linha, novo_status))
+                    alteracoes.append((linha, novo_status, nova_dd))
 
         if erros:
             st.warning(
@@ -1506,16 +1525,15 @@ with st.expander("👥 Cadastro de colaboradores"):
             )
 
         if alteracoes:
-            if st.button("💾 Confirmar alteração de status", type="primary"):
+            if st.button("💾 Salvar alterações do colaborador", type="primary"):
                 try:
-                    for linha, novo_status in alteracoes:
+                    for linha, novo_status, data_desl in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
-                        data_desl = None if ativo_novo else linha.get("data_desligamento")
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                    st.success("Status atualizado com sucesso.")
+                    st.success("Cadastro atualizado com sucesso.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Não foi possível atualizar o status: {e}")
+                    st.error(f"Não foi possível atualizar o cadastro: {e}")
     else:
         st.info("Nenhum colaborador encontrado para o filtro selecionado.")
 
