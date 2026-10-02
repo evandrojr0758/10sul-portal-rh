@@ -1354,16 +1354,50 @@ def tela_dna_seguranca():
             st.session_state[fp_key]=base_fp
             st.session_state[nonce_key]=int(st.session_state.get(nonce_key,0))+1
 
+    # Visualização rápida para cobrança/print dos DNAs pendentes.
+    filtro_key=f"dna_filtro_pendentes_{periodo}"
+    if filtro_key not in st.session_state:
+        st.session_state[filtro_key]=False
+
+    fb1, fb2, fb3 = st.columns([1.15, 1.0, 4.0])
+    with fb1:
+        if st.button("📋 Pendentes de DNA", key=f"dna_pendentes_{periodo}", use_container_width=True):
+            st.session_state[filtro_key]=True
+            st.session_state[nonce_key]=int(st.session_state.get(nonce_key,0))+1
+            st.rerun()
+    with fb2:
+        if st.button("👥 Mostrar todos", key=f"dna_todos_{periodo}", use_container_width=True):
+            st.session_state[filtro_key]=False
+            st.session_state[nonce_key]=int(st.session_state.get(nonce_key,0))+1
+            st.rerun()
+
+    draft=st.session_state[draft_key].copy()
+    if st.session_state.get(filtro_key, False):
+        st.markdown(f"### 📋 Pendências de DNA — {meses[mes_d-1]} / {int(ano_d)}")
+        st.caption(f"Posição em {hoje.strftime('%d/%m/%Y')} • Exibindo somente colaboradores com menos de 2 DNAs.")
+        exibido=draft[pd.to_numeric(draft["DNA"], errors="coerce").fillna(0) < 2].copy().reset_index(drop=True)
+        if exibido.empty:
+            st.success("✅ Todos os colaboradores atingiram o mínimo de 2 DNAs nesta competência.")
+    else:
+        exibido=draft.copy().reset_index(drop=True)
+
     editor_key=f"dna_editor_seg_{periodo}_{st.session_state.get(nonce_key,0)}"
+    nomes_exibidos=list(exibido["COLABORADOR"])
 
     def _dna_editor_changed():
         estado=st.session_state.get(editor_key, {}) or {}
         edits=estado.get("edited_rows", {}) or {}
         draft=st.session_state[draft_key].copy()
         for ridx, mudancas in edits.items():
-            try: i=int(ridx)
-            except Exception: continue
-            if i < 0 or i >= len(draft): continue
+            try:
+                pos=int(ridx)
+                nome_linha=nomes_exibidos[pos]
+            except Exception:
+                continue
+            alvo=draft.index[draft["COLABORADOR"].astype(str)==str(nome_linha)].tolist()
+            if not alvo:
+                continue
+            i=alvo[0]
             if "DNA" in mudancas:
                 try: q=max(0,int(mudancas.get("DNA") or 0))
                 except Exception: q=0
@@ -1373,9 +1407,8 @@ def tela_dna_seguranca():
         # recria o editor com o rascunho atualizado; assim o STATUS muda na hora
         st.session_state[nonce_key]=int(st.session_state.get(nonce_key,0))+1
 
-    draft=st.session_state[draft_key].copy()
     edit=st.data_editor(
-        draft,
+        exibido,
         use_container_width=True,
         hide_index=True,
         disabled=["DESTRA","COLABORADOR","STATUS GRATIFICAÇÃO"] if pode else list(draft.columns),
