@@ -1007,7 +1007,11 @@ with _rankings_topo:
                 title=None,
                 axis=alt.Axis(labelAngle=-35, labelLimit=150),
             ),
-            xOffset=alt.XOffset("TIPO:N", sort=["FALTAS", "ATESTADOS"]),
+            xOffset=alt.XOffset(
+                "TIPO:N",
+                sort=["FALTAS", "ATESTADOS"],
+                scale=alt.Scale(paddingInner=0.02, paddingOuter=0.02),
+            ),
             y=alt.Y(
                 "QTD:Q",
                 title="Quantidade",
@@ -1017,6 +1021,10 @@ with _rankings_topo:
                 "TIPO:N",
                 title=None,
                 sort=["FALTAS", "ATESTADOS"],
+                scale=alt.Scale(
+                    domain=["FALTAS", "ATESTADOS"],
+                    range=["#E53935", "#FB8C00"],
+                ),
                 legend=alt.Legend(orient="bottom"),
             ),
             tooltip=[
@@ -1026,7 +1034,7 @@ with _rankings_topo:
             ],
         )
 
-        _barras_rank = _base_rank.mark_bar(size=28)
+        _barras_rank = _base_rank.mark_bar(size=34)
         _rotulos_rank = _base_rank.mark_text(
             dy=-8,
             fontSize=13,
