@@ -389,7 +389,7 @@ def ler_colaboradores():
     return sorted(rows, key=lambda r: _nome_colaborador(r).upper())
 
 
-def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None):
+def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None, destra=None):
     nome = str(nome or "").strip().upper()
     if not nome:
         raise ValueError("Informe o nome do colaborador.")
@@ -411,6 +411,7 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_
         "ativo": True,
         "salario_base": salario_base,
         "frente": str(frente or "").strip().upper() or None,
+        "destra": str(destra or "").strip() or None,
     }
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
@@ -705,6 +706,33 @@ def _tabela_ocorrencias_disponivel():
         return True
     except Exception:
         return False
+
+# ==========================================================
+# CONTROLE DE DNA / SEGURANÇA DO TRABALHO
+# ==========================================================
+SENHA_ADMIN_RH = "28266451"
+
+def ler_dnas(ano, mes):
+    ini = f"{int(ano):04d}-{int(mes):02d}-01"
+    fim = f"{int(ano):04d}-{int(mes):02d}-{calendar.monthrange(int(ano), int(mes))[1]:02d}"
+    params = (
+        "select=*&data=gte." + urllib.parse.quote(ini) +
+        "&data=lte." + urllib.parse.quote(fim) +
+        "&order=data.asc"
+    )
+    return sb("GET", "rh_dna", params) or []
+
+def salvar_dna(colaborador_id, data_dna, registrado_por="SEGURANÇA DO TRABALHO"):
+    payload = {"colaborador_id": int(colaborador_id), "data": data_dna.isoformat(), "registrado_por": str(registrado_por or "SEGURANÇA DO TRABALHO").strip().upper()}
+    sb("POST", "rh_dna", "", payload, "return=minimal")
+
+def excluir_dna(dna_id):
+    sb("DELETE", "rh_dna", "id=eq." + urllib.parse.quote(str(int(dna_id))))
+
+def competencia_dna_fechada(ano, mes, hoje_ref=None):
+    hoje_ref = hoje_ref or date.today()
+    limite = date(int(ano) + 1, 1, 10) if int(mes) == 12 else date(int(ano), int(mes) + 1, 10)
+    return hoje_ref >= limite, limite
 
 st.markdown("""
 <style>
@@ -1552,6 +1580,76 @@ if alteracoes:
         except Exception as e:
             st.error(f"Não foi possível salvar: {e}")
 
+# ==========================================================
+# TELA — CONTROLE DE DNA
+# ==========================================================
+with st.expander("🦺 Controle de DNA — Segurança do Trabalho"):
+    st.caption("Registre os DNAs por colaborador. A meta para gratificação é de no mínimo 2 DNAs na competência.")
+    _dna_fechado, _dna_limite = competencia_dna_fechada(int(ano), mes, hoje)
+    _dna_unlock_key = f"dna_desbloqueado_{int(ano)}_{mes}"
+    _dna_desbloqueado = bool(st.session_state.get(_dna_unlock_key, False))
+    if _dna_fechado and not _dna_desbloqueado:
+        st.warning(f"🔒 Competência fechada desde {_dna_limite.strftime('%d/%m/%Y')}. Para incluir ou excluir DNA é necessária a senha administrativa.")
+        _senha_dna = st.text_input("Senha para liberar edição do DNA", type="password", key=f"senha_dna_{int(ano)}_{mes}")
+        if st.button("🔓 Liberar edição", key=f"liberar_dna_{int(ano)}_{mes}"):
+            if _senha_dna == SENHA_ADMIN_RH:
+                st.session_state[_dna_unlock_key] = True
+                st.rerun()
+            else:
+                st.error("Senha incorreta.")
+    elif _dna_fechado and _dna_desbloqueado:
+        st.info("🔓 Competência fechada, mas a edição está liberada nesta sessão por senha administrativa.")
+        if st.button("🔒 Bloquear novamente", key=f"bloquear_dna_{int(ano)}_{mes}"):
+            st.session_state.pop(_dna_unlock_key, None)
+            st.rerun()
+    else:
+        st.caption(f"Prazo de lançamento desta competência: até {_dna_limite.strftime('%d/%m/%Y')}.")
+    _pode_editar_dna = (not _dna_fechado) or _dna_desbloqueado
+    try:
+        _dnas = ler_dnas(int(ano), mes)
+        _colabs_dna = sorted(_todos_cad, key=lambda r: _nome_colaborador(r).upper())
+        _nomes_dna = {_nome_colaborador(c): c for c in _colabs_dna if _nome_colaborador(c)}
+        if _pode_editar_dna and _nomes_dna:
+            with st.form(f"form_dna_{int(ano)}_{mes}", clear_on_submit=True):
+                _dc1, _dc2, _dc3 = st.columns([2.2, 1, 1.4])
+                with _dc1: _dna_nome = st.selectbox("Colaborador", list(_nomes_dna.keys()))
+                with _dc2: _dna_data = st.date_input("Data do DNA", value=min(hoje, date(int(ano), mes, ultimo_mes)))
+                with _dc3: _dna_resp = st.text_input("Lançado por", value="SEGURANÇA DO TRABALHO")
+                if st.form_submit_button("➕ Lançar DNA", type="primary"):
+                    if _dna_data.year != int(ano) or _dna_data.month != mes:
+                        st.error("A data do DNA precisa pertencer à competência selecionada.")
+                    else:
+                        salvar_dna(int(_nomes_dna[_dna_nome]["id"]), _dna_data, _dna_resp)
+                        st.rerun()
+        _nome_por_id_dna = {int(c["id"]): _nome_colaborador(c) for c in _colabs_dna if c.get("id") is not None}
+        _contagem_dna = {}
+        for _r in _dnas:
+            _cid_dna = int(_r.get("colaborador_id")); _contagem_dna[_cid_dna] = _contagem_dna.get(_cid_dna, 0) + 1
+        _resumo_dna = []
+        for _c in _colabs_dna:
+            if _c.get("id") is None: continue
+            _cid_dna = int(_c["id"]); _qtd_dna = int(_contagem_dna.get(_cid_dna, 0))
+            _resumo_dna.append({"DESTRA": str(_c.get("destra") or ""), "COLABORADOR": _nome_colaborador(_c), "DNA": _qtd_dna, "STATUS GRATIFICAÇÃO": "✅ ATENDE" if _qtd_dna >= 2 else "❌ NÃO ATENDE"})
+        if _resumo_dna:
+            st.markdown("#### Acompanhamento mensal")
+            st.dataframe(pd.DataFrame(_resumo_dna), use_container_width=True, hide_index=True)
+        if _dnas:
+            st.markdown("#### Lançamentos do mês")
+            _linhas_dna = []
+            for _r in _dnas:
+                _linhas_dna.append({"ID": _r.get("id"), "COLABORADOR": _nome_por_id_dna.get(int(_r.get("colaborador_id")), str(_r.get("colaborador_id"))), "DATA": pd.to_datetime(_r.get("data"), errors="coerce").strftime("%d/%m/%Y"), "LANÇADO POR": str(_r.get("registrado_por") or "")})
+            st.dataframe(pd.DataFrame(_linhas_dna), use_container_width=True, hide_index=True)
+            if _pode_editar_dna:
+                _ids_excluir = [int(r.get("id")) for r in _dnas if r.get("id") is not None]
+                _id_exc = st.selectbox("Excluir lançamento (ID)", [""] + _ids_excluir, key=f"dna_excluir_{int(ano)}_{mes}")
+                if _id_exc != "" and st.button("🗑️ Excluir DNA selecionado", key=f"btn_exc_dna_{int(ano)}_{mes}"):
+                    excluir_dna(int(_id_exc)); st.rerun()
+        else:
+            st.caption("Nenhum DNA lançado nesta competência.")
+    except Exception as e:
+        st.error("A estrutura do Controle de DNA ainda não está disponível no Supabase. Execute o SQL desta versão uma única vez.")
+        st.caption(str(e))
+
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
 
@@ -1560,6 +1658,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         with cc1:
             novo_nome = st.text_input("Colaborador *")
             novo_cracha = st.text_input("Crachá")
+            novo_destra = st.text_input("DESTRA")
             novo_salario = st.number_input("Salário base (R$)", min_value=0.0, step=0.01, value=0.0)
         with cc2:
             nova_funcao = st.text_input("Função")
@@ -1569,7 +1668,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         incluir = st.form_submit_button("➕ Cadastrar colaborador", type="primary")
         if incluir:
             try:
-                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None)
+                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None, novo_destra or None)
                 st.success("Colaborador cadastrado com sucesso.")
                 st.rerun()
             except Exception as e:
@@ -1602,9 +1701,11 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df["salario_base"] = None
         if "frente" not in cadastro_df.columns:
             cadastro_df["frente"] = None
+        if "destra" not in cadastro_df.columns:
+            cadastro_df["destra"] = None
 
         cols_editor = [c for c in [
-            "id", "cracha", "colaborador", "funcao", "empresa", "salario_base", "frente",
+            "id", "cracha", "destra", "colaborador", "funcao", "empresa", "salario_base", "frente",
             "status", "data_desligamento"
         ] if c in cadastro_df.columns]
 
@@ -1614,6 +1715,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         }
         original_salario = {str(r["id"]): (float(r.get("salario_base")) if r.get("salario_base") not in (None, "") else None) for r in todos_cadastro}
         original_frente = {str(r["id"]): str(r.get("frente") or "").strip().upper() for r in todos_cadastro}
+        original_destra = {str(r["id"]): str(r.get("destra") or "").strip() for r in todos_cadastro}
         original_desligamento = {}
         for r in todos_cadastro:
             _dd = pd.to_datetime(r.get("data_desligamento"), errors="coerce")
@@ -1623,10 +1725,11 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("status", "data_desligamento", "salario_base", "frente")],
+            disabled=[c for c in cols_editor if c not in ("status", "data_desligamento", "salario_base", "frente", "destra")],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
+                "destra": st.column_config.TextColumn("DESTRA"),
                 "colaborador": st.column_config.TextColumn("Colaborador"),
                 "funcao": st.column_config.TextColumn("Função"),
                 "empresa": st.column_config.TextColumn("Empresa"),
@@ -1667,15 +1770,17 @@ with st.expander("👥 Cadastro de colaboradores"):
             salario_antigo = original_salario.get(cid)
             nova_frente = str(linha.get("frente") or "").strip().upper()
             frente_antiga = original_frente.get(cid, "")
+            nova_destra = str(linha.get("destra") or "").strip()
+            destra_antiga = original_destra.get(cid, "")
             # Informar data de desligamento torna o colaborador INATIVO automaticamente.
             if nova_dd is not None:
                 novo_status = "INATIVO"
-            mudou = (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga)
+            mudou = (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga)
             if mudou:
                 if novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
                 else:
-                    alteracoes.append((linha, novo_status, nova_dd, novo_salario, nova_frente))
+                    alteracoes.append((linha, novo_status, nova_dd, novo_salario, nova_frente, nova_destra))
 
         if erros:
             st.warning(
@@ -1685,10 +1790,10 @@ with st.expander("👥 Cadastro de colaboradores"):
         if alteracoes:
             if st.button("💾 Salvar alterações do colaborador", type="primary"):
                 try:
-                    for linha, novo_status, data_desl, novo_salario, nova_frente in alteracoes:
+                    for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"salario_base": novo_salario, "frente": nova_frente or None}, "return=minimal")
+                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None}, "return=minimal")
                     st.success("Cadastro atualizado com sucesso.")
                     st.rerun()
                 except Exception as e:
