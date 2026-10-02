@@ -1001,6 +1001,21 @@ def tela_apuracao_gratificacao():
     cod_por_id={int(o["id"]):str(o.get("codigo") or "").upper() for o in ocorr_status if o.get("id") is not None}
     dna_por={int(r["colaborador_id"]):int(r.get("quantidade") or 0) for r in dna_regs if r.get("colaborador_id") is not None}
     ap_por={int(r["colaborador_id"]):r for r in ap_regs if r.get("colaborador_id") is not None}
+    # A gratificação SEMPRE usa somente a frequência já persistida no Supabase.
+    # Se existir rascunho/alteração pendente na tela de frequência desta mesma competência,
+    # deixa isso explícito para evitar interpretar a grade editada como dado já salvo.
+    _periodo_grat = f"{int(ano_g)}_{int(mes_g)}"
+    _drafts_pendentes = [
+        k for k, v in st.session_state.items()
+        if str(k).startswith("rh_grade_draft_") and _periodo_grat in str(k) and isinstance(v, pd.DataFrame)
+    ]
+    if _drafts_pendentes:
+        st.info(
+            "ℹ️ A apuração considera os lançamentos **salvos no RH**. "
+            "Se você acabou de trocar FALTA por ATESTADO na frequência, confirme a alteração com a senha/motivo "
+            "e clique em **💾 Salvar alterações** antes de conferir a gratificação."
+        )
+
     faltas={}; atest={}
     for f in freq:
         cid=int(f.get("colaborador_id") or 0); cod=cod_por_id.get(int(f.get("ocorrencia_id") or 0),"")
@@ -1044,13 +1059,33 @@ def tela_apuracao_gratificacao():
             if at>=int(demais.get("atestados_zera_tudo") or 2): valor=0; motivos.append(f"{at} dias de atestado")
             elif at==1:
                 desc=float(demais.get("desconto_1_atestado_percentual") or 20); valor=integral*(1-desc/100); motivos.append(f"1 dia de atestado (-{desc:.0f}%)")
-        status="⏳ PENDENTE" if valor is None else ("❌ ZERADA" if valor<=0 else "✅ ELEGÍVEL")
+        status="⏳ PENDENTE" if valor is None else ("❌ ZERADA" if valor<=0 else ("✅ INTEGRAL" if abs(float(valor)-float(integral)) < 0.01 else "🟠 PARCIAL"))
         ids[nome]=cid
         linhas.append({"COLABORADOR":nome,"FRENTE":frente,"SALÁRIO":sal,"EQUIPE REVISÃO":equipe,"MÉDIA TEMPO (h)":media,"FALTAS":fa,"ATESTADOS (dias)":at,"DNA":dna,"DESVIOS":des,"INTEGRAL":integral,"GRATIFICAÇÃO":valor,"STATUS":status,"MOTIVO / CÁLCULO":" • ".join(motivos) if motivos else "Requisitos atendidos"})
     if not linhas:
         st.info("Nenhum colaborador com frente de gratificação definida para esta competência."); return
     df=pd.DataFrame(linhas)
     st.caption("Edite somente **EQUIPE REVISÃO** e **MÉDIA TEMPO (h)**. Os demais campos são calculados pelo sistema.")
+    _grat_key=f"grat_editor_{ano_g}_{mes_g}"
+
+    def _salvar_edicao_gratificacao_imediata():
+        estado=st.session_state.get(_grat_key) or {}
+        alteradas=estado.get("edited_rows") or {}
+        if not alteradas:
+            return
+        usuario=usr.get("nome") or usr.get("usuario")
+        for idx_txt, mudancas in alteradas.items():
+            try:
+                idx=int(idx_txt)
+                base=df.iloc[idx]
+                if str(base["FRENTE"]).upper() != "REVISÃO":
+                    continue
+                equipe=mudancas.get("EQUIPE REVISÃO", base["EQUIPE REVISÃO"])
+                media=mudancas.get("MÉDIA TEMPO (h)", base["MÉDIA TEMPO (h)"])
+                salvar_apuracao_manual(ids[base["COLABORADOR"]],ano_g,mes_g,equipe,media,None,usuario)
+            except Exception:
+                continue
+
     edit=st.data_editor(df,use_container_width=True,hide_index=True,height=min(760,90+len(df)*35),
         disabled=[c for c in df.columns if c not in ("EQUIPE REVISÃO","MÉDIA TEMPO (h)")],
         column_config={
@@ -1059,7 +1094,7 @@ def tela_apuracao_gratificacao():
             "GRATIFICAÇÃO":st.column_config.NumberColumn("GRATIFICAÇÃO",format="R$ %.2f"),
             "EQUIPE REVISÃO":st.column_config.SelectboxColumn("EQUIPE REVISÃO",options=["","EQUIPE 1","EQUIPE 2"],required=False),
             "MÉDIA TEMPO (h)":st.column_config.NumberColumn("MÉDIA TEMPO (h)",min_value=0.0,step=0.1,format="%.2f"),
-        },key=f"grat_editor_{ano_g}_{mes_g}")
+        },key=_grat_key,on_change=_salvar_edicao_gratificacao_imediata)
     if st.button("💾 Salvar dados manuais da apuração",type="primary",key=f"grat_salvar_{ano_g}_{mes_g}"):
         try:
             for _,r in edit.iterrows():
@@ -1778,6 +1813,10 @@ for i, cid in enumerate(ids):
 
 if alteracoes:
     st.markdown("#### Alterações pendentes")
+    st.warning(
+        f"⚠️ Existem **{len(alteracoes)} alteração(ões) ainda não gravada(s)**. "
+        "Enquanto não clicar em **💾 Salvar alterações**, relatórios e a tela de Gratificação continuarão usando o valor anterior salvo no banco."
+    )
 
     # Registros que já existem no Supabase são consolidados. Qualquer edição deles
     # exige a senha administrativa, inclusive após F5 ou em outro computador.
