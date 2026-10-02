@@ -4,6 +4,7 @@ import calendar
 import urllib.request
 import urllib.error
 import urllib.parse
+import hashlib
 from datetime import datetime, date
 from io import BytesIO
 
@@ -708,32 +709,131 @@ def _tabela_ocorrencias_disponivel():
         return False
 
 # ==========================================================
-# CONTROLE DE DNA / SEGURANÇA DO TRABALHO
+# ACESSO POR PERFIL + CONTROLE DE DNA
 # ==========================================================
-SENHA_ADMIN_RH = "28266451"
 
-def ler_dnas(ano, mes):
-    ini = f"{int(ano):04d}-{int(mes):02d}-01"
-    fim = f"{int(ano):04d}-{int(mes):02d}-{calendar.monthrange(int(ano), int(mes))[1]:02d}"
-    params = (
-        "select=*&data=gte." + urllib.parse.quote(ini) +
-        "&data=lte." + urllib.parse.quote(fim) +
-        "&order=data.asc"
-    )
-    return sb("GET", "rh_dna", params) or []
+def _hash_senha(valor):
+    return hashlib.sha256(str(valor or "").encode("utf-8")).hexdigest()
 
-def salvar_dna(colaborador_id, data_dna, registrado_por="SEGURANÇA DO TRABALHO"):
-    payload = {"colaborador_id": int(colaborador_id), "data": data_dna.isoformat(), "registrado_por": str(registrado_por or "SEGURANÇA DO TRABALHO").strip().upper()}
-    sb("POST", "rh_dna", "", payload, "return=minimal")
-
-def excluir_dna(dna_id):
-    sb("DELETE", "rh_dna", "id=eq." + urllib.parse.quote(str(int(dna_id))))
+def autenticar_usuario(usuario, senha):
+    usuario = str(usuario or "").strip().lower()
+    if not usuario or not senha:
+        return None
+    params = "select=id,usuario,nome,perfil,ativo,senha_hash&usuario=eq." + urllib.parse.quote(usuario) + "&limit=1"
+    regs = sb("GET", "rh_usuarios", params) or []
+    if not regs:
+        return None
+    r = regs[0]
+    if not bool(r.get("ativo", True)):
+        return None
+    if str(r.get("senha_hash") or "") != _hash_senha(senha):
+        return None
+    return {"id": r.get("id"), "usuario": r.get("usuario"), "nome": r.get("nome") or r.get("usuario"), "perfil": str(r.get("perfil") or "").upper()}
 
 def competencia_dna_fechada(ano, mes, hoje_ref=None):
     hoje_ref = hoje_ref or date.today()
     limite = date(int(ano) + 1, 1, 10) if int(mes) == 12 else date(int(ano), int(mes) + 1, 10)
     return hoje_ref >= limite, limite
 
+def ler_dna_mensal(ano, mes):
+    competencia = f"{int(ano):04d}-{int(mes):02d}-01"
+    params = "select=*&competencia=eq." + urllib.parse.quote(competencia)
+    return sb("GET", "rh_dna_mensal", params) or []
+
+def salvar_dna_mensal(colaborador_id, ano, mes, quantidade, atualizado_por):
+    competencia = f"{int(ano):04d}-{int(mes):02d}-01"
+    payload = {
+        "colaborador_id": int(colaborador_id),
+        "competencia": competencia,
+        "quantidade": max(0, int(quantidade or 0)),
+        "atualizado_por": str(atualizado_por or "").strip().upper(),
+        "atualizado_em": datetime.now().isoformat(timespec="seconds"),
+    }
+    sb("POST", "rh_dna_mensal", "on_conflict=colaborador_id,competencia", payload, "resolution=merge-duplicates,return=minimal")
+
+def tela_login():
+    st.markdown("<div style='height:8vh'></div>", unsafe_allow_html=True)
+    c1,c2,c3=st.columns([1,1.15,1])
+    with c2:
+        st.markdown("## 👥 Portal RH — Aracruz")
+        st.caption("10 Sul • Acesso restrito")
+        with st.form("form_login_portal"):
+            u=st.text_input("Usuário")
+            pw=st.text_input("Senha", type="password")
+            entrar=st.form_submit_button("Entrar", type="primary", use_container_width=True)
+        if entrar:
+            try:
+                dados=autenticar_usuario(u,pw)
+                if dados:
+                    st.session_state["usuario_logado"]=dados
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha inválidos.")
+            except Exception as e:
+                st.error("Não foi possível validar o acesso. Execute o SQL de usuários desta versão no Supabase.")
+                st.caption(str(e))
+
+def cabecalho_sessao():
+    usr=st.session_state.get("usuario_logado") or {}
+    a,b=st.columns([8,2], vertical_alignment="center")
+    with b:
+        st.caption(f"👤 {usr.get('nome','')} • {usr.get('perfil','')}")
+        if st.button("Sair", key="logout_portal", use_container_width=True):
+            st.session_state.pop("usuario_logado",None)
+            st.rerun()
+
+def tela_dna_seguranca():
+    usr=st.session_state.get("usuario_logado") or {}
+    cabecalho_sessao()
+    st.title("🦺 Controle de DNA — Segurança do Trabalho")
+    st.caption("Informe somente a quantidade de DNAs realizados por colaborador em cada competência.")
+    hoje=date.today(); meses=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+    a,b,c=st.columns([1.2,.7,2.5])
+    with a: mes_d=st.selectbox("Mês", range(1,13), index=hoje.month-1, format_func=lambda x: meses[x-1], key="dna_mes_seg")
+    with b: ano_d=st.number_input("Ano", min_value=2025, max_value=2100, value=hoje.year, step=1, key="dna_ano_seg")
+    with c: st.markdown(f"### {meses[mes_d-1].upper()} / {int(ano_d)}")
+    fechado, limite=competencia_dna_fechada(int(ano_d), mes_d, hoje)
+    unlock_key=f"dna_seg_unlock_{int(ano_d)}_{mes_d}"
+    liberado=bool(st.session_state.get(unlock_key,False))
+    if fechado and not liberado:
+        st.warning(f"🔒 Competência fechada desde {limite.strftime('%d/%m/%Y')}. Alterações após o prazo exigem autorização do RH/Administrador.")
+        with st.expander("🔐 Desbloquear competência"):
+            su=st.text_input("Usuário RH/Administrador", key=f"dna_auth_u_{ano_d}_{mes_d}")
+            sp=st.text_input("Senha", type="password", key=f"dna_auth_p_{ano_d}_{mes_d}")
+            if st.button("Liberar edição", key=f"dna_auth_b_{ano_d}_{mes_d}"):
+                aut=autenticar_usuario(su,sp)
+                if aut and aut.get("perfil") in ("RH","ADMIN"):
+                    st.session_state[unlock_key]=True; st.rerun()
+                else: st.error("Autorização inválida.")
+    elif fechado and liberado:
+        st.info("🔓 Competência liberada nesta sessão por autorização.")
+    else:
+        st.caption(f"Prazo para lançamento desta competência: até {limite.strftime('%d/%m/%Y')}.")
+    pode=(not fechado) or liberado
+    colabs=sb("GET","rh_colaboradores","select=*&order=colaborador.asc") or []
+    regs=ler_dna_mensal(int(ano_d),mes_d)
+    qtd_por={int(r['colaborador_id']):int(r.get('quantidade') or 0) for r in regs if r.get('colaborador_id') is not None}
+    linhas=[]
+    id_por_nome={}
+    for col in colabs:
+        if not bool(col.get("ativo",True)): continue
+        cid=int(col['id']); nome=_nome_colaborador(col); id_por_nome[nome]=cid
+        q=qtd_por.get(cid,0)
+        linhas.append({"DESTRA":str(col.get("destra") or ""),"COLABORADOR":nome,"DNA":q,"STATUS GRATIFICAÇÃO":"✅ ATENDE" if q>=2 else "❌ NÃO ATENDE"})
+    df=pd.DataFrame(linhas)
+    if df.empty:
+        st.info("Nenhum colaborador ativo encontrado."); return
+    edit=st.data_editor(df,use_container_width=True,hide_index=True,disabled=["DESTRA","COLABORADOR","STATUS GRATIFICAÇÃO"] if pode else list(df.columns),column_config={"DNA":st.column_config.NumberColumn("DNA",min_value=0,step=1,format="%d")},key=f"dna_editor_seg_{ano_d}_{mes_d}",height=min(780,80+len(df)*35))
+    if pode and st.button("💾 Salvar DNA", type="primary", key=f"dna_salvar_seg_{ano_d}_{mes_d}"):
+        try:
+            alterados=0
+            for i,row in edit.iterrows():
+                nome=row["COLABORADOR"]; novo=int(row["DNA"] or 0); antigo=int(df.loc[i,"DNA"] or 0)
+                if novo!=antigo:
+                    salvar_dna_mensal(id_por_nome[nome],int(ano_d),mes_d,novo,usr.get("nome") or usr.get("usuario")); alterados+=1
+            st.success(f"{alterados} alteração(ões) salva(s).")
+            st.rerun()
+        except Exception as e: st.error(f"Não foi possível salvar: {e}")
 st.markdown("""
 <style>
 .block-container{padding-top:1.25rem;max-width:98%}
@@ -847,6 +947,27 @@ def abrir_ficha_colaborador(colaborador):
         st.dataframe(_hist_df, use_container_width=True, hide_index=True)
     else:
         st.caption("Nenhuma ocorrência individual registrada para este colaborador.")
+
+# ==========================================================
+# LOGIN / ROTEAMENTO POR PERFIL
+# ==========================================================
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
+    st.stop()
+
+if not st.session_state.get("usuario_logado"):
+    tela_login()
+    st.stop()
+
+_perfil_atual = str(st.session_state["usuario_logado"].get("perfil") or "").upper()
+if _perfil_atual == "SEGURANCA":
+    tela_dna_seguranca()
+    st.stop()
+if _perfil_atual not in ("RH", "ADMIN"):
+    st.error("Seu perfil não possui acesso a este portal.")
+    st.stop()
+
+cabecalho_sessao()
 
 _titulo, _ajuda = st.columns([8.8, 1.2], vertical_alignment="center")
 with _titulo:
@@ -1579,76 +1700,6 @@ if alteracoes:
             st.rerun()
         except Exception as e:
             st.error(f"Não foi possível salvar: {e}")
-
-# ==========================================================
-# TELA — CONTROLE DE DNA
-# ==========================================================
-with st.expander("🦺 Controle de DNA — Segurança do Trabalho"):
-    st.caption("Registre os DNAs por colaborador. A meta para gratificação é de no mínimo 2 DNAs na competência.")
-    _dna_fechado, _dna_limite = competencia_dna_fechada(int(ano), mes, hoje)
-    _dna_unlock_key = f"dna_desbloqueado_{int(ano)}_{mes}"
-    _dna_desbloqueado = bool(st.session_state.get(_dna_unlock_key, False))
-    if _dna_fechado and not _dna_desbloqueado:
-        st.warning(f"🔒 Competência fechada desde {_dna_limite.strftime('%d/%m/%Y')}. Para incluir ou excluir DNA é necessária a senha administrativa.")
-        _senha_dna = st.text_input("Senha para liberar edição do DNA", type="password", key=f"senha_dna_{int(ano)}_{mes}")
-        if st.button("🔓 Liberar edição", key=f"liberar_dna_{int(ano)}_{mes}"):
-            if _senha_dna == SENHA_ADMIN_RH:
-                st.session_state[_dna_unlock_key] = True
-                st.rerun()
-            else:
-                st.error("Senha incorreta.")
-    elif _dna_fechado and _dna_desbloqueado:
-        st.info("🔓 Competência fechada, mas a edição está liberada nesta sessão por senha administrativa.")
-        if st.button("🔒 Bloquear novamente", key=f"bloquear_dna_{int(ano)}_{mes}"):
-            st.session_state.pop(_dna_unlock_key, None)
-            st.rerun()
-    else:
-        st.caption(f"Prazo de lançamento desta competência: até {_dna_limite.strftime('%d/%m/%Y')}.")
-    _pode_editar_dna = (not _dna_fechado) or _dna_desbloqueado
-    try:
-        _dnas = ler_dnas(int(ano), mes)
-        _colabs_dna = sorted(_todos_cad, key=lambda r: _nome_colaborador(r).upper())
-        _nomes_dna = {_nome_colaborador(c): c for c in _colabs_dna if _nome_colaborador(c)}
-        if _pode_editar_dna and _nomes_dna:
-            with st.form(f"form_dna_{int(ano)}_{mes}", clear_on_submit=True):
-                _dc1, _dc2, _dc3 = st.columns([2.2, 1, 1.4])
-                with _dc1: _dna_nome = st.selectbox("Colaborador", list(_nomes_dna.keys()))
-                with _dc2: _dna_data = st.date_input("Data do DNA", value=min(hoje, date(int(ano), mes, ultimo_mes)))
-                with _dc3: _dna_resp = st.text_input("Lançado por", value="SEGURANÇA DO TRABALHO")
-                if st.form_submit_button("➕ Lançar DNA", type="primary"):
-                    if _dna_data.year != int(ano) or _dna_data.month != mes:
-                        st.error("A data do DNA precisa pertencer à competência selecionada.")
-                    else:
-                        salvar_dna(int(_nomes_dna[_dna_nome]["id"]), _dna_data, _dna_resp)
-                        st.rerun()
-        _nome_por_id_dna = {int(c["id"]): _nome_colaborador(c) for c in _colabs_dna if c.get("id") is not None}
-        _contagem_dna = {}
-        for _r in _dnas:
-            _cid_dna = int(_r.get("colaborador_id")); _contagem_dna[_cid_dna] = _contagem_dna.get(_cid_dna, 0) + 1
-        _resumo_dna = []
-        for _c in _colabs_dna:
-            if _c.get("id") is None: continue
-            _cid_dna = int(_c["id"]); _qtd_dna = int(_contagem_dna.get(_cid_dna, 0))
-            _resumo_dna.append({"DESTRA": str(_c.get("destra") or ""), "COLABORADOR": _nome_colaborador(_c), "DNA": _qtd_dna, "STATUS GRATIFICAÇÃO": "✅ ATENDE" if _qtd_dna >= 2 else "❌ NÃO ATENDE"})
-        if _resumo_dna:
-            st.markdown("#### Acompanhamento mensal")
-            st.dataframe(pd.DataFrame(_resumo_dna), use_container_width=True, hide_index=True)
-        if _dnas:
-            st.markdown("#### Lançamentos do mês")
-            _linhas_dna = []
-            for _r in _dnas:
-                _linhas_dna.append({"ID": _r.get("id"), "COLABORADOR": _nome_por_id_dna.get(int(_r.get("colaborador_id")), str(_r.get("colaborador_id"))), "DATA": pd.to_datetime(_r.get("data"), errors="coerce").strftime("%d/%m/%Y"), "LANÇADO POR": str(_r.get("registrado_por") or "")})
-            st.dataframe(pd.DataFrame(_linhas_dna), use_container_width=True, hide_index=True)
-            if _pode_editar_dna:
-                _ids_excluir = [int(r.get("id")) for r in _dnas if r.get("id") is not None]
-                _id_exc = st.selectbox("Excluir lançamento (ID)", [""] + _ids_excluir, key=f"dna_excluir_{int(ano)}_{mes}")
-                if _id_exc != "" and st.button("🗑️ Excluir DNA selecionado", key=f"btn_exc_dna_{int(ano)}_{mes}"):
-                    excluir_dna(int(_id_exc)); st.rerun()
-        else:
-            st.caption("Nenhum DNA lançado nesta competência.")
-    except Exception as e:
-        st.error("A estrutura do Controle de DNA ainda não está disponível no Supabase. Execute o SQL desta versão uma única vez.")
-        st.caption(str(e))
 
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
