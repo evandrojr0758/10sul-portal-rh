@@ -1261,16 +1261,29 @@ def tela_apuracao_gratificacao():
             except Exception as e:
                 st.error(f"Não foi possível salvar a média individual de {nome_ed}: {e}")
 
-    # O botão/checkbox 🔎 VER fica ao lado do MOTIVO / CÁLCULO e abre o detalhamento dos desvios.
+    # Abre o detalhamento de desvios somente uma vez por marcação.
+    # Isso evita reabrir o dialog em todo rerun e impede conflito com a Ficha do Colaborador.
+    _chave_desvio_tratado = f"grat_desvio_tratado_{ano_g}_{mes_g}"
+    _marcados_agora = []
     for pos in range(len(editado_grat)):
         if bool(editado_grat.iloc[pos].get("VER DESVIOS", False)):
-            linha_sel = editado_grat.iloc[pos]
-            nome_sel = str(linha_sel["COLABORADOR"])
-            if int(linha_sel.get("DESVIOS", 0) or 0) > 0:
-                _abrir_modal_desvios_grat(nome_sel, ids.get(nome_sel), oc_impactantes)
-            else:
-                st.info(f"{nome_sel} não possui desvio que retire a bonificação nesta competência.")
-            break
+            _marcados_agora.append(str(editado_grat.iloc[pos]["COLABORADOR"]))
+
+    _tratados = set(st.session_state.get(_chave_desvio_tratado, []))
+    # Se o usuário desmarcou uma linha, ela volta a poder abrir no próximo clique.
+    _tratados.intersection_update(_marcados_agora)
+    _novo_clique = next((n for n in _marcados_agora if n not in _tratados), None)
+
+    if _novo_clique:
+        _tratados.add(_novo_clique)
+        st.session_state[_chave_desvio_tratado] = list(_tratados)
+        _linha_sel = editado_grat[editado_grat["COLABORADOR"].astype(str) == _novo_clique].iloc[0]
+        if int(_linha_sel.get("DESVIOS", 0) or 0) > 0:
+            _abrir_modal_desvios_grat(_novo_clique, ids.get(_novo_clique), oc_impactantes)
+        else:
+            st.info(f"{_novo_clique} não possui desvio que retire a bonificação nesta competência.")
+    else:
+        st.session_state[_chave_desvio_tratado] = list(_tratados)
 
     if alterou_media:
         st.rerun()
