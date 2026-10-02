@@ -1298,10 +1298,14 @@ def tela_dna_seguranca():
     st.caption("Informe somente a quantidade de DNAs realizados por colaborador em cada competência.")
     cabecalho_sessao()
     hoje=date.today(); meses=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
-    a,b,c=st.columns([1.2,.7,2.5])
+    a,b,c=st.columns([1.2,.7,2.5], vertical_alignment="bottom")
     with a: mes_d=st.selectbox("Mês", range(1,13), index=hoje.month-1, format_func=lambda x: meses[x-1], key="dna_mes_seg")
     with b: ano_d=st.number_input("Ano", min_value=2025, max_value=2100, value=hoje.year, step=1, key="dna_ano_seg")
-    with c: st.markdown(f"### {meses[mes_d-1].upper()} / {int(ano_d)}")
+    with c:
+        st.markdown(
+            f'<div style="height:38px;display:flex;align-items:center;font-size:1.55rem;font-weight:700;line-height:1;">{meses[mes_d-1].upper()} / {int(ano_d)}</div>',
+            unsafe_allow_html=True,
+        )
     fechado, limite=competencia_dna_fechada(int(ano_d), mes_d, hoje)
     unlock_key=f"dna_seg_unlock_{int(ano_d)}_{mes_d}"
     liberado=bool(st.session_state.get(unlock_key,False))
@@ -1372,6 +1376,44 @@ def tela_dna_seguranca():
             st.rerun()
 
     draft=st.session_state[draft_key].copy()
+
+    # Exportação no mesmo padrão da planilha de DNA: DESTRA | COLABORADOR | DNA em X.
+    # Ex.: quantidade 2 = XX; quantidade 4 = XXXX.
+    def _excel_dna_bytes(df_origem):
+        out = BytesIO()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "DNA"
+        ws.append(["DESTRA", "COLABORADOR", "DNA"])
+        for _, r in df_origem.iterrows():
+            try:
+                qtd = max(0, int(pd.to_numeric(r.get("DNA"), errors="coerce") or 0))
+            except Exception:
+                qtd = 0
+            ws.append([r.get("DESTRA", ""), r.get("COLABORADOR", ""), "X" * qtd])
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.column_dimensions["A"].width = 18
+        ws.column_dimensions["B"].width = 44
+        ws.column_dimensions["C"].width = 18
+        for row in ws.iter_rows(min_row=2):
+            row[2].alignment = Alignment(horizontal="left", vertical="center")
+        wb.save(out)
+        out.seek(0)
+        return out.getvalue()
+
+    exp1, exp2, exp3 = st.columns([1.15, 1.0, 4.0])
+    with exp1:
+        st.download_button(
+            "📥 Exportar Excel",
+            data=_excel_dna_bytes(draft),
+            file_name=f"DNA_{meses[mes_d-1].upper()}_{int(ano_d)}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key=f"dna_excel_{periodo}",
+        )
+
     if st.session_state.get(filtro_key, False):
         st.markdown(f"### 📋 Pendências de DNA — {meses[mes_d-1]} / {int(ano_d)}")
         st.caption(f"Posição em {hoje.strftime('%d/%m/%Y')} • Exibindo somente colaboradores com menos de 2 DNAs.")
