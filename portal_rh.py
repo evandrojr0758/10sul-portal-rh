@@ -2476,7 +2476,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         original_salario = {str(r["id"]): (float(r.get("salario_base")) if r.get("salario_base") not in (None, "") else None) for r in todos_cadastro}
         original_frente = {str(r["id"]): str(r.get("frente") or "").strip().upper() for r in todos_cadastro}
         original_destra = {str(r["id"]): str(r.get("destra") or "").strip() for r in todos_cadastro}
-        original_equipe = {str(r["id"]): str(r.get("equipe_revisao") or "").strip().upper() for r in todos_cadastro}
+        original_equipe = {str(r["id"]): ("" if pd.isna(r.get("equipe_revisao")) else str(r.get("equipe_revisao") or "").strip().upper()) for r in todos_cadastro}
         original_desligamento = {}
         for r in todos_cadastro:
             _dd = pd.to_datetime(r.get("data_desligamento"), errors="coerce")
@@ -2534,7 +2534,10 @@ with st.expander("👥 Cadastro de colaboradores"):
             frente_antiga = original_frente.get(cid, "")
             nova_destra = str(linha.get("destra") or "").strip()
             destra_antiga = original_destra.get(cid, "")
-            nova_equipe = str(linha.get("equipe_revisao") or "").strip().upper()
+            equipe_val = linha.get("equipe_revisao")
+            nova_equipe = "" if pd.isna(equipe_val) else str(equipe_val or "").strip().upper()
+            if nova_equipe in ("NAN", "NONE", "NULL"):
+                nova_equipe = ""
             equipe_antiga = original_equipe.get(cid, "")
             if nova_frente != "REVISÃO":
                 nova_equipe = ""
@@ -2553,8 +2556,12 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "Informe a data de desligamento para: " + ", ".join(erros)
             )
 
+        revisao_sem_equipe = [str(linha.get("colaborador") or linha.get("id")) for linha, _, _, _, nova_frente, _, nova_equipe in alteracoes if nova_frente == "REVISÃO" and nova_equipe not in ("EQUIPE 1", "EQUIPE 2")]
+        if revisao_sem_equipe:
+            st.warning("Selecione EQUIPE 1 ou EQUIPE 2 para os colaboradores da frente REVISÃO: " + ", ".join(revisao_sem_equipe))
+
         if alteracoes:
-            if st.button("💾 Salvar alterações do colaborador", type="primary"):
+            if st.button("💾 Salvar alterações do colaborador", type="primary", disabled=bool(revisao_sem_equipe)):
                 try:
                     for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
