@@ -886,6 +886,12 @@ def tela_regras_gratificacao():
                 desc_1_at = c4.number_input("1 dia de atestado — desconto no Absenteísmo (R$)", min_value=0.0, value=float(r.get("desconto_1_atestado_valor") or 100), step=10.0, key=f"rg_atv_{r['id']}")
                 atest_zera = c5.number_input("Dias de atestado para zerar Absenteísmo", min_value=1, value=int(r.get("atestados_zera_categoria") or 2), step=1, key=f"rg_atz_{r['id']}")
                 dna_min = c6.number_input("DNA mínimo no mês", min_value=0, value=int(r.get("dna_minimo") or 2), step=1, key=f"rg_dna_{r['id']}")
+                st.markdown("**Faixas do Tempo de Entrega — percentual da parcela de Tempo**")
+                t1,t2,t3,t4 = st.columns(4)
+                tempo_12 = t1.number_input("Até 12h (%)", min_value=0.0, max_value=100.0, value=float(r.get("tempo_ate_12_percentual") if r.get("tempo_ate_12_percentual") is not None else 100), step=5.0, key=f"rg_t12_{r['id']}")
+                tempo_16 = t2.number_input("> 12h até 16h (%)", min_value=0.0, max_value=100.0, value=float(r.get("tempo_ate_16_percentual") if r.get("tempo_ate_16_percentual") is not None else 60), step=5.0, key=f"rg_t16_{r['id']}")
+                tempo_24 = t3.number_input("> 16h até 24h (%)", min_value=0.0, max_value=100.0, value=float(r.get("tempo_ate_24_percentual") if r.get("tempo_ate_24_percentual") is not None else 40), step=5.0, key=f"rg_t24_{r['id']}")
+                tempo_acima = t4.number_input("> 24h (%)", min_value=0.0, max_value=100.0, value=float(r.get("tempo_acima_24_percentual") if r.get("tempo_acima_24_percentual") is not None else 0), step=5.0, key=f"rg_tac_{r['id']}")
                 st.info("FALTA = zera a gratificação inteira • Desvio comportamental/advertência = zera a gratificação inteira • DNA abaixo do mínimo = zera a gratificação inteira.")
                 if abs((peso_abs + peso_tempo) - 100) > 0.001:
                     st.warning("Absenteísmo + Tempo de entrega deve totalizar 100%.")
@@ -897,6 +903,10 @@ def tela_regras_gratificacao():
                     "atestados_zera_tudo": None, "dna_minimo": int(dna_min),
                     "dna_abaixo_minimo_zera": True, "desvio_comportamental_zera": True,
                     "atraso_habilitado": False,
+                    "tempo_ate_12_percentual": tempo_12,
+                    "tempo_ate_16_percentual": tempo_16,
+                    "tempo_ate_24_percentual": tempo_24,
+                    "tempo_acima_24_percentual": tempo_acima,
                 }
             else:
                 st.caption("Regra-base para ITR, SOS, CNP, BORRACHARIA, CAPD e CRAVEJAMENTO. FABRICAÇÃO não entra nesta regra.")
@@ -930,6 +940,136 @@ def tela_regras_gratificacao():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Não foi possível salvar a regra: {e}")
+
+
+# ==========================================================
+# APURAÇÃO MENSAL DE GRATIFICAÇÃO
+# ==========================================================
+def ler_apuracao_gratificacao(ano, mes):
+    try:
+        return sb("GET", "rh_gratificacao_apuracao", f"select=*&ano=eq.{int(ano)}&mes=eq.{int(mes)}") or []
+    except Exception:
+        return []
+
+
+def salvar_apuracao_manual(colaborador_id, ano, mes, equipe, media_horas, observacao, atualizado_por):
+    payload = {
+        "colaborador_id": int(colaborador_id), "ano": int(ano), "mes": int(mes),
+        "equipe_revisao": str(equipe or "").strip() or None,
+        "media_tempo_entrega_horas": None if media_horas in (None, "") else float(media_horas),
+        "observacao": str(observacao or "").strip() or None,
+        "atualizado_por": str(atualizado_por or "").strip() or None,
+        "atualizado_em": datetime.now().isoformat(timespec="seconds"),
+    }
+    sb("POST", "rh_gratificacao_apuracao", "on_conflict=colaborador_id,ano,mes", payload,
+       "resolution=merge-duplicates,return=minimal")
+
+
+def _regra_por_codigo(regras, codigo):
+    return next((r for r in regras if str(r.get("codigo") or "").upper() == codigo), {})
+
+
+def _percentual_tempo_revisao(media, regra):
+    if media is None:
+        return None
+    h=float(media)
+    if h <= 12: return float(regra.get("tempo_ate_12_percentual") if regra.get("tempo_ate_12_percentual") is not None else 100)
+    if h <= 16: return float(regra.get("tempo_ate_16_percentual") if regra.get("tempo_ate_16_percentual") is not None else 60)
+    if h <= 24: return float(regra.get("tempo_ate_24_percentual") if regra.get("tempo_ate_24_percentual") is not None else 40)
+    return float(regra.get("tempo_acima_24_percentual") if regra.get("tempo_acima_24_percentual") is not None else 0)
+
+
+def tela_apuracao_gratificacao():
+    usr=st.session_state.get("usuario_logado") or {}
+    st.markdown("### 💰 Apuração Mensal de Gratificação")
+    st.caption("Frequência, DNA, salário e desvios são carregados automaticamente. Para REVISÃO, informe a equipe e a média mensal do Tempo de Entrega.")
+    hoje=date.today(); meses_g=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+    g1,g2,g3=st.columns([1.1,.7,2.6])
+    mes_g=g1.selectbox("Mês da apuração", range(1,13), index=hoje.month-1, format_func=lambda x: meses_g[x-1], key="grat_mes")
+    ano_g=int(g2.number_input("Ano da apuração", min_value=2025, max_value=2100, value=hoje.year, step=1, key="grat_ano"))
+    g3.markdown(f"### {meses_g[mes_g-1].upper()} / {ano_g}")
+    try:
+        regras=ler_regras_gratificacao(); freq=ler_frequencia(ano_g,mes_g)
+        colabs=sb("GET","rh_colaboradores","select=*&order=colaborador.asc") or []
+        ocorr_status=ler_ocorrencias(); dna_regs=ler_dna_mensal(ano_g,mes_g)
+        ap_regs=ler_apuracao_gratificacao(ano_g,mes_g)
+    except Exception as e:
+        st.error(f"Não foi possível montar a apuração: {e}"); return
+    rev=_regra_por_codigo(regras,"REVISAO"); demais=_regra_por_codigo(regras,"ITR_DEMAIS")
+    if not rev or not demais:
+        st.warning("Cadastre/salve primeiro as regras de gratificação."); return
+    cod_por_id={int(o["id"]):str(o.get("codigo") or "").upper() for o in ocorr_status if o.get("id") is not None}
+    dna_por={int(r["colaborador_id"]):int(r.get("quantidade") or 0) for r in dna_regs if r.get("colaborador_id") is not None}
+    ap_por={int(r["colaborador_id"]):r for r in ap_regs if r.get("colaborador_id") is not None}
+    faltas={}; atest={}
+    for f in freq:
+        cid=int(f.get("colaborador_id") or 0); cod=cod_por_id.get(int(f.get("ocorrencia_id") or 0),"")
+        if cod=="FA": faltas[cid]=faltas.get(cid,0)+1
+        if cod=="A": atest[cid]=atest.get(cid,0)+1
+    ini=f"{ano_g:04d}-{mes_g:02d}-01"; fim=f"{ano_g:04d}-{mes_g:02d}-{calendar.monthrange(ano_g,mes_g)[1]:02d}"
+    try:
+        oc_mes=sb("GET","rh_colaborador_ocorrencias",f"select=*&data=gte.{ini}&data=lte.{fim}") or []
+    except Exception: oc_mes=[]
+    tipos_desvio={"ADVERTÊNCIA VERBAL","ADVERTÊNCIA ESCRITA","SUSPENSÃO","COMPORTAMENTO"}
+    desvios={}
+    for o in oc_mes:
+        if str(o.get("tipo") or "").upper() in tipos_desvio:
+            cid=int(o.get("colaborador_id") or 0); desvios[cid]=desvios.get(cid,0)+1
+    linhas=[]; ids={}
+    for c in colabs:
+        cid=int(c["id"]); nome=_nome_colaborador(c); frente=str(c.get("frente") or "").upper().strip()
+        if frente=="FABRICAÇÃO" or not frente: continue
+        dd=c.get("data_desligamento")
+        if dd and str(dd) < ini: continue
+        sal=float(c.get("salario_base") or 0); fa=faltas.get(cid,0); at=atest.get(cid,0); dna=dna_por.get(cid,0); des=desvios.get(cid,0)
+        manual=ap_por.get(cid,{})
+        equipe=str(manual.get("equipe_revisao") or "") if frente=="REVISÃO" else ""
+        media=manual.get("media_tempo_entrega_horas") if frente=="REVISÃO" else None
+        integral=(sal*float(rev.get("percentual_salario") or 35)/100) if frente=="REVISÃO" else float(demais.get("valor_fixo") or 360)
+        valor=integral; motivos=[]; pct_tempo=None
+        regra=rev if frente=="REVISÃO" else demais
+        if fa>0 and bool(regra.get("falta_zera_tudo",True)): valor=0; motivos.append(f"{fa} falta(s)")
+        if des>0 and bool(regra.get("desvio_comportamental_zera",True)): valor=0; motivos.append(f"{des} desvio(s)")
+        if dna < int(regra.get("dna_minimo") or 2) and bool(regra.get("dna_abaixo_minimo_zera",True)): valor=0; motivos.append(f"DNA {dna}/{int(regra.get('dna_minimo') or 2)}")
+        if valor>0 and frente=="REVISÃO":
+            abs_parcela=integral*float(rev.get("peso_absenteismo") or 20)/100
+            tempo_parcela=integral*float(rev.get("peso_tempo_entrega") or 80)/100
+            if at>=int(rev.get("atestados_zera_categoria") or 2): abs_parcela=0; motivos.append(f"{at} dias de atestado: absenteísmo zerado")
+            elif at==1: abs_parcela=max(0,abs_parcela-float(rev.get("desconto_1_atestado_valor") or 100)); motivos.append("1 dia de atestado")
+            pct_tempo=_percentual_tempo_revisao(media,rev)
+            if pct_tempo is None:
+                valor=None; motivos.append("informar média da Revisão")
+            else: valor=abs_parcela + tempo_parcela*(pct_tempo/100)
+        elif valor>0:
+            if at>=int(demais.get("atestados_zera_tudo") or 2): valor=0; motivos.append(f"{at} dias de atestado")
+            elif at==1:
+                desc=float(demais.get("desconto_1_atestado_percentual") or 20); valor=integral*(1-desc/100); motivos.append(f"1 dia de atestado (-{desc:.0f}%)")
+        status="⏳ PENDENTE" if valor is None else ("❌ ZERADA" if valor<=0 else "✅ ELEGÍVEL")
+        ids[nome]=cid
+        linhas.append({"COLABORADOR":nome,"FRENTE":frente,"SALÁRIO":sal,"EQUIPE REVISÃO":equipe,"MÉDIA TEMPO (h)":media,"FALTAS":fa,"ATESTADOS (dias)":at,"DNA":dna,"DESVIOS":des,"INTEGRAL":integral,"GRATIFICAÇÃO":valor,"STATUS":status,"MOTIVO / CÁLCULO":" • ".join(motivos) if motivos else "Requisitos atendidos"})
+    if not linhas:
+        st.info("Nenhum colaborador com frente de gratificação definida para esta competência."); return
+    df=pd.DataFrame(linhas)
+    st.caption("Edite somente **EQUIPE REVISÃO** e **MÉDIA TEMPO (h)**. Os demais campos são calculados pelo sistema.")
+    edit=st.data_editor(df,use_container_width=True,hide_index=True,height=min(760,90+len(df)*35),
+        disabled=[c for c in df.columns if c not in ("EQUIPE REVISÃO","MÉDIA TEMPO (h)")],
+        column_config={
+            "SALÁRIO":st.column_config.NumberColumn("SALÁRIO",format="R$ %.2f"),
+            "INTEGRAL":st.column_config.NumberColumn("INTEGRAL",format="R$ %.2f"),
+            "GRATIFICAÇÃO":st.column_config.NumberColumn("GRATIFICAÇÃO",format="R$ %.2f"),
+            "EQUIPE REVISÃO":st.column_config.SelectboxColumn("EQUIPE REVISÃO",options=["","EQUIPE 1","EQUIPE 2"],required=False),
+            "MÉDIA TEMPO (h)":st.column_config.NumberColumn("MÉDIA TEMPO (h)",min_value=0.0,step=0.1,format="%.2f"),
+        },key=f"grat_editor_{ano_g}_{mes_g}")
+    if st.button("💾 Salvar dados manuais da apuração",type="primary",key=f"grat_salvar_{ano_g}_{mes_g}"):
+        try:
+            for _,r in edit.iterrows():
+                if str(r["FRENTE"]).upper()=="REVISÃO":
+                    salvar_apuracao_manual(ids[r["COLABORADOR"]],ano_g,mes_g,r["EQUIPE REVISÃO"],r["MÉDIA TEMPO (h)"],None,usr.get("nome") or usr.get("usuario"))
+            st.success("Dados da Revisão salvos. Recalculando a apuração..."); st.rerun()
+        except Exception as e: st.error(f"Não foi possível salvar: {e}")
+    validos=df["GRATIFICAÇÃO"].dropna()
+    k1,k2,k3,k4=st.columns(4)
+    k1.metric("Colaboradores",len(df)); k2.metric("Elegíveis",int((df["GRATIFICAÇÃO"].fillna(0)>0).sum())); k3.metric("Zerados",int((df["GRATIFICAÇÃO"]==0).sum())); k4.metric("Total previsto",f"R$ {validos.sum():,.2f}".replace(",","X").replace(".",",").replace("X","."))
 
 def tela_dna_seguranca():
     usr=st.session_state.get("usuario_logado") or {}
@@ -1132,6 +1272,9 @@ cabecalho_sessao(mostrar_ajuda=True)
 
 with st.expander("💰 Regras de Gratificação", expanded=False):
     tela_regras_gratificacao()
+
+with st.expander("🧮 Apuração de Gratificação", expanded=False):
+    tela_apuracao_gratificacao()
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
