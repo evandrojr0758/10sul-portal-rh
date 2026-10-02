@@ -719,7 +719,7 @@ def autenticar_usuario(usuario, senha):
     usuario = str(usuario or "").strip().lower()
     if not usuario or not senha:
         return None
-    params = "select=id,usuario,nome,perfil,ativo,senha_hash&usuario=eq." + urllib.parse.quote(usuario) + "&limit=1"
+    params = "select=id,usuario,nome,perfil,ativo,senha_hash,trocar_senha&usuario=eq." + urllib.parse.quote(usuario) + "&limit=1"
     regs = sb("GET", "rh_usuarios", params) or []
     if not regs:
         return None
@@ -728,7 +728,44 @@ def autenticar_usuario(usuario, senha):
         return None
     if str(r.get("senha_hash") or "") != _hash_senha(senha):
         return None
-    return {"id": r.get("id"), "usuario": r.get("usuario"), "nome": r.get("nome") or r.get("usuario"), "perfil": str(r.get("perfil") or "").upper()}
+    return {"id": r.get("id"), "usuario": r.get("usuario"), "nome": r.get("nome") or r.get("usuario"), "perfil": str(r.get("perfil") or "").upper(), "trocar_senha": bool(r.get("trocar_senha", False))}
+
+def alterar_senha_usuario(usuario_id, senha_atual, nova_senha):
+    usr = st.session_state.get("usuario_logado") or {}
+    usuario = str(usr.get("usuario") or "").strip().lower()
+    if not autenticar_usuario(usuario, senha_atual):
+        raise ValueError("A senha atual está incorreta.")
+    nova_senha = str(nova_senha or "")
+    if len(nova_senha) < 8:
+        raise ValueError("A nova senha deve ter pelo menos 8 caracteres.")
+    payload = {"senha_hash": _hash_senha(nova_senha), "trocar_senha": False}
+    sb("PATCH", "rh_usuarios", "id=eq." + str(int(usuario_id)), payload, "return=minimal")
+
+def modal_alterar_senha(obrigatoria=False):
+    titulo = "🔐 Crie sua nova senha" if obrigatoria else "🔐 Alterar senha"
+    st.markdown(f"### {titulo}")
+    if obrigatoria:
+        st.info("Este é seu primeiro acesso. Para continuar, substitua a senha inicial por uma senha pessoal.")
+    with st.form("form_troca_senha_portal", clear_on_submit=False):
+        atual = st.text_input("Senha atual", type="password")
+        nova = st.text_input("Nova senha", type="password", help="Mínimo de 8 caracteres.")
+        confirma = st.text_input("Confirmar nova senha", type="password")
+        salvar = st.form_submit_button("Salvar nova senha", type="primary", use_container_width=True)
+    if salvar:
+        if nova != confirma:
+            st.error("A confirmação não confere com a nova senha.")
+        elif nova == atual:
+            st.error("A nova senha deve ser diferente da senha atual.")
+        else:
+            try:
+                usr = st.session_state.get("usuario_logado") or {}
+                alterar_senha_usuario(usr.get("id"), atual, nova)
+                st.session_state["usuario_logado"]["trocar_senha"] = False
+                st.session_state.pop("abrir_troca_senha", None)
+                st.success("Senha alterada com sucesso.")
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
 
 def competencia_dna_fechada(ano, mes, hoje_ref=None):
     hoje_ref = hoje_ref or date.today()
@@ -775,12 +812,20 @@ def tela_login():
 
 def cabecalho_sessao():
     usr=st.session_state.get("usuario_logado") or {}
-    a,b=st.columns([8,2], vertical_alignment="center")
-    with b:
+    a,b,c=st.columns([7.2,1.5,1.3], vertical_alignment="center")
+    with a:
         st.caption(f"👤 {usr.get('nome','')} • {usr.get('perfil','')}")
+    with b:
+        if st.button("🔐 Alterar senha", key="abrir_alterar_senha", use_container_width=True):
+            st.session_state["abrir_troca_senha"] = True
+    with c:
         if st.button("Sair", key="logout_portal", use_container_width=True):
             st.session_state.pop("usuario_logado",None)
+            st.session_state.pop("abrir_troca_senha",None)
             st.rerun()
+    if st.session_state.get("abrir_troca_senha"):
+        with st.expander("Alteração de senha", expanded=True):
+            modal_alterar_senha(False)
 
 def tela_dna_seguranca():
     usr=st.session_state.get("usuario_logado") or {}
@@ -957,6 +1002,13 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
 
 if not st.session_state.get("usuario_logado"):
     tela_login()
+    st.stop()
+
+if bool(st.session_state["usuario_logado"].get("trocar_senha", False)):
+    st.markdown("<div style='height:5vh'></div>", unsafe_allow_html=True)
+    c1,c2,c3=st.columns([1,1.15,1])
+    with c2:
+        modal_alterar_senha(True)
     st.stop()
 
 _perfil_atual = str(st.session_state["usuario_logado"].get("perfil") or "").upper()
