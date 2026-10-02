@@ -514,7 +514,50 @@ div[data-testid="stDataEditor"] [role="columnheader"]{font-weight:700!important}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("👥 Portal RH — Aracruz")
+@st.dialog("❔ Como usar o Portal RH")
+def abrir_ajuda_portal():
+    st.markdown("""
+### Visão geral
+O **Portal RH — Aracruz** foi criado para registrar e acompanhar a frequência mensal dos colaboradores de forma simples e segura.
+
+### 1. Resumo do mês
+Na parte superior você acompanha os totais de **Faltas, Atestados, Folgas, Presenças, Liberados e Compensações**. A **Média de Colaboradores** considera somente os colaboradores classificados como **OPERACIONAL**, conforme a regra definida para o portal.
+
+### 2. Colaboradores
+O quadro **Colaboradores** mostra o total de pessoas cadastradas e a divisão entre **Operacionais** e **Outros**. Você pode usar **Buscar colaborador** para localizar rapidamente um nome e o filtro **STATUS** para visualizar TODOS, OPERACIONAL ou OUTROS.
+
+### 3. Preenchimento da frequência
+Cada coluna numerada representa um **dia do mês**. Selecione a ocorrência correspondente para cada colaborador.
+
+- 🟧 **PENDENTE**: dia já disponível e ainda sem lançamento.
+- 🟧 **Alterado / não salvo**: lançamento feito na tela, mas ainda aguardando o botão **Salvar alterações**.
+- 🟦 **Salvo**: lançamento já gravado no sistema.
+- Dias futuros permanecem sem cobrança de preenchimento.
+
+### 4. LB e COMP
+Ao selecionar **LB** ou **COMP**, o sistema abre imediatamente uma janela de **observação obrigatória**. O lançamento somente é confirmado depois de preencher a informação exigida e clicar em **Confirmar observação**. Se a janela for fechada sem confirmar, o lançamento não deve permanecer.
+
+### 5. Salvamento e alterações posteriores
+Use **Salvar alterações** para gravar o que foi preenchido. É permitido salvar mesmo que ainda existam células pendentes, para que o RH possa continuar o trabalho depois. Depois que um lançamento estiver salvo, qualquer alteração exige **senha de autorização** e **motivo da alteração**, preservando o controle do histórico.
+
+### 6. Análises de Frequência
+Abra **📊 Análises de Frequência** para consultar o resumo por função e o gráfico comparativo de **Faltas x Atestados por colaborador**.
+
+### 7. Exportação
+O botão **Exportar Excel — BaseFuncionário / BaseFuncionário** gera o arquivo no modelo utilizado pelo RH com os lançamentos do período.
+
+**Dica:** se estiver procurando uma pessoa específica, use a busca por nome antes de lançar. Ao apagar o texto da busca, a grade volta automaticamente a exibir todos os colaboradores permitidos pelo filtro de STATUS.
+    """)
+    if st.button("Entendi", use_container_width=True, type="primary"):
+        st.rerun()
+
+_titulo, _ajuda = st.columns([8.8, 1.2], vertical_alignment="center")
+with _titulo:
+    st.title("👥 Portal RH — Aracruz")
+with _ajuda:
+    if st.button("❔ Ajuda", key="btn_ajuda_portal", help="Ver explicação desta tela", use_container_width=True):
+        abrir_ajuda_portal()
+
 st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorrências</div>', unsafe_allow_html=True)
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
