@@ -633,7 +633,7 @@ for c in colaboradores:
     ids.append(cid)
     row = {
         "COLABORADOR": _nome_colaborador(c),
-        # Classificação usada na Média de Recebíveis. Apenas OPERACIONAL entra no cálculo.
+        # Classificação usada na Média de Colaboradores. Apenas OPERACIONAL entra no cálculo.
         "STATUS": _classificacao_colaborador(c),
         "FUNÇÃO": str(c.get("funcao") or c.get("funcao_padrao") or ""),
         # Na grade usa a empresa real da BaseFuncionário e exibe o nome abreviado.
@@ -762,7 +762,7 @@ with _rankings_topo:
         _grafico_rank = _rank_ocorrencias.set_index("COLABORADOR")[["FALTAS", "ATESTADOS"]]
         st.bar_chart(_grafico_rank, height=300, use_container_width=True)
 
-# Média de Recebíveis — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
+# Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
 # Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
 _codigos_recebiveis = {"FO", "FA", "OK", "A"}
 _total_recebiveis = 0
@@ -789,7 +789,19 @@ with resumo_topo:
     k4.metric("Presenças", contagens["OK"])
     k5.metric("Liberados", contagens["LB"])
     k6.metric("Compensações", contagens["COMP"])
-    k7.metric("Média de Recebíveis", f"{_media_diaria:.2f}".replace(".", ","))
+    k7.metric("Média de Colaboradores", f"{_media_diaria:.2f}".replace(".", ","))
+
+    # Quadro compacto do efetivo cadastrado. Independente do filtro visual da grade.
+    _qtd_registrados = len(_colaboradores_todos)
+    _qtd_operacionais = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OPERACIONAL")
+    _qtd_outros = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OUTROS")
+    st.markdown(
+        f"**👥 Colaboradores** &nbsp;&nbsp; | &nbsp;&nbsp; "
+        f"**Registrados:** {_qtd_registrados} &nbsp;&nbsp; "
+        f"**Operacionais:** {_qtd_operacionais} &nbsp;&nbsp; "
+        f"**Outros:** {_qtd_outros}",
+        unsafe_allow_html=True,
+    )
 
 # Exportação no mesmo padrão das abas BaseFuncionario e BaseFuncionário usadas no fechamento.
 try:
