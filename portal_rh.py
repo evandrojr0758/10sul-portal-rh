@@ -1017,9 +1017,32 @@ def tela_apuracao_gratificacao():
 
     st.markdown("#### ⏱️ Média mensal por equipe — Revisão")
     st.caption("Informe a média uma única vez para cada equipe. O sistema aplica automaticamente a todos os colaboradores conforme a equipe cadastrada.")
-    _mc1,_mc2,_mc3=st.columns([1,1,1.2])
+    _mc1,_mc2,_mc3,_mc4=st.columns([1,1,1.2,1.1])
     media_eq1=_mc1.number_input("Média EQUIPE 1 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 1")), format="%.2f", key=f"media_eq1_{ano_g}_{mes_g}")
     media_eq2=_mc2.number_input("Média EQUIPE 2 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 2")), format="%.2f", key=f"media_eq2_{ano_g}_{mes_g}")
+
+    limpar_key=f"confirmar_limpeza_medias_{ano_g}_{mes_g}"
+    if _mc4.button("🧹 Limpar médias", key=f"limpar_medias_{ano_g}_{mes_g}"):
+        st.session_state[limpar_key]=True
+
+    if st.session_state.get(limpar_key, False):
+        st.warning(f"⚠️ Confirma limpar as médias aplicadas em lote de {meses_g[mes_g-1]} / {ano_g}? A equipe cadastrada dos colaboradores NÃO será alterada.")
+        _lc1,_lc2,_lc3=st.columns([1,1,3])
+        if _lc1.button("✅ Sim, limpar", type="primary", key=f"confirmar_limpar_medias_{ano_g}_{mes_g}"):
+            try:
+                params=("ano=eq."+urllib.parse.quote(str(int(ano_g)))+"&mes=eq."+urllib.parse.quote(str(int(mes_g))))
+                sb("DELETE", "rh_gratificacao_apuracao", params)
+                st.session_state.pop(f"media_eq1_{ano_g}_{mes_g}", None)
+                st.session_state.pop(f"media_eq2_{ano_g}_{mes_g}", None)
+                st.session_state.pop(limpar_key, None)
+                st.success("Médias da competência removidas. As equipes cadastradas nos colaboradores foram mantidas.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível limpar as médias: {e}")
+        if _lc2.button("Cancelar", key=f"cancelar_limpar_medias_{ano_g}_{mes_g}"):
+            st.session_state.pop(limpar_key, None)
+            st.rerun()
+
     if _mc3.button("💾 Aplicar médias às equipes", type="primary", key=f"aplicar_medias_{ano_g}_{mes_g}"):
         try:
             usuario=usr.get("nome") or usr.get("usuario")
@@ -1061,11 +1084,16 @@ def tela_apuracao_gratificacao():
     try:
         oc_mes=sb("GET","rh_colaborador_ocorrencias",f"select=*&data=gte.{ini}&data=lte.{fim}") or []
     except Exception: oc_mes=[]
-    tipos_desvio={"ADVERTÊNCIA VERBAL","ADVERTÊNCIA ESCRITA","SUSPENSÃO","COMPORTAMENTO"}
+    # Regra da gratificação: somente estas ocorrências NÃO retiram a bonificação.
+    # Qualquer outro tipo de ocorrência individual registrado pelo RH na competência
+    # é considerado ocorrência que zera a gratificação.
+    tipos_nao_penalizam={"ADVERTÊNCIA VERBAL","ORIENTAÇÃO","ELOGIO / RECONHECIMENTO"}
     desvios={}
     for o in oc_mes:
-        if str(o.get("tipo") or "").upper() in tipos_desvio:
-            cid=int(o.get("colaborador_id") or 0); desvios[cid]=desvios.get(cid,0)+1
+        tipo_oc=str(o.get("tipo") or "").upper().strip()
+        if tipo_oc and tipo_oc not in tipos_nao_penalizam:
+            cid=int(o.get("colaborador_id") or 0)
+            desvios[cid]=desvios.get(cid,0)+1
     linhas=[]; ids={}
     for c in colabs:
         cid=int(c["id"]); nome=_nome_colaborador(c); frente=str(c.get("frente") or "").upper().strip()
@@ -1261,8 +1289,9 @@ def abrir_ficha_colaborador(colaborador):
     if st.button("💾 Registrar ocorrência", type="primary", use_container_width=True, key=f"oc_salvar_{cid}"):
         try:
             salvar_ocorrencia_colaborador(cid, _data_oc, _tipo_oc, _descricao_oc, _registrado_por)
+            # Não alterar session_state do text_area depois que o widget foi instanciado.
+            # O rerun atualiza a ficha e evita o erro StreamlitAPIException.
             st.success("Ocorrência registrada com sucesso.")
-            st.session_state[f"oc_desc_{cid}"] = ""
             st.rerun()
         except Exception as e:
             st.error(f"Não foi possível registrar: {e}")
