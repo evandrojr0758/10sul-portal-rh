@@ -577,21 +577,42 @@ for r in freq:
     except Exception:
         pass
 
-# Filtro visual por classificação do colaborador. Não altera cadastro nem dados salvos.
+# Filtros VISUAIS da grade. Não alteram cadastro, indicadores ou dados salvos.
+# A busca pode ser feita por qualquer parte do nome do colaborador.
 _colaboradores_todos = list(colaboradores)
-_filtro_status = st.selectbox(
-    "Filtrar por STATUS",
-    ["TODOS", "OPERACIONAL", "OUTROS"],
-    index=0,
-    key=f"rh_filtro_status_{int(ano)}_{mes}",
-)
-if _filtro_status == "TODOS":
-    colaboradores = _colaboradores_todos
-else:
-    colaboradores = [
-        c for c in _colaboradores_todos
+_col_busca, _col_status = st.columns([2, 1], gap="medium")
+with _col_busca:
+    _busca_colaborador = st.text_input(
+        "🔎 Buscar colaborador",
+        value="",
+        placeholder="Digite parte do nome...",
+        key=f"rh_busca_colaborador_{int(ano)}_{mes}",
+    ).strip()
+with _col_status:
+    _filtro_status = st.selectbox(
+        "Filtrar por STATUS",
+        ["TODOS", "OPERACIONAL", "OUTROS"],
+        index=0,
+        key=f"rh_filtro_status_{int(ano)}_{mes}",
+    )
+
+_colaboradores_filtrados = _colaboradores_todos
+if _filtro_status != "TODOS":
+    _colaboradores_filtrados = [
+        c for c in _colaboradores_filtrados
         if _classificacao_colaborador(c) == _filtro_status
     ]
+
+if _busca_colaborador:
+    _termo = _busca_colaborador.casefold()
+    _colaboradores_filtrados = [
+        c for c in _colaboradores_filtrados
+        if _termo in _nome_colaborador(c).casefold()
+    ]
+
+colaboradores = _colaboradores_filtrados
+if _busca_colaborador and not colaboradores:
+    st.info(f'Nenhum colaborador encontrado para "{_busca_colaborador}" com o filtro selecionado.')
 
 # Área de análises recolhível para manter a tela principal compacta.
 _analises_expander = st.expander("📊 Análises de Frequência", expanded=False)
