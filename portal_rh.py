@@ -1764,6 +1764,10 @@ def _resumo_matriz_cmc(matriz):
     # Para a média mensal do efetivo entram somente OK + FALTA + ATESTADO + FOLGA.
     # Férias e demais códigos não entram nessa conta.
     r["TOTAL CONTABILIZADO"] = r[["PRESENTES","FALTAS","ATESTADOS","FOLGAS"]].sum(axis=1)
+    # A média individual representa a fração de 1 colaborador no mês:
+    # (FO + FA + A + OK) / quantidade de dias da competência.
+    dias_mes = len(dias_cols)
+    r["MÉDIA CONTABILIZADA"] = (r["TOTAL CONTABILIZADO"] / dias_mes).round(2) if dias_mes else 0.0
     return r
 
 def _excel_cmc(matriz, ano, mes):
@@ -1793,7 +1797,8 @@ def _excel_cmc(matriz, ano, mes):
     media_colaboradores = total_contabilizado / dias_mes if dias_mes else 0
     ws2.append(["DIAS DO MÊS", dias_mes])
     ws2.append(["MÉDIA DE COLABORADORES", media_colaboradores])
-    ws2["B9"].number_format = "0.00"
+    # Formata a linha da média sem depender de posição fixa.
+    ws2.cell(ws2.max_row, 2).number_format = "0.00"
     ws2.column_dimensions["A"].width = 28
     ws2.column_dimensions["B"].width = 18
     bio=BytesIO(); wb.save(bio); bio.seek(0); return bio.getvalue()
@@ -1819,7 +1824,7 @@ def tela_fechamento_cmc_bahia():
         edit = st.data_editor(matriz, use_container_width=True, hide_index=True, disabled=["COLABORADOR"], column_config=cfg, key=f"cmc_editor_{ano}_{mes}")
         resumo=_resumo_matriz_cmc(edit)
         st.markdown("#### Resumo do fechamento")
-        st.dataframe(resumo[["COLABORADOR","PRESENTES","FALTAS","ATESTADOS","FOLGAS","FÉRIAS","TOTAL CONTABILIZADO"]], use_container_width=True, hide_index=True)
+        st.dataframe(resumo[["COLABORADOR","PRESENTES","FALTAS","ATESTADOS","FOLGAS","FÉRIAS","TOTAL CONTABILIZADO","MÉDIA CONTABILIZADA"]], use_container_width=True, hide_index=True)
 
         dias_mes = calendar.monthrange(ano, mes)[1]
         total_contabilizado = int(resumo["TOTAL CONTABILIZADO"].sum())
@@ -1828,7 +1833,7 @@ def tela_fechamento_cmc_bahia():
         c1.metric("Registros considerados", f"{total_contabilizado}")
         c2.metric("Dias do mês", f"{dias_mes}")
         c3.metric("Média de colaboradores", f"{media_colaboradores:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        st.caption("Média = (OK + FALTA + ATESTADO + FOLGA de todos os colaboradores) ÷ quantidade de dias do mês. FÉRIAS não entra na média.")
+        st.caption("TOTAL CONTABILIZADO = OK + FA + A + FO. MÉDIA CONTABILIZADA = TOTAL CONTABILIZADO ÷ dias da competência. A Média de Colaboradores é a soma dessas médias individuais. FÉRIAS não entra na conta.")
 
         excel=_excel_cmc(edit,ano,mes)
         st.download_button("📥 Exportar fechamento CMC Bahia", data=excel, file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
