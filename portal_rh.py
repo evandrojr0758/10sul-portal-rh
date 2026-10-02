@@ -1824,7 +1824,34 @@ def tela_fechamento_cmc_bahia():
         edit = st.data_editor(matriz, use_container_width=True, hide_index=True, disabled=["COLABORADOR"], column_config=cfg, key=f"cmc_editor_{ano}_{mes}")
         resumo=_resumo_matriz_cmc(edit)
         st.markdown("#### Resumo do fechamento")
-        st.dataframe(resumo[["COLABORADOR","PRESENTES","FALTAS","ATESTADOS","FOLGAS","FÉRIAS","TOTAL CONTABILIZADO","MÉDIA CONTABILIZADA"]], use_container_width=True, hide_index=True)
+
+        # Grade compacta para manter TOTAL e MÉDIA sempre visíveis sem rolagem horizontal.
+        resumo_tela = resumo[[
+            "COLABORADOR", "PRESENTES", "FALTAS", "ATESTADOS", "FOLGAS",
+            "FÉRIAS", "TOTAL CONTABILIZADO", "MÉDIA CONTABILIZADA"
+        ]].rename(columns={
+            "PRESENTES": "OK",
+            "FALTAS": "FA",
+            "ATESTADOS": "A",
+            "FOLGAS": "FO",
+            "TOTAL CONTABILIZADO": "TOTAL",
+            "MÉDIA CONTABILIZADA": "MÉDIA",
+        })
+        st.dataframe(
+            resumo_tela,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "COLABORADOR": st.column_config.TextColumn("COLABORADOR", width="large"),
+                "OK": st.column_config.NumberColumn("OK", width="small", format="%d"),
+                "FA": st.column_config.NumberColumn("FA", width="small", format="%d"),
+                "A": st.column_config.NumberColumn("A", width="small", format="%d"),
+                "FO": st.column_config.NumberColumn("FO", width="small", format="%d"),
+                "FÉRIAS": st.column_config.NumberColumn("FÉRIAS", width="small", format="%d"),
+                "TOTAL": st.column_config.NumberColumn("TOTAL", width="small", format="%d"),
+                "MÉDIA": st.column_config.NumberColumn("MÉDIA", width="small", format="%.2f"),
+            },
+        )
 
         dias_mes = calendar.monthrange(ano, mes)[1]
         total_contabilizado = int(resumo["TOTAL CONTABILIZADO"].sum())
