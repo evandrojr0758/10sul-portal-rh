@@ -1325,15 +1325,27 @@ def tela_dna_seguranca():
     qtd_por={int(r['colaborador_id']):int(r.get('quantidade') or 0) for r in regs if r.get('colaborador_id') is not None}
     linhas=[]
     id_por_nome={}
-    for col in colabs:
-        if not bool(col.get("ativo",True)): continue
+    editor_key=f"dna_editor_seg_{ano_d}_{mes_d}"
+
+    # O STATUS é apenas visual e reage imediatamente ao valor digitado no editor.
+    # O banco continua sendo alterado somente quando o usuário clicar em Salvar DNA.
+    estado_editor = st.session_state.get(editor_key, {}) or {}
+    edits_pendentes = estado_editor.get("edited_rows", {}) or {}
+
+    for idx, col in enumerate([c for c in colabs if bool(c.get("ativo", True))]):
         cid=int(col['id']); nome=_nome_colaborador(col); id_por_nome[nome]=cid
         q=qtd_por.get(cid,0)
-        linhas.append({"DESTRA":str(col.get("destra") or ""),"COLABORADOR":nome,"DNA":q,"STATUS GRATIFICAÇÃO":"✅ ATENDE" if q>=2 else "❌ NÃO ATENDE"})
+        pend = edits_pendentes.get(idx, edits_pendentes.get(str(idx), {})) or {}
+        if "DNA" in pend:
+            try:
+                q = int(pend.get("DNA") or 0)
+            except (TypeError, ValueError):
+                q = 0
+        linhas.append({"DESTRA":str(col.get("destra") or ""),"COLABORADOR":nome,"DNA":q,"STATUS GRATIFICAÇÃO":"✅ APTO" if q>=2 else "❌ NÃO ATENDE"})
     df=pd.DataFrame(linhas)
     if df.empty:
         st.info("Nenhum colaborador ativo encontrado."); return
-    edit=st.data_editor(df,use_container_width=True,hide_index=True,disabled=["DESTRA","COLABORADOR","STATUS GRATIFICAÇÃO"] if pode else list(df.columns),column_config={"DNA":st.column_config.NumberColumn("DNA",min_value=0,step=1,format="%d")},key=f"dna_editor_seg_{ano_d}_{mes_d}",height=min(780,80+len(df)*35))
+    edit=st.data_editor(df,use_container_width=True,hide_index=True,disabled=["DESTRA","COLABORADOR","STATUS GRATIFICAÇÃO"] if pode else list(df.columns),column_config={"DNA":st.column_config.NumberColumn("DNA",min_value=0,step=1,format="%d")},key=editor_key,height=min(780,80+len(df)*35))
     if pode and st.button("💾 Salvar DNA", type="primary", key=f"dna_salvar_seg_{ano_d}_{mes_d}"):
         try:
             alterados=0
