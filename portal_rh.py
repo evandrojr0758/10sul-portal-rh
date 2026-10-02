@@ -1396,21 +1396,23 @@ def tela_dna_seguranca():
                 qtd = 0
             ws.append([r.get("DESTRA", ""), r.get("COLABORADOR", ""), "X" * qtd])
 
-        # Tabela estruturada do Excel: cabeçalho azul, filtros e linhas alternadas.
-        ultima_linha = max(2, ws.max_row)
-        tabela = Table(displayName="TabelaDNA", ref=f"A1:C{ultima_linha}")
-        estilo = TableStyleInfo(
-            name="TableStyleMedium2",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False,
-        )
-        tabela.tableStyleInfo = estilo
-        ws.add_table(tabela)
+        # Tabela estruturada dinâmica: 1 linha de cabeçalho + quantidade real de colaboradores.
+        # Ex.: 115 colaboradores => A1:C116. Não cria linha fictícia no fim.
+        qtd_colaboradores = len(df_origem.index)
+        ultima_linha = qtd_colaboradores + 1
+        if qtd_colaboradores > 0:
+            tabela = Table(displayName="TabelaDNA", ref=f"A1:C{ultima_linha}")
+            estilo = TableStyleInfo(
+                name="TableStyleMedium2",
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False,
+            )
+            tabela.tableStyleInfo = estilo
+            ws.add_table(tabela)
 
         ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:C{ultima_linha}"
         ws.column_dimensions["A"].width = 14.5546875
         ws.column_dimensions["B"].width = 58.21875
         ws.column_dimensions["C"].width = 13.77734375
