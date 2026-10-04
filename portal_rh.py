@@ -5,6 +5,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import hashlib
+import secrets
 from datetime import datetime, date
 from io import BytesIO
 
@@ -945,6 +946,114 @@ def tela_regras_gratificacao():
 
 
 # ==========================================================
+# ==========================================================
+# FLUXO DE AUTORIZAÇÃO DA GRATIFICAÇÃO
+# ==========================================================
+def _grat_aprovacao(ano, mes):
+    try:
+        r = sb("GET", "rh_gratificacao_aprovacoes", f"select=*&ano=eq.{int(ano)}&mes=eq.{int(mes)}&order=id.desc&limit=1") or []
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
+def _grat_aprovacao_token(token):
+    try:
+        tok = urllib.parse.quote(str(token or "").strip(), safe="")
+        r = sb("GET", "rh_gratificacao_aprovacoes", f"select=*&token=eq.{tok}&limit=1") or []
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
+def _snapshot_gratificacao(df, ano, mes, enviado_por):
+    cols = [c for c in ["COLABORADOR","EMPRESA","FUNÇÃO","FRENTE","SALÁRIO","EQUIPE REVISÃO","MÉDIA TEMPO (h)","FALTAS","ATESTADOS (dias)","DNA","DESVIOS","INTEGRAL","GRATIFICAÇÃO","STATUS","MOTIVO / CÁLCULO"] if c in df.columns]
+    snap = df[cols].copy()
+    snap = snap.where(pd.notna(snap), None)
+    return {
+        "ano": int(ano), "mes": int(mes),
+        "enviado_por": str(enviado_por or "").strip(),
+        "enviado_em": datetime.now().isoformat(timespec="seconds"),
+        "total": float(pd.to_numeric(df.get("GRATIFICAÇÃO", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()),
+        "quantidade": int(len(df)),
+        "linhas": snap.to_dict(orient="records"),
+    }
+
+
+def _enviar_gratificacao_gestor(df, ano, mes, enviado_por):
+    token = secrets.token_urlsafe(24)
+    snapshot = _snapshot_gratificacao(df, ano, mes, enviado_por)
+    payload = {
+        "ano": int(ano), "mes": int(mes), "status": "AGUARDANDO_AUTORIZACAO",
+        "token": token, "snapshot": snapshot,
+        "enviado_por": str(enviado_por or "").strip(),
+        "enviado_em": datetime.now().isoformat(timespec="seconds"),
+    }
+    sb("POST", "rh_gratificacao_aprovacoes", "on_conflict=ano,mes", payload, "resolution=merge-duplicates,return=representation")
+    return token
+
+
+def _autorizar_gratificacao(token):
+    tok = urllib.parse.quote(str(token).strip(), safe="")
+    payload = {"status":"AUTORIZADA", "autorizado_em":datetime.now().isoformat(timespec="seconds"), "autorizado_por":"GESTOR (LINK)"}
+    sb("PATCH", "rh_gratificacao_aprovacoes", f"token=eq.{tok}&status=eq.AGUARDANDO_AUTORIZACAO", payload, "return=minimal")
+
+
+def _excel_snapshot_autorizado(reg, empresa=None):
+    snap = reg.get("snapshot") or {}
+    linhas = snap.get("linhas") or []
+    dfr = pd.DataFrame(linhas)
+    if empresa and not dfr.empty and "EMPRESA" in dfr.columns:
+        alvo = str(empresa).upper().strip()
+        emp_norm = (dfr["EMPRESA"].astype(str).str.upper().str.strip()
+                    .replace({"10 SUL SERVICE":"SERVICE", "10 SUL PRESTADORA":"PRESTADORA"}))
+        dfr = dfr[emp_norm.eq(alvo)].copy()
+    wb=Workbook(); ws=wb.active; ws.title="Gratificação Autorizada"
+    titulo=f"GRATIFICAÇÃO AUTORIZADA - {str(empresa or 'GERAL').upper()} - {int(reg.get('mes')):02d}/{int(reg.get('ano'))}"
+    ncols=max(1,len(dfr.columns))
+    ws.merge_cells(start_row=1,start_column=1,end_row=1,end_column=ncols)
+    c=ws.cell(1,1,titulo); c.font=Font(bold=True,size=14,color="FFFFFF"); c.fill=PatternFill("solid",fgColor="1F4E78"); c.alignment=Alignment(horizontal="center")
+    ws.cell(2,1,f"Autorizada em: {reg.get('autorizado_em') or ''}"); ws.cell(2,1).font=Font(bold=True)
+    if len(dfr.columns):
+        for j,col in enumerate(dfr.columns,1):
+            cell=ws.cell(4,j,col); cell.font=Font(bold=True,color="FFFFFF"); cell.fill=PatternFill("solid",fgColor="4472C4")
+        for i,row in enumerate(dfr.itertuples(index=False,name=None),5):
+            for j,val in enumerate(row,1): ws.cell(i,j,val)
+        for j,col in enumerate(dfr.columns,1): ws.column_dimensions[get_column_letter(j)].width=max(13,min(42,len(str(col))+6))
+        if "GRATIFICAÇÃO" in dfr.columns:
+            gc=list(dfr.columns).index("GRATIFICAÇÃO")+1
+            for r in range(5,5+len(dfr)): ws.cell(r,gc).number_format='R$ #,##0.00'
+    bio=BytesIO(); wb.save(bio); return bio.getvalue()
+
+
+def tela_publica_aprovacao_gratificacao(token):
+    reg=_grat_aprovacao_token(token)
+    if not reg:
+        st.error("Link de autorização inválido ou indisponível."); return
+    snap=reg.get("snapshot") or {}; linhas=snap.get("linhas") or []
+    meses=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+    mes=int(reg.get("mes") or 1); ano=int(reg.get("ano") or 0); status=str(reg.get("status") or "")
+    st.markdown("<div style='height:3vh'></div>",unsafe_allow_html=True)
+    a,b,c=st.columns([1,2.2,1])
+    with b:
+        st.markdown("## ✅ Aprovação de Gratificação")
+        st.markdown(f"### {meses[mes-1]} / {ano}")
+        st.caption("Confira a apuração abaixo. Esta página é somente leitura e não exige login.")
+        k1,k2=st.columns(2); k1.metric("Colaboradores", int(snap.get("quantidade") or len(linhas))); k2.metric("Total da gratificação", f"R$ {float(snap.get('total') or 0):,.2f}".replace(",","X").replace(".",",").replace("X","."))
+        if linhas:
+            dfp=pd.DataFrame(linhas)
+            vis=[c for c in ["COLABORADOR","EMPRESA","FRENTE","GRATIFICAÇÃO","STATUS","MOTIVO / CÁLCULO"] if c in dfp.columns]
+            st.dataframe(dfp[vis],hide_index=True,use_container_width=True,height=430)
+        if status=="AGUARDANDO_AUTORIZACAO":
+            st.warning("Ao autorizar, você confirma o pagamento exatamente conforme esta apuração.")
+            if st.button("✅ AUTORIZAR PAGAMENTO DA GRATIFICAÇÃO",type="primary",use_container_width=True,key="public_autorizar_grat"):
+                try:
+                    _autorizar_gratificacao(token); st.success("Gratificação autorizada com sucesso."); st.rerun()
+                except Exception as e: st.error(f"Não foi possível registrar a autorização: {e}")
+        elif status=="AUTORIZADA":
+            st.success(f"✅ GRATIFICAÇÃO AUTORIZADA em {reg.get('autorizado_em') or ''}.")
+        else: st.info(f"Status: {status}")
+
 # APURAÇÃO MENSAL DE GRATIFICAÇÃO
 # ==========================================================
 def ler_apuracao_gratificacao(ano, mes):
@@ -1289,6 +1398,57 @@ def tela_apuracao_gratificacao():
     if alterou_media:
         st.rerun()
 
+    # Fluxo de envio/autorização. Depois de enviado, esta competência fica somente leitura.
+    _apr = _grat_aprovacao(ano_g, mes_g)
+    _apr_status = str((_apr or {}).get("status") or "EM_APURACAO")
+    _bloqueada = _apr_status in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA")
+    st.markdown("---")
+    if _apr_status == "AGUARDANDO_AUTORIZACAO":
+        st.warning("🔒 AGUARDANDO AUTORIZAÇÃO DO GESTOR — esta competência está bloqueada para alterações.")
+        _token=(_apr or {}).get("token")
+        if _token:
+            try:
+                _base=str(st.context.url).split("?")[0]
+            except Exception:
+                _base=""
+            _link=f"{_base}?aprovar_gratificacao={_token}" if _base else f"?aprovar_gratificacao={_token}"
+            st.code(_link, language=None)
+            st.caption("Envie este link ao gestor. Ele abre a apuração em modo somente leitura, sem login.")
+    elif _apr_status == "AUTORIZADA":
+        st.success("✅ GRATIFICAÇÃO AUTORIZADA — À ENVIAR À CONTABILIDADE")
+        st.caption(f"Autorizada em: {(_apr or {}).get('autorizado_em') or '-'} • A competência permanece bloqueada.")
+        st.markdown("##### 📊 Gerar planilha autorizada para a Contabilidade")
+        _ga1, _ga2 = st.columns([1, 2], vertical_alignment="bottom")
+        _empresa_aut = _ga1.selectbox("Empresa / Contabilidade", ["SERVICE", "PRESTADORA"], key=f"grat_aut_empresa_{ano_g}_{mes_g}")
+        try:
+            _bytes_aut=_excel_snapshot_autorizado(_apr, _empresa_aut)
+            _ga2.download_button(
+                f"⬇️ Gerar planilha AUTORIZADA — {_empresa_aut}",
+                data=_bytes_aut,
+                file_name=f"GRATIFICACAO_AUTORIZADA_{_empresa_aut}_{mes_g:02d}_{ano_g}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary", use_container_width=True,
+                key=f"grat_aut_xlsx_{ano_g}_{mes_g}_{_empresa_aut}"
+            )
+            st.caption("A autorização é única para toda a competência. A seleção acima apenas separa o arquivo destinado à contabilidade de cada empresa; a apuração continua bloqueada.")
+        except Exception as e: st.error(f"Não foi possível gerar a planilha autorizada: {e}")
+    else:
+        st.info("Após enviar ao gestor, esta competência será bloqueada e não permitirá mais alterações.")
+        _confirm_key=f"grat_confirm_envio_{ano_g}_{mes_g}"
+        if st.button("📨 Enviar para autorização do gestor",type="primary",use_container_width=True,key=f"grat_enviar_gestor_{ano_g}_{mes_g}"):
+            st.session_state[_confirm_key]=True
+        if st.session_state.get(_confirm_key):
+            st.warning("Confirma o envio? Depois desta etapa não será possível alterar nenhum dado desta competência.")
+            _ca,_cb,_cc=st.columns([1,1,3])
+            if _ca.button("🔒 Confirmar e bloquear",type="primary",key=f"grat_confirma_envio_{ano_g}_{mes_g}"):
+                try:
+                    _usr_nome=(usr.get("nome") or usr.get("usuario") or "ADMIN")
+                    _enviar_gratificacao_gestor(df,ano_g,mes_g,_usr_nome)
+                    st.session_state.pop(_confirm_key,None); st.success("Apuração enviada e bloqueada."); st.rerun()
+                except Exception as e:
+                    st.error(f"Não foi possível enviar. Confirme se a tabela rh_gratificacao_aprovacoes foi criada no Supabase. Detalhe: {e}")
+            if _cb.button("Cancelar",key=f"grat_cancela_envio_{ano_g}_{mes_g}"): st.session_state.pop(_confirm_key,None); st.rerun()
+
     validos=df["GRATIFICAÇÃO"].dropna()
     k1,k2,k3,k4=st.columns(4)
     k1.metric("Colaboradores",len(df)); k2.metric("Elegíveis",int((df["GRATIFICAÇÃO"].fillna(0)>0).sum())); k3.metric("Zerados",int((df["GRATIFICAÇÃO"]==0).sum())); k4.metric("Total previsto",f"R$ {validos.sum():,.2f}".replace(",","X").replace(".",",").replace("X","."))
@@ -1296,7 +1456,10 @@ def tela_apuracao_gratificacao():
     # Relatório de fechamento para a Contabilidade
     st.markdown("---")
     st.markdown("#### 📄 Relatório para Contabilidade")
-    st.caption("Escolha a empresa e gere o fechamento da gratificação desta competência em Excel.")
+    if _apr_status != "AUTORIZADA":
+        st.caption("Disponível somente depois da autorização do gestor.")
+    else:
+        st.caption("Competência autorizada. Escolha a empresa para gerar o fechamento.")
     rc1, rc2 = st.columns([1, 2], vertical_alignment="bottom")
     empresa_rel = rc1.selectbox(
         "Empresa", ["SERVICE", "PRESTADORA"],
@@ -1304,7 +1467,9 @@ def tela_apuracao_gratificacao():
     )
 
     def _gerar_relatorio_contabilidade(df_base, empresa):
-        dfr = df_base[df_base["EMPRESA"].astype(str).str.upper().str.strip() == empresa].copy()
+        _emp_norm = (df_base["EMPRESA"].astype(str).str.upper().str.strip()
+                     .replace({"10 SUL SERVICE":"SERVICE", "10 SUL PRESTADORA":"PRESTADORA"}))
+        dfr = df_base[_emp_norm.eq(str(empresa).upper().strip())].copy()
         cols = ["COLABORADOR","EMPRESA","FUNÇÃO","FRENTE","SALÁRIO","INTEGRAL","GRATIFICAÇÃO","STATUS","MOTIVO / CÁLCULO","EQUIPE REVISÃO","MÉDIA TEMPO (h)"]
         dfr = dfr[cols].copy()
         dfr = dfr.rename(columns={
@@ -1343,7 +1508,7 @@ def tela_apuracao_gratificacao():
         return bio.getvalue(), len(dfr)
 
     chave_rel=f"grat_rel_bytes_{ano_g}_{mes_g}_{empresa_rel}"
-    if rc2.button("📊 Gerar relatório de gratificação", type="primary", key=f"gerar_rel_{ano_g}_{mes_g}"):
+    if rc2.button("📊 Gerar relatório de gratificação", type="primary", key=f"gerar_rel_{ano_g}_{mes_g}", disabled=(_apr_status != "AUTORIZADA")):
         try:
             dados_rel, qtd_rel = _gerar_relatorio_contabilidade(df, empresa_rel)
             st.session_state[chave_rel]=dados_rel
@@ -1891,6 +2056,8 @@ def _montar_matriz_cmc(df):
     p = p.reindex(columns=dias_presentes, fill_value="")
     p.columns = [f"{d:02d}" for d in dias_presentes]
     p = p.reset_index().rename(columns={"Nome":"COLABORADOR"})
+    # Exibe a função ao lado do colaborador para facilitar a conferência do fechamento.
+    p.insert(1, "FUNÇÃO", p["COLABORADOR"].map(lambda x: _FUNCOES_CMC.get(_nome_cmc(x), "NÃO CADASTRADA")))
     return p, ano, mes
 
 def _resumo_matriz_cmc(matriz):
@@ -1898,6 +2065,8 @@ def _resumo_matriz_cmc(matriz):
         return matriz.copy()
     dias_cols = [c for c in matriz.columns if str(c).isdigit()]
     r = matriz.copy()
+    if "FUNÇÃO" not in r.columns:
+        r.insert(1, "FUNÇÃO", r["COLABORADOR"].map(lambda x: _FUNCOES_CMC.get(_nome_cmc(x), "NÃO CADASTRADA")))
     for cod, nome in [("OK","PRESENTES"),("FA","FALTAS"),("A","ATESTADOS"),("FO","FOLGAS"),("FE","FÉRIAS")]:
         r[nome] = (r[dias_cols] == cod).sum(axis=1)
     r["TOTAL CONTABILIZADO"] = r[["PRESENTES","FALTAS","ATESTADOS","FOLGAS"]].sum(axis=1)
@@ -1954,15 +2123,18 @@ def tela_fechamento_cmc_bahia():
         st.success(f"{aba} lida com sucesso • Competência {mes:02d}/{ano} • {len(matriz)} colaboradores")
         dias_cols=[c for c in matriz.columns if str(c).isdigit()]
         opcoes=["", "OK", "FO", "FA", "A", "FE", "LB", "COMP"]
-        cfg={"COLABORADOR": st.column_config.TextColumn("COLABORADOR", disabled=True)}
+        cfg={
+            "COLABORADOR": st.column_config.TextColumn("COLABORADOR", disabled=True, width="large"),
+            "FUNÇÃO": st.column_config.TextColumn("FUNÇÃO", disabled=True, width="medium"),
+        }
         for c in dias_cols: cfg[c]=st.column_config.SelectboxColumn(c, options=opcoes, required=False, width="small")
-        edit = st.data_editor(matriz, use_container_width=True, hide_index=True, disabled=["COLABORADOR"], column_config=cfg, key=f"cmc_editor_{ano}_{mes}")
+        edit = st.data_editor(matriz, use_container_width=True, hide_index=True, disabled=["COLABORADOR", "FUNÇÃO"], column_config=cfg, key=f"cmc_editor_{ano}_{mes}")
         resumo=_resumo_matriz_cmc(edit)
         st.markdown("#### Resumo do fechamento")
 
         # Grade compacta para manter TOTAL e MÉDIA sempre visíveis sem rolagem horizontal.
         resumo_tela = resumo[[
-            "COLABORADOR", "PRESENTES", "FALTAS", "ATESTADOS", "FOLGAS",
+            "COLABORADOR", "FUNÇÃO", "PRESENTES", "FALTAS", "ATESTADOS", "FOLGAS",
             "FÉRIAS", "TOTAL CONTABILIZADO", "MÉDIA CONTABILIZADA"
         ]].rename(columns={
             "PRESENTES": "OK",
@@ -1978,6 +2150,7 @@ def tela_fechamento_cmc_bahia():
             hide_index=True,
             column_config={
                 "COLABORADOR": st.column_config.TextColumn("COLABORADOR", width="large"),
+                "FUNÇÃO": st.column_config.TextColumn("FUNÇÃO", width="medium"),
                 "OK": st.column_config.NumberColumn("OK", width="small", format="%d"),
                 "FA": st.column_config.NumberColumn("FA", width="small", format="%d"),
                 "A": st.column_config.NumberColumn("A", width="small", format="%d"),
@@ -2012,6 +2185,14 @@ def tela_fechamento_cmc_bahia():
 # ==========================================================
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
+    st.stop()
+
+try:
+    _qp_token = st.query_params.get("aprovar_gratificacao")
+except Exception:
+    _qp_token = None
+if _qp_token:
+    tela_publica_aprovacao_gratificacao(_qp_token)
     st.stop()
 
 if not st.session_state.get("usuario_logado"):
@@ -2309,6 +2490,7 @@ _periodo_key = f"{int(ano)}_{mes}"
 # o rascunho da grade completa pode ser reutilizado com índices diferentes e o
 # salvamento deixa de identificar corretamente a célula alterada.
 import hashlib
+import secrets
 _escopo_visual = ",".join(str(x) for x in ids)
 _escopo_hash = hashlib.sha1(_escopo_visual.encode("utf-8")).hexdigest()[:12]
 _draft_key = f"rh_grade_draft_{_periodo_key}_{_escopo_hash}"
