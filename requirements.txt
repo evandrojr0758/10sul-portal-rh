@@ -1,3 +1,4 @@
 streamlit-keyup
 openpyxl
 pandas
+reportlab
