@@ -1638,8 +1638,9 @@ def tela_apuracao_gratificacao():
     else:
         st.session_state[_chave_desvio_tratado] = list(_tratados)
 
-    if alterou_media:
-        st.rerun()
+    # Alterações de média em lote já executam st.rerun() no próprio fluxo de confirmação.
+    # Não usar a antiga flag `alterou_media`, pois ela deixou de existir após a integração
+    # das médias automáticas vindas das inspeções.
 
     # Fluxo de envio/autorização. Depois de enviado, esta competência fica somente leitura.
     _apr = _grat_aprovacao(ano_g, mes_g)
