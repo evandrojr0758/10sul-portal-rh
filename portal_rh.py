@@ -2489,18 +2489,7 @@ st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorr
 # Assim não são capturados/empurrados pela área superior do Streamlit.
 cabecalho_sessao(mostrar_ajuda=True)
 
-# Tela de inspeções: exclusiva para RH/ADMIN e isolada do restante do portal.
-if st.session_state.get("pagina_portal_rh") == "INSPECOES":
-    if st.button("← Voltar ao Portal RH", key="voltar_portal_inspecoes"):
-        st.session_state["pagina_portal_rh"] = "PRINCIPAL"
-        st.rerun()
-    st.markdown("---")
-    tela_inspecoes_carretas()
-    st.stop()
-
-if st.button("⏱️ Lançamento de Inspeções", key="abrir_inspecoes", type="primary"):
-    st.session_state["pagina_portal_rh"] = "INSPECOES"
-    st.rerun()
+# As inspeções são lançadas em aplicativo separado. O Portal RH apenas consulta automaticamente o Supabase.
 
 # Módulo CMC Bahia: página exclusiva e disponível somente para ADMIN.
 if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "CMC_BAHIA":
