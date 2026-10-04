@@ -1214,7 +1214,7 @@ def medias_inspecoes_por_equipe(ano, mes):
             if str(r.get("equipe") or "").upper().strip()!=equipe:
                 continue
             try:
-                h=float(r.get("duracao_horas"))
+                h=float(r.get("duracao_liquida_horas") if r.get("duracao_liquida_horas") is not None else r.get("duracao_horas"))
             except Exception:
                 try:
                     di=pd.to_datetime(r.get("inicio")); df=pd.to_datetime(r.get("fim")); h=(df-di).total_seconds()/3600
