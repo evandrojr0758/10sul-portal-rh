@@ -39,7 +39,7 @@ def sb(method, tabela, params="", payload=None, prefer=None):
     url = f"{SUPABASE_URL}/rest/v1/{tabela}"
     if params:
         url += "?" + params
-    data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    data = None if payload is None else json.dumps(_json_seguro(payload) if "_json_seguro" in globals() else payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("apikey", SUPABASE_SERVICE_KEY)
     req.add_header("Authorization", f"Bearer {SUPABASE_SERVICE_KEY}")
@@ -966,17 +966,43 @@ def _grat_aprovacao_token(token):
         return None
 
 
+def _json_seguro(valor):
+    """Converte valores pandas/numpy/NaN em tipos JSON válidos para o Supabase."""
+    if valor is None:
+        return None
+    try:
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
+    if isinstance(valor, dict):
+        return {str(k): _json_seguro(v) for k, v in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [_json_seguro(v) for v in valor]
+    # numpy scalars e tipos semelhantes
+    if hasattr(valor, "item"):
+        try:
+            return _json_seguro(valor.item())
+        except Exception:
+            pass
+    if isinstance(valor, (datetime, date)):
+        return valor.isoformat()
+    if isinstance(valor, (str, int, float, bool)):
+        return valor
+    return str(valor)
+
+
 def _snapshot_gratificacao(df, ano, mes, enviado_por):
     cols = [c for c in ["COLABORADOR","EMPRESA","FUNÇÃO","FRENTE","SALÁRIO","EQUIPE REVISÃO","MÉDIA TEMPO (h)","FALTAS","ATESTADOS (dias)","DNA","DESVIOS","INTEGRAL","GRATIFICAÇÃO","STATUS","MOTIVO / CÁLCULO"] if c in df.columns]
     snap = df[cols].copy()
-    snap = snap.where(pd.notna(snap), None)
+    linhas = [_json_seguro(reg) for reg in snap.to_dict(orient="records")]
     return {
         "ano": int(ano), "mes": int(mes),
         "enviado_por": str(enviado_por or "").strip(),
         "enviado_em": datetime.now().isoformat(timespec="seconds"),
         "total": float(pd.to_numeric(df.get("GRATIFICAÇÃO", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()),
         "quantidade": int(len(df)),
-        "linhas": snap.to_dict(orient="records"),
+        "linhas": linhas,
     }
 
 
