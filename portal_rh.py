@@ -21,6 +21,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.platypus import SimpleDocTemplate, Table as PDFTable, TableStyle as PDFTableStyle, Paragraph, Spacer
+from reportlab.lib.units import mm
 
 st.set_page_config(page_title="Portal RH | 10 Sul", page_icon="👥", layout="wide")
 
@@ -1047,31 +1053,76 @@ def _reabrir_gratificacao_admin(ano, mes, usuario, motivo):
     sb("PATCH", "rh_gratificacao_aprovacoes", f"ano=eq.{int(ano)}&mes=eq.{int(mes)}", payload, "return=minimal")
 
 
-def _excel_snapshot_autorizado(reg, empresa=None):
+def _pdf_snapshot_autorizado(reg, empresa=None):
     snap = reg.get("snapshot") or {}
     linhas = snap.get("linhas") or []
     dfr = pd.DataFrame(linhas)
+
     if empresa and not dfr.empty and "EMPRESA" in dfr.columns:
         alvo = str(empresa).upper().strip()
         emp_norm = (dfr["EMPRESA"].astype(str).str.upper().str.strip()
                     .replace({"10 SUL SERVICE":"SERVICE", "10 SUL PRESTADORA":"PRESTADORA"}))
         dfr = dfr[emp_norm.eq(alvo)].copy()
-    wb=Workbook(); ws=wb.active; ws.title="Gratificação Autorizada"
-    titulo=f"GRATIFICAÇÃO AUTORIZADA - {str(empresa or 'GERAL').upper()} - {int(reg.get('mes')):02d}/{int(reg.get('ano'))}"
-    ncols=max(1,len(dfr.columns))
-    ws.merge_cells(start_row=1,start_column=1,end_row=1,end_column=ncols)
-    c=ws.cell(1,1,titulo); c.font=Font(bold=True,size=14,color="FFFFFF"); c.fill=PatternFill("solid",fgColor="1F4E78"); c.alignment=Alignment(horizontal="center")
-    ws.cell(2,1,f"Autorizada em: {reg.get('autorizado_em') or ''}"); ws.cell(2,1).font=Font(bold=True)
-    if len(dfr.columns):
-        for j,col in enumerate(dfr.columns,1):
-            cell=ws.cell(4,j,col); cell.font=Font(bold=True,color="FFFFFF"); cell.fill=PatternFill("solid",fgColor="4472C4")
-        for i,row in enumerate(dfr.itertuples(index=False,name=None),5):
-            for j,val in enumerate(row,1): ws.cell(i,j,val)
-        for j,col in enumerate(dfr.columns,1): ws.column_dimensions[get_column_letter(j)].width=max(13,min(42,len(str(col))+6))
-        if "GRATIFICAÇÃO" in dfr.columns:
-            gc=list(dfr.columns).index("GRATIFICAÇÃO")+1
-            for r in range(5,5+len(dfr)): ws.cell(r,gc).number_format='R$ #,##0.00'
-    bio=BytesIO(); wb.save(bio); return bio.getvalue()
+
+    if "GRATIFICAÇÃO" not in dfr.columns:
+        dfr["GRATIFICAÇÃO"] = 0.0
+    dfr["GRATIFICAÇÃO"] = pd.to_numeric(dfr["GRATIFICAÇÃO"], errors="coerce").fillna(0.0)
+    # Contabilidade recebe somente quem possui valor efetivo a receber.
+    dfr = dfr[dfr["GRATIFICAÇÃO"] > 0].copy()
+    if "COLABORADOR" not in dfr.columns:
+        dfr["COLABORADOR"] = ""
+    dfr = dfr[["COLABORADOR", "GRATIFICAÇÃO"]].sort_values("COLABORADOR")
+    total = float(dfr["GRATIFICAÇÃO"].sum())
+
+    def moeda(v):
+        return f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    bio = BytesIO()
+    doc = SimpleDocTemplate(
+        bio, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm,
+        topMargin=16*mm, bottomMargin=16*mm,
+        title=f"Gratificação Autorizada - {empresa or 'GERAL'}"
+    )
+    styles = getSampleStyleSheet()
+    titulo = ParagraphStyle("titulo_grat", parent=styles["Heading1"], alignment=TA_CENTER, fontSize=15, leading=18, spaceAfter=5*mm)
+    subt = ParagraphStyle("sub_grat", parent=styles["Normal"], alignment=TA_CENTER, fontSize=9, textColor=colors.HexColor("#555555"), spaceAfter=6*mm)
+    total_style = ParagraphStyle("total_grat", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=11, leading=14)
+
+    mes = int(reg.get("mes") or 0); ano = int(reg.get("ano") or 0)
+    meses_pdf = ["JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"]
+    mes_nome = meses_pdf[mes-1] if 1 <= mes <= 12 else f"{mes:02d}"
+    story = [
+        Paragraph(f"GRATIFICAÇÃO AUTORIZADA - {str(empresa or 'GERAL').upper()}", titulo),
+        Paragraph(f"Competência: {mes_nome} / {ano} &nbsp;&nbsp;|&nbsp;&nbsp; Autorizada em: {reg.get('autorizado_em') or '-'}", subt),
+    ]
+
+    dados = [["COLABORADOR", "GRATIFICAÇÃO"]]
+    for _, row in dfr.iterrows():
+        dados.append([str(row["COLABORADOR"]), moeda(row["GRATIFICAÇÃO"])])
+    dados.append(["TOTAL", moeda(total)])
+
+    tabela = PDFTable(dados, colWidths=[125*mm, 45*mm], repeatRows=1, hAlign="CENTER")
+    tabela.setStyle(PDFTableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1F4E78")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("ALIGN", (0,0), (-1,0), "CENTER"),
+        ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
+        ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#EAF2F8")),
+        ("ALIGN", (1,1), (1,-1), "RIGHT"),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#C9D2DC")),
+        ("ROWBACKGROUNDS", (0,1), (-1,-2), [colors.white, colors.HexColor("#F7F9FB")]),
+        ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+        ("LEFTPADDING", (0,0), (-1,-1), 7),
+        ("RIGHTPADDING", (0,0), (-1,-1), 7),
+    ]))
+    story.append(tabela)
+    story.append(Spacer(1, 4*mm))
+    story.append(Paragraph(f"<b>Total autorizado: {moeda(total)}</b> &nbsp;&nbsp;|&nbsp;&nbsp; Colaboradores com valor a receber: {len(dfr)}", total_style))
+    doc.build(story)
+    return bio.getvalue()
 
 
 def tela_publica_aprovacao_gratificacao(token):
@@ -1465,21 +1516,21 @@ def tela_apuracao_gratificacao():
     elif _apr_status == "AUTORIZADA":
         st.success("✅ GRATIFICAÇÃO AUTORIZADA — À ENVIAR À CONTABILIDADE")
         st.caption(f"Autorizada em: {(_apr or {}).get('autorizado_em') or '-'} • A competência permanece bloqueada.")
-        st.markdown("##### 📊 Gerar planilha autorizada para a Contabilidade")
+        st.markdown("##### 📄 Gerar PDF autorizado para a Contabilidade")
         _ga1, _ga2 = st.columns([1, 2], vertical_alignment="bottom")
         _empresa_aut = _ga1.selectbox("Empresa / Contabilidade", ["SERVICE", "PRESTADORA"], key=f"grat_aut_empresa_{ano_g}_{mes_g}")
         try:
-            _bytes_aut=_excel_snapshot_autorizado(_apr, _empresa_aut)
+            _bytes_aut=_pdf_snapshot_autorizado(_apr, _empresa_aut)
             _ga2.download_button(
-                f"⬇️ Gerar planilha AUTORIZADA — {_empresa_aut}",
+                f"⬇️ Gerar PDF AUTORIZADO — {_empresa_aut}",
                 data=_bytes_aut,
-                file_name=f"GRATIFICACAO_AUTORIZADA_{_empresa_aut}_{mes_g:02d}_{ano_g}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                file_name=f"GRATIFICACAO_AUTORIZADA_{_empresa_aut}_{mes_g:02d}_{ano_g}.pdf",
+                mime="application/pdf",
                 type="primary", use_container_width=True,
-                key=f"grat_aut_xlsx_{ano_g}_{mes_g}_{_empresa_aut}"
+                key=f"grat_aut_pdf_{ano_g}_{mes_g}_{_empresa_aut}"
             )
-            st.caption("A autorização é única para toda a competência. A seleção acima apenas separa o arquivo destinado à contabilidade de cada empresa; a apuração continua bloqueada.")
-        except Exception as e: st.error(f"Não foi possível gerar a planilha autorizada: {e}")
+            st.caption("O PDF leva somente COLABORADOR e GRATIFICAÇÃO, exclui valores zerados e apresenta o total autorizado. A apuração continua bloqueada.")
+        except Exception as e: st.error(f"Não foi possível gerar o PDF autorizado: {e}")
     if _apr_status in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA") and str(usr.get("perfil") or "").upper() == "ADMIN":
         st.markdown("##### 🧪 Administração / Testes")
         _rk = f"grat_reabrir_{ano_g}_{mes_g}"
