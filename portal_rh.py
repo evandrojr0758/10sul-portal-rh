@@ -999,6 +999,28 @@ def _autorizar_gratificacao(token):
     sb("PATCH", "rh_gratificacao_aprovacoes", f"token=eq.{tok}&status=eq.AGUARDANDO_AUTORIZACAO", payload, "return=minimal")
 
 
+def _reabrir_gratificacao_admin(ano, mes, usuario, motivo):
+    reg = _grat_aprovacao(ano, mes) or {}
+    snap = reg.get("snapshot") or {}
+    hist = list(snap.get("reaberturas") or [])
+    hist.append({
+        "em": datetime.now().isoformat(timespec="seconds"),
+        "por": str(usuario or "ADMIN").strip(),
+        "motivo": str(motivo or "").strip(),
+        "status_anterior": str(reg.get("status") or ""),
+        "autorizado_em_anterior": reg.get("autorizado_em"),
+        "autorizado_por_anterior": reg.get("autorizado_por"),
+    })
+    snap["reaberturas"] = hist
+    payload = {
+        "status": "CANCELADA",
+        "snapshot": snap,
+        "autorizado_em": None,
+        "autorizado_por": None,
+    }
+    sb("PATCH", "rh_gratificacao_aprovacoes", f"ano=eq.{int(ano)}&mes=eq.{int(mes)}", payload, "return=minimal")
+
+
 def _excel_snapshot_autorizado(reg, empresa=None):
     snap = reg.get("snapshot") or {}
     linhas = snap.get("linhas") or []
@@ -1432,7 +1454,31 @@ def tela_apuracao_gratificacao():
             )
             st.caption("A autorização é única para toda a competência. A seleção acima apenas separa o arquivo destinado à contabilidade de cada empresa; a apuração continua bloqueada.")
         except Exception as e: st.error(f"Não foi possível gerar a planilha autorizada: {e}")
-    else:
+    if _apr_status in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA") and str(usr.get("perfil") or "").upper() == "ADMIN":
+        st.markdown("##### 🧪 Administração / Testes")
+        _rk = f"grat_reabrir_{ano_g}_{mes_g}"
+        if st.button("🔓 Cancelar envio e reabrir apuração", key=f"btn_{_rk}"):
+            st.session_state[_rk] = True
+        if st.session_state.get(_rk):
+            st.warning("⚠️ Esta ação invalida o fluxo atual de autorização e volta a competência para edição. Se já estiver autorizada, a autorização será cancelada.")
+            _motivo_reab = st.text_input("Motivo da reabertura *", key=f"motivo_{_rk}", placeholder="Ex.: Teste do fluxo de aprovação")
+            _r1, _r2, _r3 = st.columns([1.2,1,3])
+            if _r1.button("Confirmar reabertura", type="primary", key=f"confirm_{_rk}"):
+                if not str(_motivo_reab or "").strip():
+                    st.error("Informe o motivo da reabertura.")
+                else:
+                    try:
+                        _usr_nome=(usr.get("nome") or usr.get("usuario") or "ADMIN")
+                        _reabrir_gratificacao_admin(ano_g, mes_g, _usr_nome, _motivo_reab)
+                        st.session_state.pop(_rk, None)
+                        st.success("Envio/autorização cancelado. A competência voltou para edição.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível reabrir a competência: {e}")
+            if _r2.button("Voltar", key=f"cancel_{_rk}"):
+                st.session_state.pop(_rk, None); st.rerun()
+
+    if _apr_status not in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA"):
         st.info("Após enviar ao gestor, esta competência será bloqueada e não permitirá mais alterações.")
         _confirm_key=f"grat_confirm_envio_{ano_g}_{mes_g}"
         if st.button("📨 Enviar para autorização do gestor",type="primary",use_container_width=True,key=f"grat_enviar_gestor_{ano_g}_{mes_g}"):
