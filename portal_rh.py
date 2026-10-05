@@ -2318,7 +2318,9 @@ def _modal_horas_extras_cmc(df, ano, mes):
             novo["MINUTOS"] = base.reset_index(drop=True)["MINUTOS"]
             st.session_state[estado_key] = novo
             st.session_state[versao_key] = st.session_state.get(versao_key, 0) + 1
-            st.rerun()
+            # Reexecuta somente o fragmento do st.dialog. Um rerun completo
+            # da aplicação fecha o modal porque o botão que o abriu deixa de estar ativo.
+            st.rerun(scope="fragment")
 
         if b2.button("⬜ Desmarcar tudo", use_container_width=True, key=f"cmc_he_desmarcar_tudo_{ano}_{mes}"):
             novo = edit.copy().reset_index(drop=True)
@@ -2326,7 +2328,9 @@ def _modal_horas_extras_cmc(df, ano, mes):
             novo["MINUTOS"] = base.reset_index(drop=True)["MINUTOS"]
             st.session_state[estado_key] = novo
             st.session_state[versao_key] = st.session_state.get(versao_key, 0) + 1
-            st.rerun()
+            # Reexecuta somente o fragmento do st.dialog. Um rerun completo
+            # da aplicação fecha o modal porque o botão que o abriu deixa de estar ativo.
+            st.rerun(scope="fragment")
 
         # Guarda também as edições individuais para uso no botão Aplicar.
         atual = edit.copy().reset_index(drop=True)
