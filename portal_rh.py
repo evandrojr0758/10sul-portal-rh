@@ -2103,6 +2103,7 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50% APÓS 01:28</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50apos}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50a)}</td></tr>
         <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 100%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he100}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v100)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t100)}</td></tr>
         </table><br>
+        <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;padding:8px 0'><span>QUANTIDADE DE COLABORADORES</span><span>{int(resumo['COLABORADOR'].nunique())}</span></div>
         <div style='display:flex;justify-content:space-between;font-size:20px;font-weight:800;padding:8px 0'><span>TOTAL COLABORADOR</span><span>{_fmt_qtd(sum(x[1] for x in linhas))}</span><span>{_fmt_brl(total_geral)}</span></div>
         <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;color:red;padding:8px 0'><span>FALTAS</span><span>{faltas}</span><span>{_fmt_brl(valor_falta)}</span><span>({_fmt_brl(total_faltas)})</span></div>
         <div style='margin-top:10px;border-top:2px solid #2f7d1f;padding-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:23px;font-weight:900;color:#1f2937'><span>TOTAL</span><span>{_fmt_brl(total_liquido)}</span></div>
@@ -2132,7 +2133,7 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
             header_h = 70
             tabela_h = 62 + (len(linhas) + 1) * row_h
             extras_h = 3 * row_h + 45
-            totais_h = 190
+            totais_h = 245
             H = margem * 2 + header_h + tabela_h + extras_h + totais_h
             img = Image.new("RGB", (W, H), "white")
             d = ImageDraw.Draw(img)
@@ -2190,6 +2191,11 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
                 y += row_h
 
             y += 40
+            d.text((x0,y), "QUANTIDADE DE COLABORADORES", fill=preto, font=f_bold)
+            qtd_colab_txt=str(int(resumo["COLABORADOR"].nunique()))
+            bb=d.textbbox((0,0),qtd_colab_txt,font=f_bold)
+            d.text((x1-(bb[2]-bb[0]),y), qtd_colab_txt, fill=preto, font=f_bold)
+            y += 55
             d.text((x0,y), "TOTAL COLABORADOR", fill=preto, font=f_bold)
             qtdtxt=_fmt_qtd(sum(x[1] for x in linhas)); bb=d.textbbox((0,0),qtdtxt,font=f_bold)
             d.text((W//2-(bb[2]-bb[0])//2,y), qtdtxt, fill=preto, font=f_bold)
