@@ -2255,9 +2255,13 @@ def _codigo_ponto_prestadora(row):
     textos = " | ".join(valores).upper()
 
     # Ocorrências explícitas do ponto têm prioridade sobre horários.
+    # O relatório da Prestadora usa várias grafias para falta na coluna Entrada 1/G,
+    # por exemplo: Falta, Falt, FALTA, D.Falt, D. Falt, D.Falta e D. Falta.
+    # Todas essas variações devem ser classificadas como FA.
     if "ATEST" in textos:
         return "A"
-    if "FALTA" in textos:
+    textos_falta = (textos.replace(".", " ").replace("-", " ").replace("_", " "))
+    if any(token.startswith("FALT") for token in textos_falta.split()):
         return "FA"
     if "FERIAS" in textos or "FÉRIAS" in textos:
         return "FE"
