@@ -2050,6 +2050,68 @@ def _nome_cmc(txt):
     import re
     return re.sub(r"\s+", " ", str(txt or "").strip().upper())
 
+def _funcoes_cmc_ativas():
+    """Cadastro CMC Bahia isolado do cadastro de Aracruz."""
+    if "cadastro_funcoes_cmc_bahia" not in st.session_state:
+        st.session_state["cadastro_funcoes_cmc_bahia"] = dict(_FUNCOES_CMC)
+    return st.session_state["cadastro_funcoes_cmc_bahia"]
+
+def _valores_cmc_ativos():
+    if "cadastro_valores_cmc_bahia" not in st.session_state:
+        st.session_state["cadastro_valores_cmc_bahia"] = dict(_VALORES_CMC)
+    return st.session_state["cadastro_valores_cmc_bahia"]
+
+def _modal_cadastro_colaboradores_cmc():
+    @st.dialog("Cadastro de Colaboradores — CMC Bahia", width="large")
+    def _abrir():
+        cadastro = _funcoes_cmc_ativas()
+        df = pd.DataFrame(
+            [{"COLABORADOR": n, "FUNÇÃO": f} for n, f in sorted(cadastro.items())]
+        )
+        editado = st.data_editor(
+            df, num_rows="dynamic", use_container_width=True, hide_index=True,
+            key="editor_cadastro_colaboradores_cmc",
+            column_config={
+                "COLABORADOR": st.column_config.TextColumn("COLABORADOR", required=True),
+                "FUNÇÃO": st.column_config.SelectboxColumn(
+                    "FUNÇÃO", options=sorted(_valores_cmc_ativos().keys()), required=True
+                ),
+            },
+        )
+        if st.button("💾 Salvar cadastro CMC Bahia", type="primary", use_container_width=True, key="salvar_cadastro_cmc"):
+            novo = {}
+            for _, row in editado.iterrows():
+                nome = _nome_cmc(row.get("COLABORADOR"))
+                funcao = _nome_cmc(row.get("FUNÇÃO"))
+                if nome and funcao:
+                    novo[nome] = funcao
+            st.session_state["cadastro_funcoes_cmc_bahia"] = novo
+            st.success("Registro efetuado com sucesso!")
+    _abrir()
+
+def _modal_valores_funcoes_cmc():
+    @st.dialog("Valores por Função — CMC Bahia", width="large")
+    def _abrir():
+        valores = _valores_cmc_ativos()
+        df = pd.DataFrame([{"FUNÇÃO": f, "VALOR MENSAL": v} for f, v in valores.items()])
+        editado = st.data_editor(
+            df, num_rows="dynamic", use_container_width=True, hide_index=True,
+            key="editor_valores_funcoes_cmc",
+            column_config={
+                "FUNÇÃO": st.column_config.TextColumn("FUNÇÃO", required=True),
+                "VALOR MENSAL": st.column_config.NumberColumn("VALOR MENSAL (R$)", min_value=0.0, format="R$ %.2f", required=True),
+            },
+        )
+        if st.button("💾 Salvar valores CMC Bahia", type="primary", use_container_width=True, key="salvar_valores_cmc"):
+            novo = {}
+            for _, row in editado.iterrows():
+                funcao = _nome_cmc(row.get("FUNÇÃO"))
+                if funcao:
+                    novo[funcao] = float(row.get("VALOR MENSAL") or 0)
+            st.session_state["cadastro_valores_cmc_bahia"] = novo
+            st.success("Registro efetuado com sucesso!")
+    _abrir()
+
 def _fmt_brl(v):
     return "R$ " + f"{float(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
 
@@ -2068,10 +2130,11 @@ def _horas_decimal(hhmm):
 
 def _resumo_financeiro_cmc(resumo):
     r=resumo.copy()
-    r["FUNÇÃO"] = r["COLABORADOR"].map(lambda x: _FUNCOES_CMC.get(_nome_cmc(x), "NÃO CADASTRADA"))
+    r["FUNÇÃO"] = r["COLABORADOR"].map(lambda x: _funcoes_cmc_ativas().get(_nome_cmc(x), "NÃO CADASTRADA"))
     g=r.groupby("FUNÇÃO", dropna=False)["MÉDIA CONTABILIZADA"].sum().to_dict()
     ordem=["MECANICO I","MECANICO II","SOLDADOR","BORRACHEIRO","ELETRICISTA"]
-    return [(f, float(g.get(f,0)), _VALORES_CMC[f], float(g.get(f,0))*_VALORES_CMC[f]) for f in ordem]
+    valores = _valores_cmc_ativos()
+    return [(f, float(g.get(f,0)), float(valores.get(f,0)), float(g.get(f,0))*float(valores.get(f,0))) for f in ordem]
 
 def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
     @st.dialog("Resumo Financeiro — CMC Bahia", width="large")
@@ -2112,7 +2175,7 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         <div style='margin-top:10px;border-top:2px solid #2f7d1f;padding-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:23px;font-weight:900;color:#1f2937'><span>TOTAL</span><span>{_fmt_brl(total_liquido)}</span></div>
         """
         st.markdown(html2, unsafe_allow_html=True)
-        faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _FUNCOES_CMC]
+        faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _funcoes_cmc_ativas()]
         if faltantes:
             st.warning("Função não cadastrada para: " + ", ".join(faltantes))
     _abrir()
@@ -2411,7 +2474,7 @@ def _montar_matriz_cmc(df):
     p.columns = [f"{d:02d}" for d in dias_presentes]
     p = p.reset_index().rename(columns={"Nome":"COLABORADOR"})
     # Exibe a função ao lado do colaborador para facilitar a conferência do fechamento.
-    p.insert(1, "FUNÇÃO", p["COLABORADOR"].map(lambda x: _FUNCOES_CMC.get(_nome_cmc(x), "NÃO CADASTRADA")))
+    p.insert(1, "FUNÇÃO", p["COLABORADOR"].map(lambda x: _funcoes_cmc_ativas().get(_nome_cmc(x), "NÃO CADASTRADA")))
     return p, ano, mes
 
 def _resumo_matriz_cmc(matriz):
@@ -2420,7 +2483,7 @@ def _resumo_matriz_cmc(matriz):
     dias_cols = [c for c in matriz.columns if str(c).isdigit()]
     r = matriz.copy()
     if "FUNÇÃO" not in r.columns:
-        r.insert(1, "FUNÇÃO", r["COLABORADOR"].map(lambda x: _FUNCOES_CMC.get(_nome_cmc(x), "NÃO CADASTRADA")))
+        r.insert(1, "FUNÇÃO", r["COLABORADOR"].map(lambda x: _funcoes_cmc_ativas().get(_nome_cmc(x), "NÃO CADASTRADA")))
     for cod, nome in [("OK","PRESENTES"),("FA","FALTAS"),("A","ATESTADOS"),("FO","FOLGAS"),("FE","FÉRIAS")]:
         r[nome] = (r[dias_cols] == cod).sum(axis=1)
     r["TOTAL CONTABILIZADO"] = r[["PRESENTES","FALTAS","ATESTADOS","FOLGAS"]].sum(axis=1)
@@ -2464,6 +2527,15 @@ def _excel_cmc(matriz, ano, mes):
 def tela_fechamento_cmc_bahia():
     st.markdown("### 🏭 Fechamento CMC Bahia")
     st.caption("Importe a planilha do ponto eletrônico. O Portal monta automaticamente a matriz mensal por colaborador e dia, sem PROCV/PROCX.")
+
+    st.markdown("#### 👥 Cadastros do Fechamento")
+    _cad1, _cad2 = st.columns(2)
+    if _cad1.button("👥 Cadastro de Colaboradores", use_container_width=True, key="abrir_cadastro_colaboradores_cmc"):
+        _modal_cadastro_colaboradores_cmc()
+    if _cad2.button("💰 Valores por Função", use_container_width=True, key="abrir_valores_funcoes_cmc"):
+        _modal_valores_funcoes_cmc()
+    st.divider()
+
     arquivos = st.file_uploader(
         "Planilha do ponto eletrônico — CMC Bahia",
         type=["xlsx", "xls"],
