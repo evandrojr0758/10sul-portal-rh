@@ -8,6 +8,9 @@ import urllib.parse
 import hashlib
 import secrets
 import base64
+import smtplib
+from email.message import EmailMessage
+from email.utils import make_msgid
 from datetime import datetime, time, date
 from io import BytesIO
 
@@ -2136,25 +2139,101 @@ def _resumo_financeiro_cmc(resumo):
     valores = _valores_cmc_ativos()
     return [(f, float(g.get(f,0)), float(valores.get(f,0)), float(g.get(f,0))*float(valores.get(f,0))) for f in ordem]
 
+def _gerar_png_resumo_cmc(linhas, mes_nome, ano, mes, dias_contabilizados, he50, he50apos, he100, v50, v100, faltas, valor_falta):
+    """Gera uma imagem PNG compacta do resumo financeiro para baixar/anexar ao e-mail."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        W = 1400
+        row_h = 42
+        H = 120 + row_h * (len(linhas) + 3) + 210
+        img = Image.new("RGB", (W, H), "white")
+        d = ImageDraw.Draw(img)
+        try:
+            fb = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+            fh = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
+            fn = ImageFont.truetype("DejaVuSans.ttf", 18)
+        except Exception:
+            fb = fh = fn = ImageFont.load_default()
+        green=(47,125,31); dark=(31,41,55); red=(220,38,38); grid=(70,70,70)
+        d.rectangle((20,20,W-20,72), fill=green)
+        titulo=f"FECHAMENTO {mes_nome} - {ano} 01/{mes:02d} A {dias_contabilizados:02d}/{mes:02d}"
+        bb=d.textbbox((0,0),titulo,font=fb); d.text(((W-(bb[2]-bb[0]))/2,32),titulo,fill="white",font=fb)
+        xs=[20,330,610,1010,W-20]; y=82
+        headers=["FUNÇÃO","QTD. COLABORADORES","VALOR / COLABORADOR","TOTAL / FUNÇÃO"]
+        for i,h in enumerate(headers):
+            d.rectangle((xs[i],y,xs[i+1],y+row_h),outline=grid,width=1); d.text((xs[i]+10,y+10),h,fill=dark,font=fh)
+        y+=row_h; total=0
+        for f,q,v,t in linhas:
+            total+=t; vals=[f,_fmt_qtd(q),_fmt_brl(v),_fmt_brl(t)]
+            for i,val in enumerate(vals):
+                d.rectangle((xs[i],y,xs[i+1],y+row_h),outline=grid,width=1); d.text((xs[i]+10,y+10),str(val),fill=dark,font=fn)
+            y+=row_h
+        t50=_horas_decimal(he50)*v50; t50a=_horas_decimal(he50apos)*v50; t100=_horas_decimal(he100)*v100
+        for desc,horas,valor,tot in [("HORA EXTRA 50%",he50,v50,t50),("HORA EXTRA 50% APÓS 01:28",he50apos,v50,t50a),("HORA EXTRA 100%",he100,v100,t100)]:
+            vals=[desc,horas,_fmt_brl(valor),_fmt_brl(tot)]
+            for i,val in enumerate(vals):
+                d.rectangle((xs[i],y,xs[i+1],y+row_h),outline=grid,width=1); d.text((xs[i]+10,y+10),str(val),fill=dark,font=fn)
+            y+=row_h
+        total_geral=total+t50+t50a+t100; total_faltas=faltas*valor_falta; total_liquido=total_geral-total_faltas
+        y+=18
+        d.text((30,y),"TOTAL COLABORADOR",fill=dark,font=fh); d.text((600,y),_fmt_qtd(sum(x[1] for x in linhas)),fill=dark,font=fh); d.text((1100,y),_fmt_brl(total_geral),fill=dark,font=fh); y+=45
+        d.text((30,y),"FALTAS",fill=red,font=fh); d.text((600,y),str(faltas),fill=red,font=fh); d.text((820,y),_fmt_brl(valor_falta),fill=red,font=fh); d.text((1100,y),f"({_fmt_brl(total_faltas)})",fill=red,font=fh); y+=52
+        d.line((20,y,W-20,y),fill=green,width=3); y+=18
+        d.text((30,y),"TOTAL",fill=dark,font=fb); d.text((1080,y),_fmt_brl(total_liquido),fill=dark,font=fb)
+        bio=BytesIO(); img.save(bio,format="PNG",optimize=True); return bio.getvalue(), total_liquido
+    except Exception as e:
+        return None, 0.0
+
+
+def _modal_email_cmc(png_bytes, mes_nome, ano, total_liquido):
+    @st.dialog("Enviar fechamento por e-mail", width="large")
+    def _abrir_email():
+        st.caption("A imagem do Resumo Financeiro será exibida no corpo do e-mail e também anexada em PNG.")
+        padrao = st.session_state.get("cmc_email_destinatarios", "")
+        dest = st.text_area("Destinatários", value=padrao, placeholder="email1@empresa.com; email2@empresa.com")
+        assunto = st.text_input("Assunto", value=f"Fechamento CMC Bahia — {mes_nome.title()}/{ano}")
+        corpo = st.text_area("Mensagem", value=f"Olá, boa tarde.\n\nSegue o fechamento CMC Bahia referente à competência {mes_nome.title()}/{ano}.\n\nTotal do fechamento: {_fmt_brl(total_liquido)}.\n\nAtenciosamente,")
+        st.markdown("**Configuração de envio**")
+        c1,c2=st.columns(2)
+        smtp_host=c1.text_input("Servidor SMTP", value=st.session_state.get("cmc_smtp_host","smtp.office365.com"))
+        smtp_port=c2.number_input("Porta", min_value=1, max_value=65535, value=int(st.session_state.get("cmc_smtp_port",587)), step=1)
+        remetente=c1.text_input("E-mail remetente", value=st.session_state.get("cmc_smtp_user",""))
+        senha=c2.text_input("Senha / senha de aplicativo", value=st.session_state.get("cmc_smtp_pass",""), type="password")
+        if st.button("📧 Enviar fechamento", type="primary", use_container_width=True):
+            emails=[x.strip() for x in re.split(r"[;,\n]+",dest) if x.strip()]
+            if not emails or not remetente or not senha or not smtp_host:
+                st.error("Informe destinatário(s), remetente, senha e servidor SMTP.")
+                return
+            try:
+                msg=EmailMessage(); msg["Subject"]=assunto; msg["From"]=remetente; msg["To"]=", ".join(emails)
+                cid=make_msgid(domain="10sul.local")
+                html_corpo="<br>".join(corpo.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").splitlines())
+                msg.set_content(corpo)
+                msg.add_alternative(f"<div style='font-family:Arial,sans-serif;font-size:14px'>{html_corpo}<br><br><img src='cid:{cid[1:-1]}' style='max-width:100%;height:auto'></div>", subtype="html")
+                msg.get_payload()[1].add_related(png_bytes, maintype="image", subtype="png", cid=cid, filename=f"FECHAMENTO_CMC_BAHIA_{ano}_{mes_nome}.png")
+                msg.add_attachment(png_bytes, maintype="image", subtype="png", filename=f"FECHAMENTO_CMC_BAHIA_{ano}_{mes_nome}.png")
+                with smtplib.SMTP(smtp_host,int(smtp_port),timeout=30) as server:
+                    server.ehlo(); server.starttls(); server.ehlo(); server.login(remetente,senha); server.send_message(msg)
+                st.session_state["cmc_email_destinatarios"]=dest; st.session_state["cmc_smtp_host"]=smtp_host; st.session_state["cmc_smtp_port"]=int(smtp_port); st.session_state["cmc_smtp_user"]=remetente
+                st.success("Fechamento enviado por e-mail com sucesso.")
+            except Exception as e:
+                st.error(f"Não foi possível enviar o e-mail: {e}")
+    _abrir_email()
+
+
 def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
     @st.dialog("Resumo Financeiro — CMC Bahia", width="large")
     def _abrir():
-        import calendar
         linhas=_resumo_financeiro_cmc(resumo)
         mes_nome=["","JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"][mes]
-        st.markdown(f"<div style='background:#2f7d1f;color:white;text-align:center;font-weight:800;padding:8px;font-size:20px'>FECHAMENTO {mes_nome} - {ano} 01/{mes:02d} A {dias_contabilizados:02d}/{mes:02d}</div>", unsafe_allow_html=True)
-        html="<table style='width:100%;border-collapse:collapse;font-size:16px'><tr><th style='border:1px solid #222;padding:7px'>Função</th><th style='border:1px solid #222;padding:7px'>Quantidade de<br>Colaboradores</th><th style='border:1px solid #222;padding:7px'>Valor Mensal por<br>Colaborador (R$)</th><th style='border:1px solid #222;padding:7px'>Total Mensal por<br>Função (R$)</th></tr>"
+        st.markdown(f"<div style='background:#2f7d1f;color:white;text-align:center;font-weight:800;padding:6px;font-size:18px'>FECHAMENTO {mes_nome} - {ano} 01/{mes:02d} A {dias_contabilizados:02d}/{mes:02d}</div>", unsafe_allow_html=True)
+        html="<table style='width:100%;border-collapse:collapse;font-size:14px;line-height:1.15'><tr><th style='border:1px solid #222;padding:5px'>Função</th><th style='border:1px solid #222;padding:5px'>Quantidade de Colaboradores</th><th style='border:1px solid #222;padding:5px'>Valor Mensal por Colaborador (R$)</th><th style='border:1px solid #222;padding:5px'>Total Mensal por Função (R$)</th></tr>"
         total=0
         for f,q,v,t in linhas:
-            total+=t
-            html+=f"<tr><td style='border:1px solid #222;padding:6px'>{f}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_qtd(q)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t)}</td></tr>"
-        html+="</table>"
-        st.markdown(html, unsafe_allow_html=True)
-        st.markdown("&nbsp;", unsafe_allow_html=True)
+            total+=t; html+=f"<tr><td style='border:1px solid #222;padding:4px'>{f}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_qtd(q)}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(v)}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(t)}</td></tr>"
+        html+="</table>"; st.markdown(html, unsafe_allow_html=True)
         c1,c2,c3=st.columns(3)
-        st.session_state.setdefault(f"cmc_he50_{ano}_{mes}", "00:00")
-        st.session_state.setdefault(f"cmc_he50apos_{ano}_{mes}", "00:00")
-        st.session_state.setdefault(f"cmc_he100_{ano}_{mes}", "00:00")
+        st.session_state.setdefault(f"cmc_he50_{ano}_{mes}", "00:00"); st.session_state.setdefault(f"cmc_he50apos_{ano}_{mes}", "00:00"); st.session_state.setdefault(f"cmc_he100_{ano}_{mes}", "00:00")
         he50=c1.text_input("Quantidade Hora Extra 50%", key=f"cmc_he50_{ano}_{mes}")
         he50apos=c2.text_input("Hora Extra 50% após 01:28", key=f"cmc_he50apos_{ano}_{mes}")
         he100=c3.text_input("Quantidade Hora Extra 100%", key=f"cmc_he100_{ano}_{mes}")
@@ -2162,22 +2241,23 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         t50=_horas_decimal(he50)*v50; t50a=_horas_decimal(he50apos)*v50; t100=_horas_decimal(he100)*v100
         faltas=int(resumo["FALTAS"].sum()) if "FALTAS" in resumo else 0
         valor_falta=st.number_input("Valor por falta (R$)", min_value=0.0, value=307.21, step=0.01, format="%.2f", key=f"cmc_vfalta_{ano}_{mes}")
-        total_geral=total+t50+t50a+t100
-        total_faltas=faltas*valor_falta
-        total_liquido=total_geral-total_faltas
-        html2=f"""<table style='width:100%;border-collapse:collapse;font-size:16px'>
-        <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50)}</td></tr>
-        <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50% APÓS 01:28</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50apos}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50a)}</td></tr>
-        <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 100%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he100}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v100)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t100)}</td></tr>
-        </table><br>
-        <div style='display:flex;justify-content:space-between;font-size:20px;font-weight:800;padding:8px 0'><span>TOTAL COLABORADOR</span><span>{_fmt_qtd(sum(x[1] for x in linhas))}</span><span>{_fmt_brl(total_geral)}</span></div>
-        <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;color:red;padding:8px 0'><span>FALTAS</span><span>{faltas}</span><span>{_fmt_brl(valor_falta)}</span><span>({_fmt_brl(total_faltas)})</span></div>
-        <div style='margin-top:10px;border-top:2px solid #2f7d1f;padding-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:23px;font-weight:900;color:#1f2937'><span>TOTAL</span><span>{_fmt_brl(total_liquido)}</span></div>
-        """
+        total_geral=total+t50+t50a+t100; total_faltas=faltas*valor_falta; total_liquido=total_geral-total_faltas
+        html2=f"""<table style='width:100%;border-collapse:collapse;font-size:14px;line-height:1.1;margin-top:4px'>
+        <tr><td style='border:1px solid #222;padding:4px'>QUANTIDADE HORA EXTRA 50%</td><td style='border:1px solid #222;padding:4px;text-align:center'>{he50}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(t50)}</td></tr>
+        <tr><td style='border:1px solid #222;padding:4px'>QUANTIDADE HORA EXTRA 50% APÓS 01:28</td><td style='border:1px solid #222;padding:4px;text-align:center'>{he50apos}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(t50a)}</td></tr>
+        <tr><td style='border:1px solid #222;padding:4px'>QUANTIDADE HORA EXTRA 100%</td><td style='border:1px solid #222;padding:4px;text-align:center'>{he100}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(v100)}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(t100)}</td></tr></table>
+        <div style='display:flex;justify-content:space-between;font-size:16px;font-weight:800;padding:5px 0'><span>TOTAL COLABORADOR</span><span>{_fmt_qtd(sum(x[1] for x in linhas))}</span><span>{_fmt_brl(total_geral)}</span></div>
+        <div style='display:flex;justify-content:space-between;font-size:16px;font-weight:800;color:red;padding:4px 0'><span>FALTAS</span><span>{faltas}</span><span>{_fmt_brl(valor_falta)}</span><span>({_fmt_brl(total_faltas)})</span></div>
+        <div style='margin-top:4px;border-top:2px solid #2f7d1f;padding-top:6px;display:flex;justify-content:space-between;align-items:center;font-size:19px;font-weight:900;color:#1f2937'><span>TOTAL</span><span>{_fmt_brl(total_liquido)}</span></div>"""
         st.markdown(html2, unsafe_allow_html=True)
+        png_bytes,_=_gerar_png_resumo_cmc(linhas,mes_nome,ano,mes,dias_contabilizados,he50,he50apos,he100,v50,v100,faltas,valor_falta)
+        if png_bytes:
+            b1,b2=st.columns(2)
+            b1.download_button("🖼️ Baixar resumo como imagem",data=png_bytes,file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.png",mime="image/png",use_container_width=True)
+            if b2.button("📧 Enviar fechamento por e-mail",use_container_width=True,type="primary"):
+                _modal_email_cmc(png_bytes,mes_nome,ano,total_liquido)
         faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _funcoes_cmc_ativas()]
-        if faltantes:
-            st.warning("Função não cadastrada para: " + ", ".join(faltantes))
+        if faltantes: st.warning("Função não cadastrada para: " + ", ".join(faltantes))
     _abrir()
 
 def _normalizar_status_cmc(valor):
