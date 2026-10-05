@@ -2279,9 +2279,24 @@ def _modal_horas_extras_cmc(df, ano, mes):
         if base.empty:
             st.info("Não encontrei horas extras preenchidas nas colunas H. Extra, H. Extra Not., H. Extra Folga ou H. Extra F. Not.")
             return
+
+        estado_key = f"cmc_he_estado_{ano}_{mes}"
+        versao_key = f"cmc_he_editor_versao_{ano}_{mes}"
+
+        # Mantém a seleção do modal durante os reruns do Streamlit.
+        # Reinicia automaticamente se mudar a quantidade de lançamentos encontrados.
+        if estado_key not in st.session_state or len(st.session_state[estado_key]) != len(base):
+            st.session_state[estado_key] = base.copy()
+            st.session_state[versao_key] = 0
+
+        estado = st.session_state[estado_key].copy().reset_index(drop=True)
+        # MINUTOS vem sempre da leitura original do ponto.
+        estado["MINUTOS"] = base.reset_index(drop=True)["MINUTOS"]
+
         st.caption("Confira cada lançamento. Desmarque CONSIDERAR para excluir e informe se a hora aprovada é 50% ou 100%.")
+
         edit = st.data_editor(
-            base[["CONSIDERAR","COLABORADOR","DATA","ORIGEM","HORAS","TIPO"]],
+            estado[["CONSIDERAR","COLABORADOR","DATA","ORIGEM","HORAS","TIPO"]],
             hide_index=True, use_container_width=True,
             disabled=["COLABORADOR","DATA","ORIGEM","HORAS"],
             column_config={
@@ -2291,19 +2306,47 @@ def _modal_horas_extras_cmc(df, ano, mes):
                 "ORIGEM": st.column_config.TextColumn("COLUNA DO PONTO", width="medium"),
                 "HORAS": st.column_config.TextColumn("HORAS", width="small"),
                 "TIPO": st.column_config.SelectboxColumn("TIPO", options=["50%","100%"], required=True, width="small"),
-            }, key=f"cmc_he_editor_{ano}_{mes}"
+            },
+            key=f"cmc_he_editor_{ano}_{mes}_{st.session_state.get(versao_key, 0)}"
         )
-        # recupera minutos pelo índice original, pois HORAS é somente exibição
-        mins_map = {i:int(v) for i,v in enumerate(base["MINUTOS"].tolist())}
+
+        # Ações em massa: usa o conteúdo atual do editor para não perder alterações de TIPO.
+        b1, b2 = st.columns(2)
+        if b1.button("☑️ Marcar tudo", use_container_width=True, key=f"cmc_he_marcar_tudo_{ano}_{mes}"):
+            novo = edit.copy().reset_index(drop=True)
+            novo["CONSIDERAR"] = True
+            novo["MINUTOS"] = base.reset_index(drop=True)["MINUTOS"]
+            st.session_state[estado_key] = novo
+            st.session_state[versao_key] = st.session_state.get(versao_key, 0) + 1
+            st.rerun()
+
+        if b2.button("⬜ Desmarcar tudo", use_container_width=True, key=f"cmc_he_desmarcar_tudo_{ano}_{mes}"):
+            novo = edit.copy().reset_index(drop=True)
+            novo["CONSIDERAR"] = False
+            novo["MINUTOS"] = base.reset_index(drop=True)["MINUTOS"]
+            st.session_state[estado_key] = novo
+            st.session_state[versao_key] = st.session_state.get(versao_key, 0) + 1
+            st.rerun()
+
+        # Guarda também as edições individuais para uso no botão Aplicar.
+        atual = edit.copy().reset_index(drop=True)
+        atual["MINUTOS"] = base.reset_index(drop=True)["MINUTOS"]
+        st.session_state[estado_key] = atual
+
         total50 = total100 = 0
-        for i, r in edit.reset_index(drop=True).iterrows():
+        for _, r in atual.iterrows():
             if bool(r.get("CONSIDERAR")):
-                if str(r.get("TIPO")) == "100%": total100 += mins_map.get(i,0)
-                else: total50 += mins_map.get(i,0)
-        c1,c2,c3=st.columns(3)
+                mins = int(r.get("MINUTOS", 0) or 0)
+                if str(r.get("TIPO")) == "100%":
+                    total100 += mins
+                else:
+                    total50 += mins
+
+        c1, c2, c3 = st.columns(3)
         c1.metric("HE encontradas", len(base))
         c2.metric("Aprovadas 50%", _hhmm_cmc(total50))
         c3.metric("Aprovadas 100%", _hhmm_cmc(total100))
+
         if st.button("💾 Aplicar horas extras aprovadas", type="primary", use_container_width=True, key=f"cmc_aplicar_he_{ano}_{mes}"):
             st.session_state[f"cmc_he50_{ano}_{mes}"] = _hhmm_cmc(total50)
             st.session_state[f"cmc_he100_{ano}_{mes}"] = _hhmm_cmc(total100)
