@@ -2336,55 +2336,85 @@ def _extrair_horas_extras_cmc(df):
     return pd.DataFrame(linhas)
 
 def _extrair_faltas_cmc(df):
-    """Lista, uma a uma, as faltas consideradas no CMC e exibe as colunas G/H/I/J do ponto."""
-    cols = ["CONSIDERAR","COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA","INFORMAÇÃO DO PONTO","ORIGEM","_ID"]
+    """Uma ocorrência por colaborador/dia, exibindo separadamente as quatro batidas G/H/I/J."""
+    cols = ["CONSIDERAR","COLABORADOR","DATA","G — ENTRADA","H — SAÍDA",
+            "I — ENTRADA","J — SAÍDA","INFORMAÇÃO DO PONTO","ORIGEM","_ID"]
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)
 
     def _valor_ponto(v):
-        if pd.isna(v):
+        if v is None:
             return ""
-        # Mantém horários legíveis sem transformar marcações textuais como D. Falt.
-        if isinstance(v, (pd.Timestamp, datetime)):
-            return v.strftime("%H:%M:%S")
-        if isinstance(v, time):
-            return v.strftime("%H:%M:%S")
         try:
-            if isinstance(v, pd.Timedelta):
-                total = int(v.total_seconds())
-                h = (total // 3600) % 24
-                m = (total % 3600) // 60
-                sec = total % 60
-                return f"{h:02d}:{m:02d}:{sec:02d}"
+            if pd.isna(v):
+                return ""
         except Exception:
             pass
-        txt = str(v).strip()
-        return "" if txt.lower() in {"nan", "nat", "none"} else txt
+        if isinstance(v, (pd.Timestamp, datetime)):
+            return v.strftime("%H:%M")
+        if isinstance(v, time):
+            return v.strftime("%H:%M")
+        try:
+            if isinstance(v, pd.Timedelta):
+                total=int(v.total_seconds())
+                return f"{(total//3600)%24:02d}:{(total%3600)//60:02d}"
+        except Exception:
+            pass
+        txt=str(v).strip()
+        if txt.lower() in {"nan","nat","none"}:
+            return ""
+        # Fração de dia do Excel, quando eventualmente vier como número.
+        try:
+            if isinstance(v,(int,float)) and 0 <= float(v) < 1:
+                total=round(float(v)*24*60)
+                return f"{(total//60)%24:02d}:{total%60:02d}"
+        except Exception:
+            pass
+        return txt
+
+    # Prefere os nomes reais das colunas do relatório.
+    marcacoes=[c for c in df.columns
+               if str(c).strip().lower().startswith("entrada")
+               or str(c).strip().lower().startswith("saída")
+               or str(c).strip().lower().startswith("saida")]
+
+    # Mantém a ordem original do Excel e pega as quatro primeiras marcações:
+    # G=Entrada, H=Saída, I=Entrada 2, J=Saída 2.
+    marcacoes=list(marcacoes[:4])
 
     linhas=[]
-    for pos, (_, r) in enumerate(df.iterrows()):
+    vistos=set()
+    for _,r in df.iterrows():
         if str(r.get("CODIGO") or "").upper().strip() != "FA":
             continue
+
         dt=r.get("Dt. Ponto")
-        data_txt=pd.to_datetime(dt).strftime("%d/%m/%Y") if pd.notna(dt) else ""
-
-        # O arquivo de ponto usa G/H/I/J como as quatro marcações da jornada.
-        # Índices posicionais: G=6, H=7, I=8, J=9.
-        valores=[]
-        for idx in (6,7,8,9):
-            try:
-                valores.append(_valor_ponto(r.iloc[idx]) if len(r.index) > idx else "")
-            except Exception:
-                valores.append("")
-        g,h,i,j = valores
-
-        info = g
-        if not info:
-            marc=[str(r.get(c)).strip() for c in r.index if (str(c).startswith("Entrada") or str(c).startswith("Saída")) and pd.notna(r.get(c))]
-            info=" | ".join(marc)
         nome=_nome_cmc(r.get("Nome"))
-        data_id=pd.to_datetime(dt).strftime("%Y-%m-%d") if pd.notna(dt) else data_txt
-        fid=f"{nome}|{data_id}|{pos}"
+        data_id=pd.to_datetime(dt).strftime("%Y-%m-%d") if pd.notna(dt) else ""
+        data_txt=pd.to_datetime(dt).strftime("%d/%m/%Y") if pd.notna(dt) else ""
+        fid=f"{nome}|{data_id}"
+
+        # Regra: uma única ocorrência por COLABORADOR + DATA.
+        if fid in vistos:
+            continue
+        vistos.add(fid)
+
+        valores=[]
+        for pos in range(4):
+            if pos < len(marcacoes):
+                valores.append(_valor_ponto(r.get(marcacoes[pos])))
+            else:
+                # fallback posicional somente se os nomes não estiverem disponíveis
+                try:
+                    valores.append(_valor_ponto(r.iloc[6+pos]) if len(r.index)>6+pos else "")
+                except Exception:
+                    valores.append("")
+        g,h,i,j=valores
+
+        info=" | ".join(
+            f"{letra}: {valor}" for letra,valor in zip(("G","H","I","J"),valores) if valor
+        )
+
         linhas.append({
             "CONSIDERAR":True,
             "COLABORADOR":nome,
@@ -2397,7 +2427,8 @@ def _extrair_faltas_cmc(df):
             "ORIGEM":"Colunas G/H/I/J / Ponto",
             "_ID":fid,
         })
-    return pd.DataFrame(linhas, columns=cols)
+
+    return pd.DataFrame(linhas,columns=cols)
 
 
 def _modal_faltas_cmc(df, ano, mes):
