@@ -2138,10 +2138,32 @@ def _codigo_ponto_prestadora(row):
             valores.append(str(v).strip())
     textos = " | ".join(valores).upper()
 
-    # Ocorrências explícitas do ponto têm prioridade sobre horários.
+    # A ocorrência oficial vem na COLUNA G do relatório de ponto.
+    # Ela tem prioridade sobre as marcações de Entrada/Saída.
+    ocorrencia_g = ""
+    try:
+        if len(row.index) >= 7:
+            vg = row.iloc[6]
+            if pd.notna(vg):
+                ocorrencia_g = str(vg).strip().upper()
+    except Exception:
+        ocorrencia_g = ""
+
+    # Variações usadas pelo ponto para falta: Falta, Falt, D.Falt, D. Falta, D. Falt etc.
+    ocorrencia_compacta = re.sub(r"[^A-ZÀ-Ú]", "", ocorrencia_g)
+    if ocorrencia_compacta in {"FALTA", "FALT", "DFALTA", "DFALT"}:
+        return "FA"
+    if "ATEST" in ocorrencia_g:
+        return "A"
+    if "FERIAS" in ocorrencia_g or "FÉRIAS" in ocorrencia_g:
+        return "FE"
+    if any(x in ocorrencia_g for x in ["DSR", "DUNT", "FERIADO", "FOLGA"]):
+        return "FO"
+
+    # Compatibilidade: se a ocorrência também vier escrita nas marcações.
     if "ATEST" in textos:
         return "A"
-    if "FALTA" in textos:
+    if "FALTA" in textos or "FALT" in textos:
         return "FA"
     if "FERIAS" in textos or "FÉRIAS" in textos:
         return "FE"
