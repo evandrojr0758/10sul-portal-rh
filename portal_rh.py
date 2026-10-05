@@ -3082,23 +3082,6 @@ if alteracoes:
         st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
     if _salvar_grade_slot.button("💾 Salvar alterações", type="primary", use_container_width=True, disabled=(not pode_salvar) or bool(edicoes_salvas), key=f"rh_salvar_grade_{int(ano)}_{mes}"):
-        import time
-
-        # Feedback central durante o processamento do salvamento.
-        _feedback_salvar = st.empty()
-        _feedback_salvar.markdown(
-            """
-            <div style="position:fixed;inset:0;background:rgba(0,0,0,.20);z-index:999998;"></div>
-            <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-                        z-index:999999;background:white;border-radius:14px;padding:26px 42px;
-                        box-shadow:0 12px 40px rgba(0,0,0,.25);font-size:24px;font-weight:700;
-                        text-align:center;min-width:300px;">
-                ⏳ Salvando...
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
         # Células vazias geram ALERTA, mas não bloqueiam o salvamento parcial.
         # Dias futuros não entram porque a grade contém somente até ultimo_visivel.
         celulas_vazias = []
@@ -3156,37 +3139,9 @@ if alteracoes:
             }
             st.session_state.pop(_draft_key, None)
             st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
-
-            _feedback_salvar.markdown(
-                """
-                <div style="position:fixed;inset:0;background:rgba(0,0,0,.20);z-index:999998;"></div>
-                <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-                            z-index:999999;background:white;border-radius:14px;padding:26px 42px;
-                            box-shadow:0 12px 40px rgba(0,0,0,.25);font-size:24px;font-weight:700;
-                            text-align:center;min-width:390px;color:#188038;">
-                    ✅ Registro efetuado com sucesso!
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(1.8)
             st.rerun()
         except Exception as e:
-            _feedback_salvar.markdown(
-                f"""
-                <div style="position:fixed;inset:0;background:rgba(0,0,0,.20);z-index:999998;"></div>
-                <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-                            z-index:999999;background:white;border-radius:14px;padding:26px 42px;
-                            box-shadow:0 12px 40px rgba(0,0,0,.25);font-size:21px;font-weight:700;
-                            text-align:center;min-width:390px;color:#c62828;">
-                    ❌ Erro ao salvar. Tente novamente.<br>
-                    <span style="font-size:13px;font-weight:400;color:#555;">{str(e)}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(2.5)
-            _feedback_salvar.empty()
+            st.error(f"Não foi possível salvar: {e}")
 
 # Mantém o botão visível mesmo quando ainda não há alteração pendente.
 # Assim o RH sempre sabe onde salvar; ele habilita automaticamente ao editar a grade.
