@@ -2307,10 +2307,34 @@ def _modal_horas_extras_cmc(df, ano, mes):
 
         tabela_he_estilizada = tabela_he.style.apply(_destacar_he_aprovada, axis=1)
 
+        editor_key = f"cmc_he_editor_{ano}_{mes}_{st.session_state.get(versao_key, 0)}"
+
+        # Ao marcar/desmarcar uma linha, o data_editor dispara um rerun.
+        # Antes de redesenhar a tabela, incorporamos as alterações do editor
+        # ao estado do modal; assim o Styler pinta/despinta a LINHA INTEIRA.
+        def _sincronizar_edicao_he():
+            widget_state = st.session_state.get(editor_key, {}) or {}
+            alteracoes = widget_state.get("edited_rows", {}) if isinstance(widget_state, dict) else {}
+            if not alteracoes:
+                return
+            novo_estado = st.session_state[estado_key].copy().reset_index(drop=True)
+            for idx, mudancas in alteracoes.items():
+                try:
+                    i = int(idx)
+                except Exception:
+                    continue
+                if i < 0 or i >= len(novo_estado):
+                    continue
+                for coluna, valor in (mudancas or {}).items():
+                    if coluna in novo_estado.columns:
+                        novo_estado.at[i, coluna] = valor
+            st.session_state[estado_key] = novo_estado
+
         edit = st.data_editor(
             tabela_he_estilizada,
             hide_index=True, use_container_width=True,
             disabled=["COLABORADOR","DATA","ORIGEM","HORAS"],
+            on_change=_sincronizar_edicao_he,
             column_config={
                 "CONSIDERAR": st.column_config.CheckboxColumn("CONSIDERAR"),
                 "COLABORADOR": st.column_config.TextColumn("COLABORADOR", width="large"),
@@ -2319,7 +2343,7 @@ def _modal_horas_extras_cmc(df, ano, mes):
                 "HORAS": st.column_config.TextColumn("HORAS", width="small"),
                 "TIPO": st.column_config.SelectboxColumn("TIPO", options=["50%","100%"], required=True, width="small"),
             },
-            key=f"cmc_he_editor_{ano}_{mes}_{st.session_state.get(versao_key, 0)}"
+            key=editor_key
         )
 
         # Ações em massa: usa o conteúdo atual do editor para não perder alterações de TIPO.
