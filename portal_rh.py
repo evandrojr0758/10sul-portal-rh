@@ -2505,6 +2505,7 @@ for r in freq:
 
 # Acesso rápido à ficha individual. O campo é pesquisável e não interfere no filtro da grade.
 _ficha_col1, _ficha_col2 = st.columns([4, 1], gap="medium")
+_colaboradores_todos = list(colaboradores)
 with _ficha_col1:
     _mapa_ficha = {_nome_colaborador(c): c for c in _colaboradores_todos}
     _nome_ficha = st.selectbox(
@@ -2523,7 +2524,6 @@ with _ficha_col2:
 
 # Filtros VISUAIS da grade. Não alteram cadastro, indicadores ou dados salvos.
 # A busca pode ser feita por qualquer parte do nome do colaborador.
-_colaboradores_todos = list(colaboradores)
 _col_busca, _col_status = st.columns([2, 1], gap="medium")
 with _col_busca:
     # Busca em tempo real: atualiza a grade a cada digitação (debounce curto),
