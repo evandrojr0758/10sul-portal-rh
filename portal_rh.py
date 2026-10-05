@@ -8,7 +8,7 @@ import urllib.parse
 import hashlib
 import secrets
 import base64
-from datetime import datetime, time
+from datetime import datetime, time, date
 from io import BytesIO
 
 import pandas as pd
@@ -2451,7 +2451,7 @@ def _modal_faltas_cmc(df, ano, mes):
             st.session_state[versao_key]=0
 
         estado=st.session_state[estado_key].copy().reset_index(drop=True)
-        tabela=estado[["CONSIDERAR","COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA","INFORMAÇÃO DO PONTO","ORIGEM"]].copy()
+        tabela=estado[["CONSIDERAR","COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA"]].copy()
         def _cor(linha):
             return ["background-color: #d9f2df; color: #173b22"]*len(linha) if bool(linha.get("CONSIDERAR",False)) else [""]*len(linha)
         estilizada=tabela.style.apply(_cor,axis=1)
@@ -2466,7 +2466,7 @@ def _modal_faltas_cmc(df, ano, mes):
                 if 0<=i<len(novo) and "CONSIDERAR" in (mud or {}): novo.at[i,"CONSIDERAR"]=bool(mud["CONSIDERAR"])
             st.session_state[estado_key]=novo
         edit=st.data_editor(estilizada,hide_index=True,use_container_width=True,
-            disabled=["COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA","INFORMAÇÃO DO PONTO","ORIGEM"],on_change=_sync,
+            disabled=["COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA"],on_change=_sync,
             column_config={
                 "CONSIDERAR":st.column_config.CheckboxColumn("CONSIDERAR"),
                 "COLABORADOR":st.column_config.TextColumn("COLABORADOR",width="large"),
@@ -2474,9 +2474,7 @@ def _modal_faltas_cmc(df, ano, mes):
                 "G — ENTRADA":st.column_config.TextColumn("G — ENTRADA",width="small"),
                 "H — SAÍDA":st.column_config.TextColumn("H — SAÍDA",width="small"),
                 "I — ENTRADA":st.column_config.TextColumn("I — ENTRADA",width="small"),
-                "J — SAÍDA":st.column_config.TextColumn("J — SAÍDA",width="small"),
-                "INFORMAÇÃO DO PONTO":st.column_config.TextColumn("INFORMAÇÃO DO PONTO",width="medium"),
-                "ORIGEM":st.column_config.TextColumn("ORIGEM",width="medium")
+                "J — SAÍDA":st.column_config.TextColumn("J — SAÍDA",width="small")
             },key=editor_key)
         b1,b2=st.columns(2)
         if b1.button("☑️ Marcar tudo",use_container_width=True,key=f"cmc_fa_all_{ano}_{mes}"):
