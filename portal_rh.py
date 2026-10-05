@@ -2108,6 +2108,122 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         <div style='margin-top:10px;border-top:2px solid #2f7d1f;padding-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:23px;font-weight:900;color:#1f2937'><span>TOTAL</span><span>{_fmt_brl(total_liquido)}</span></div>
         """
         st.markdown(html2, unsafe_allow_html=True)
+
+        # Imagem do resumo financeiro pronta para envio ao cliente
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            from io import BytesIO
+
+            def _fonte(tamanho, negrito=False):
+                caminhos = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if negrito else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if negrito else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+                ]
+                for caminho in caminhos:
+                    try:
+                        return ImageFont.truetype(caminho, tamanho)
+                    except Exception:
+                        pass
+                return ImageFont.load_default()
+
+            W = 1500
+            margem = 55
+            row_h = 54
+            header_h = 70
+            tabela_h = 62 + (len(linhas) + 1) * row_h
+            extras_h = 3 * row_h + 45
+            totais_h = 190
+            H = margem * 2 + header_h + tabela_h + extras_h + totais_h
+            img = Image.new("RGB", (W, H), "white")
+            d = ImageDraw.Draw(img)
+            verde = (47, 125, 31)
+            cinza = (245, 246, 248)
+            preto = (31, 41, 55)
+            vermelho = (220, 38, 38)
+            borda = (60, 60, 60)
+            f_titulo = _fonte(30, True)
+            f_head = _fonte(20, True)
+            f_txt = _fonte(20, False)
+            f_bold = _fonte(22, True)
+            f_total = _fonte(29, True)
+
+            x0, x1 = margem, W - margem
+            y = margem
+            d.rectangle([x0, y, x1, y + header_h], fill=verde)
+            titulo = f"FECHAMENTO {mes_nome} - {ano} 01/{mes:02d} A {dias_contabilizados:02d}/{mes:02d}"
+            box = d.textbbox((0,0), titulo, font=f_titulo)
+            d.text(((W-(box[2]-box[0]))/2, y+18), titulo, fill="white", font=f_titulo)
+            y += header_h
+
+            cols = [x0, x0+330, x0+690, x0+1070, x1]
+            cab = ["Função", "Quantidade de\nColaboradores", "Valor Mensal por\nColaborador (R$)", "Total Mensal por\nFunção (R$)"]
+            for i in range(4):
+                d.rectangle([cols[i], y, cols[i+1], y+62], fill=cinza, outline=borda, width=1)
+                d.multiline_text((cols[i]+12, y+9), cab[i], fill=preto, font=f_head, spacing=3)
+            y += 62
+            for f,q,v,t in linhas:
+                vals=[f, _fmt_qtd(q), _fmt_brl(v), _fmt_brl(t)]
+                for i,val in enumerate(vals):
+                    d.rectangle([cols[i], y, cols[i+1], y+row_h], fill="white", outline=borda, width=1)
+                    if i == 0:
+                        d.text((cols[i]+12, y+14), val, fill=preto, font=f_txt)
+                    else:
+                        bb=d.textbbox((0,0), val, font=f_txt)
+                        d.text((cols[i+1]-12-(bb[2]-bb[0]), y+14), val, fill=preto, font=f_txt)
+                y += row_h
+
+            y += 38
+            ecols=[x0, x0+770, x0+920, x0+1160, x1]
+            extras=[
+                ("QUANTIDADE HORA EXTRA 50%", he50, _fmt_brl(v50), _fmt_brl(t50)),
+                ("QUANTIDADE HORA EXTRA 50% APÓS 01:28", he50apos, _fmt_brl(v50), _fmt_brl(t50a)),
+                ("QUANTIDADE HORA EXTRA 100%", he100, _fmt_brl(v100), _fmt_brl(t100)),
+            ]
+            for linha in extras:
+                for i,val in enumerate(linha):
+                    d.rectangle([ecols[i], y, ecols[i+1], y+row_h], fill="white", outline=borda, width=1)
+                    if i == 0:
+                        d.text((ecols[i]+12,y+14), val, fill=preto, font=f_txt)
+                    else:
+                        bb=d.textbbox((0,0), val, font=f_txt)
+                        d.text((ecols[i+1]-12-(bb[2]-bb[0]),y+14), val, fill=preto, font=f_txt)
+                y += row_h
+
+            y += 40
+            d.text((x0,y), "TOTAL COLABORADOR", fill=preto, font=f_bold)
+            qtdtxt=_fmt_qtd(sum(x[1] for x in linhas)); bb=d.textbbox((0,0),qtdtxt,font=f_bold)
+            d.text((W//2-(bb[2]-bb[0])//2,y), qtdtxt, fill=preto, font=f_bold)
+            totaltxt=_fmt_brl(total_geral); bb=d.textbbox((0,0),totaltxt,font=f_bold)
+            d.text((x1-(bb[2]-bb[0]),y), totaltxt, fill=preto, font=f_bold)
+            y += 55
+            d.text((x0,y), "FALTAS", fill=vermelho, font=f_bold)
+            ft=str(faltas); bb=d.textbbox((0,0),ft,font=f_bold)
+            d.text((x0+460-(bb[2]-bb[0])//2,y), ft, fill=vermelho, font=f_bold)
+            vf=_fmt_brl(valor_falta); bb=d.textbbox((0,0),vf,font=f_bold)
+            d.text((x0+930-(bb[2]-bb[0])//2,y), vf, fill=vermelho, font=f_bold)
+            tf=f"({_fmt_brl(total_faltas)})"; bb=d.textbbox((0,0),tf,font=f_bold)
+            d.text((x1-(bb[2]-bb[0]),y), tf, fill=vermelho, font=f_bold)
+            y += 62
+            d.line([x0,y,x1,y], fill=verde, width=3)
+            y += 20
+            d.text((x0,y), "TOTAL", fill=preto, font=f_total)
+            liq=_fmt_brl(total_liquido); bb=d.textbbox((0,0),liq,font=f_total)
+            d.text((x1-(bb[2]-bb[0]),y), liq, fill=preto, font=f_total)
+
+            buffer=BytesIO()
+            img.save(buffer, format="PNG", optimize=True)
+            st.download_button(
+                "📷 Baixar resumo como imagem",
+                data=buffer.getvalue(),
+                file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.png",
+                mime="image/png",
+                use_container_width=True,
+                type="primary",
+                key=f"baixar_img_cmc_{ano}_{mes}",
+            )
+        except Exception as e:
+            st.error(f"Não foi possível gerar a imagem do resumo: {e}")
+
         faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _FUNCOES_CMC]
         if faltantes:
             st.warning("Função não cadastrada para: " + ", ".join(faltantes))
