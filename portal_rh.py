@@ -2295,8 +2295,20 @@ def _modal_horas_extras_cmc(df, ano, mes):
 
         st.caption("Confira cada lançamento. Desmarque CONSIDERAR para excluir e informe se a hora aprovada é 50% ou 100%.")
 
+        # Destaque visual: lançamentos marcados como CONSIDERAR ficam em verde-claro.
+        # O Styler preserva a edição do checkbox/TIPO e colore a linha de referência.
+        tabela_he = estado[["CONSIDERAR","COLABORADOR","DATA","ORIGEM","HORAS","TIPO"]].copy()
+
+        def _destacar_he_aprovada(linha):
+            marcado = bool(linha.get("CONSIDERAR", False))
+            if marcado:
+                return ["background-color: #d9f2df; color: #173b22"] * len(linha)
+            return [""] * len(linha)
+
+        tabela_he_estilizada = tabela_he.style.apply(_destacar_he_aprovada, axis=1)
+
         edit = st.data_editor(
-            estado[["CONSIDERAR","COLABORADOR","DATA","ORIGEM","HORAS","TIPO"]],
+            tabela_he_estilizada,
             hide_index=True, use_container_width=True,
             disabled=["COLABORADOR","DATA","ORIGEM","HORAS"],
             column_config={
