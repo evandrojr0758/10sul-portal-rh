@@ -26,16 +26,31 @@ def sb(method,tabela,params='',payload=None,prefer=None):
     except urllib.error.HTTPError as e:
         detalhe=e.read().decode('utf-8',errors='replace'); raise RuntimeError(f'Supabase HTTP {e.code}: {detalhe}') from e
 
-def salvar(carreta,equipe,inicio,fim,observacao,impacto_horas):
+def _impacto_para_horas(txt):
+    partes=str(txt or '00:00').strip().split(':')
+    if len(partes)!=2: raise ValueError('Informe o tempo de impacto no formato HH:MM.')
+    hh=int(partes[0]); mm=int(partes[1])
+    if hh < 0 or mm < 0 or mm > 59: raise ValueError('Informe o tempo de impacto no formato HH:MM.')
+    return hh + mm/60
+
+def salvar(carreta,equipe,inicio,fim,observacao,impacto_horas,registro_id=None):
     carreta=str(carreta or '').strip().upper()
     if not carreta: raise ValueError('Informe a carreta.')
-    if fim <= inicio: raise ValueError('O FIM deve ser posterior ao INÍCIO.')
-    horas=(fim-inicio).total_seconds()/3600
     impacto=max(float(impacto_horas or 0),0)
-    if impacto > horas: raise ValueError('O tempo de impacto não pode ser maior que o tempo total da inspeção.')
-    liquido=horas-impacto
-    payload={'carreta':carreta,'equipe':equipe,'inicio':inicio.isoformat(),'fim':fim.isoformat(),'duracao_horas':round(horas,6),'observacao':str(observacao or '').strip() or None,'impacto_horas':round(impacto,6),'duracao_liquida_horas':round(liquido,6),'usuario_registro':'LANÇAMENTO INSPEÇÕES'}
-    sb('POST','rh_inspecoes_carretas','',payload,'return=minimal')
+    payload={'carreta':carreta,'equipe':equipe,'inicio':inicio.isoformat(),'observacao':str(observacao or '').strip() or None,'impacto_horas':round(impacto,6),'usuario_registro':'LANÇAMENTO INSPEÇÕES'}
+    if fim is None:
+        payload.update({'fim':None,'duracao_horas':None,'duracao_liquida_horas':None})
+        horas=liquido=None
+    else:
+        if fim <= inicio: raise ValueError('O FIM deve ser posterior ao INÍCIO.')
+        horas=(fim-inicio).total_seconds()/3600
+        if impacto > horas: raise ValueError('O tempo de impacto não pode ser maior que o tempo total da inspeção.')
+        liquido=horas-impacto
+        payload.update({'fim':fim.isoformat(),'duracao_horas':round(horas,6),'duracao_liquida_horas':round(liquido,6)})
+    if registro_id is None:
+        sb('POST','rh_inspecoes_carretas','',payload,'return=minimal')
+    else:
+        sb('PATCH','rh_inspecoes_carretas',f'id=eq.{int(registro_id)}',payload,'return=minimal')
     return horas,liquido
 
 def ler(ano,mes):
@@ -56,18 +71,17 @@ with st.form('nova',clear_on_submit=True):
     a,b=st.columns(2)
     carreta=a.text_input('CARRETA',placeholder='Ex.: 13633')
     equipe=b.selectbox('EQUIPE',['EQUIPE 1','EQUIPE 2'])
-    c1,c2,c3,c4=st.columns(4)
+    c1,c2=st.columns(2)
     di=c1.date_input('INÍCIO — Data',value=hoje); hi=c2.time_input('INÍCIO — Hora')
-    df=c3.date_input('FIM — Data',value=hoje); hf=c4.time_input('FIM — Hora')
     observacao=st.text_area('OBSERVAÇÃO / DESVIO',placeholder='Ex.: Aguardando peça, liberação, equipamento indisponível...')
     impacto_txt=st.text_input('TEMPO DE IMPACTO (HH:MM)',value='00:00',placeholder='Ex.: 02:30')
-    ok=st.form_submit_button('💾 Salvar inspeção',type='primary',use_container_width=True)
+    st.caption('O FIM não é obrigatório na abertura. Depois, use ✏️ Editar lançamento para atualizar observações, impactos e finalizar a inspeção.')
+    ok=st.form_submit_button('💾 Abrir inspeção',type='primary',use_container_width=True)
 if ok:
     try:
-        partes=str(impacto_txt or '00:00').strip().split(':')
-        if len(partes)!=2: raise ValueError('Informe o tempo de impacto no formato HH:MM.')
-        impacto_h=int(partes[0])+int(partes[1])/60
-        h,liq=salvar(carreta,equipe,datetime.combine(di,hi),datetime.combine(df,hf),observacao,impacto_h); st.success(f'Carreta {carreta.upper()} salva. Tempo total: {hhmm(h)} | Impacto: {hhmm(impacto_h)} | Tempo líquido: {hhmm(liq)}.'); st.rerun()
+        impacto_h=_impacto_para_horas(impacto_txt)
+        salvar(carreta,equipe,datetime.combine(di,hi),None,observacao,impacto_h)
+        st.success(f'Carreta {carreta.upper()} aberta como EM ANDAMENTO.'); st.rerun()
     except Exception as e: st.error(str(e))
 
 st.divider(); st.subheader('📊 Acompanhamento')
@@ -90,14 +104,49 @@ else:
     dados=[]
     for r in regs:
         ini=pd.to_datetime(r.get('inicio'),errors='coerce'); fim=pd.to_datetime(r.get('fim'),errors='coerce')
-        try: h=float(r.get('duracao_horas'))
+        finalizada=pd.notna(fim)
+        try: h=float(r.get('duracao_horas')) if r.get('duracao_horas') is not None else None
         except: h=(fim-ini).total_seconds()/3600 if pd.notna(ini) and pd.notna(fim) else None
-        impacto=float(r.get('impacto_horas') or 0); liquido=float(r.get('duracao_liquida_horas') if r.get('duracao_liquida_horas') is not None else (h-impacto if h is not None else 0))
-        dados.append({'ID':r.get('id'),'CARRETA':r.get('carreta'),'EQUIPE':r.get('equipe'),'INÍCIO':ini.strftime('%d/%m/%Y %H:%M') if pd.notna(ini) else '','FIM':fim.strftime('%d/%m/%Y %H:%M') if pd.notna(fim) else '','TEMPO TOTAL':hhmm(h),'IMPACTO':hhmm(impacto),'TEMPO LÍQUIDO':hhmm(liquido),'OBSERVAÇÃO / DESVIO':r.get('observacao') or ''})
-    st.dataframe(pd.DataFrame(dados).drop(columns='ID'),use_container_width=True,hide_index=True)
-    with st.expander('🗑️ Corrigir lançamento incorreto'):
-        op={f"{x['CARRETA']} | {x['EQUIPE']} | {x['INÍCIO']} → {x['FIM']}":x['ID'] for x in dados}
-        esc=st.selectbox('Lançamento',list(op))
-        if st.button('Excluir lançamento'):
-            try: excluir(op[esc]); st.success('Lançamento excluído.'); st.rerun()
+        impacto=float(r.get('impacto_horas') or 0)
+        try: liquido=float(r.get('duracao_liquida_horas')) if r.get('duracao_liquida_horas') is not None else (h-impacto if h is not None else None)
+        except: liquido=None
+        dados.append({'ID':r.get('id'),'CARRETA':r.get('carreta'),'EQUIPE':r.get('equipe'),'INÍCIO':ini.strftime('%d/%m/%Y %H:%M') if pd.notna(ini) else '','FIM':fim.strftime('%d/%m/%Y %H:%M') if finalizada else '','STATUS':'🟢 FINALIZADA' if finalizada else '🟡 EM ANDAMENTO','TEMPO TOTAL':hhmm(h),'IMPACTO':hhmm(impacto),'TEMPO LÍQUIDO':hhmm(liquido),'OBSERVAÇÃO / DESVIO':r.get('observacao') or '', '_raw':r})
+    st.dataframe(pd.DataFrame([{k:v for k,v in x.items() if k not in ('ID','_raw')} for x in dados]),use_container_width=True,hide_index=True)
+
+    with st.expander('✏️ Editar lançamento / finalizar inspeção', expanded=False):
+        op={f"{x['CARRETA']} | {x['EQUIPE']} | {x['STATUS']} | {x['INÍCIO']}":x for x in dados}
+        esc=st.selectbox('Lançamento para editar',list(op),key='editar_sel')
+        item=op[esc]; raw=item['_raw']
+        ini0=pd.to_datetime(raw.get('inicio'))
+        fim0=pd.to_datetime(raw.get('fim'),errors='coerce')
+        with st.form('editar_inspecao'):
+            e1,e2=st.columns(2)
+            car=e1.text_input('CARRETA',value=str(raw.get('carreta') or ''))
+            eq=e2.selectbox('EQUIPE',['EQUIPE 1','EQUIPE 2'],index=0 if str(raw.get('equipe')).upper()=='EQUIPE 1' else 1)
+            i1,i2=st.columns(2)
+            edi=i1.date_input('INÍCIO — Data',value=ini0.date()); ehi=i2.time_input('INÍCIO — Hora',value=ini0.time().replace(second=0,microsecond=0))
+            obs=st.text_area('OBSERVAÇÃO / DESVIO',value=str(raw.get('observacao') or ''),placeholder='Atualize os desvios ao longo da manutenção...')
+            imp=st.text_input('TEMPO DE IMPACTO (HH:MM)',value=hhmm(float(raw.get('impacto_horas') or 0)).replace('—','00:00'))
+            finalizar=st.checkbox('🟢 Informar FIM e finalizar esta inspeção',value=pd.notna(fim0))
+            if finalizar:
+                f1,f2=st.columns(2)
+                base_fim=fim0 if pd.notna(fim0) else pd.Timestamp.now()
+                edf=f1.date_input('FIM — Data',value=base_fim.date()); ehf=f2.time_input('FIM — Hora',value=base_fim.time().replace(second=0,microsecond=0))
+            salvar_ed=st.form_submit_button('💾 Salvar alterações',type='primary',use_container_width=True)
+        if salvar_ed:
+            try:
+                impacto_h=_impacto_para_horas(imp)
+                fim_edit=datetime.combine(edf,ehf) if finalizar else None
+                h,liq=salvar(car,eq,datetime.combine(edi,ehi),fim_edit,obs,impacto_h,registro_id=item['ID'])
+                if fim_edit is None: st.success('Alterações salvas. A inspeção continua EM ANDAMENTO.')
+                else: st.success(f'Inspeção FINALIZADA. Tempo total: {hhmm(h)} | Impacto: {hhmm(impacto_h)} | Tempo líquido: {hhmm(liq)}.')
+                st.rerun()
             except Exception as e: st.error(str(e))
+
+    with st.expander('🗑️ Excluir lançamento incorreto'):
+        op_del={f"{x['CARRETA']} | {x['EQUIPE']} | {x['STATUS']} | {x['INÍCIO']}":x['ID'] for x in dados}
+        esc_del=st.selectbox('Lançamento',list(op_del),key='excluir_sel')
+        if st.button('Excluir lançamento'):
+            try: excluir(op_del[esc_del]); st.success('Lançamento excluído.'); st.rerun()
+            except Exception as e: st.error(str(e))
+
