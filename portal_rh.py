@@ -2464,17 +2464,57 @@ def _excel_cmc(matriz, ano, mes):
 def tela_fechamento_cmc_bahia():
     st.markdown("### 🏭 Fechamento CMC Bahia")
     st.caption("Importe a planilha do ponto eletrônico. O Portal monta automaticamente a matriz mensal por colaborador e dia, sem PROCV/PROCX.")
-    arq = st.file_uploader("Planilha do ponto eletrônico — CMC Bahia", type=["xlsx","xls"], key="upload_ponto_cmc_bahia")
-    if not arq:
-        st.info("Envie a planilha do ponto eletrônico para iniciar a apuração.")
+    arquivos = st.file_uploader(
+        "Planilha do ponto eletrônico — CMC Bahia",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="upload_ponto_cmc_bahia",
+    )
+    if not arquivos:
+        st.info("Envie uma ou mais planilhas do ponto eletrônico para iniciar a apuração.")
         return
     try:
-        df, aba = _ler_ponto_cmc(arq)
+        partes = []
+        abas_lidas = []
+        competencias = set()
+        for arquivo in arquivos:
+            df_parte, aba_parte = _ler_ponto_cmc(arquivo)
+            if not df_parte.empty:
+                partes.append(df_parte)
+                abas_lidas.append(f"{getattr(arquivo, 'name', 'arquivo')} ({aba_parte})")
+                competencias.update(
+                    (int(x.year), int(x.month))
+                    for x in df_parte["Dt. Ponto"].dropna().dt.to_period("M").unique()
+                )
+
+        if not partes:
+            st.warning("Nenhum registro válido foi encontrado nas planilhas.")
+            return
+        if len(competencias) > 1:
+            comps = ", ".join(f"{m:02d}/{a}" for a, m in sorted(competencias))
+            st.error(f"Os arquivos enviados possuem competências diferentes ({comps}). Importe apenas arquivos da mesma competência.")
+            return
+
+        # Consolida todos os arquivos em uma única base. Se houver sobreposição entre
+        # arquivos, mantém apenas um registro por colaborador/data para não duplicar o fechamento.
+        df = pd.concat(partes, ignore_index=True, sort=False)
+        df["Nome"] = df["Nome"].astype(str).str.strip().str.upper()
+        df["Dt. Ponto"] = pd.to_datetime(df["Dt. Ponto"], errors="coerce")
+        df = df.sort_values(["Nome", "Dt. Ponto"]).drop_duplicates(
+            subset=["Nome", "Dt. Ponto"], keep="last"
+        ).reset_index(drop=True)
+
         matriz, ano, mes = _montar_matriz_cmc(df)
         if matriz.empty:
-            st.warning("Nenhum registro válido foi encontrado na planilha.")
+            st.warning("Nenhum registro válido foi encontrado nas planilhas.")
             return
-        st.success(f"{aba} lida com sucesso • Competência {mes:02d}/{ano} • {len(matriz)} colaboradores")
+        st.success(
+            f"{len(arquivos)} arquivo(s) consolidado(s) com sucesso • "
+            f"Competência {mes:02d}/{ano} • {len(matriz)} colaboradores"
+        )
+        with st.expander("📄 Arquivos considerados", expanded=False):
+            for item in abas_lidas:
+                st.write(f"• {item}")
         he_encontradas = _extrair_horas_extras_cmc(df)
         c_he1, c_he2 = st.columns([1, 3])
         if c_he1.button(f"⏱️ Avaliar Horas Extras ({len(he_encontradas)})", type="secondary", use_container_width=True, key=f"cmc_btn_he_{ano}_{mes}"):
