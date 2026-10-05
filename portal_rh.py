@@ -2249,9 +2249,86 @@ def _excel_cmc(matriz, ano, mes):
     ws2.column_dimensions["B"].width = 18
     bio=BytesIO(); wb.save(bio); bio.seek(0); return bio.getvalue()
 
+def _seed_cadastros_cmc():
+    """Garante que o cadastro do Supabase receba os colaboradores/valores já existentes no código."""
+    try:
+        existentes = sb("GET", "rh_cmc_colaboradores", "select=colaborador") or []
+        nomes = {_nome_cmc(x.get("colaborador")) for x in existentes}
+        faltantes = [{"colaborador": n, "funcao": f} for n, f in _FUNCOES_CMC.items() if _nome_cmc(n) not in nomes]
+        if faltantes:
+            sb("POST", "rh_cmc_colaboradores", "", faltantes, "return=minimal")
+        vals = sb("GET", "rh_cmc_valores_funcao", "select=funcao") or []
+        funcoes = {str(x.get("funcao") or "").upper() for x in vals}
+        novos = [{"funcao": f, "valor_mensal": v} for f, v in _VALORES_CMC.items() if f not in funcoes]
+        if novos:
+            sb("POST", "rh_cmc_valores_funcao", "", novos, "return=minimal")
+    except Exception:
+        pass
+
+def _cadastros_cmc_ui():
+    _seed_cadastros_cmc()
+    c1, c2 = st.columns(2)
+    if c1.button("👥 Cadastro de Colaboradores", use_container_width=True, key="cmc_btn_cad_colab"):
+        st.session_state["cmc_modal"] = "colaboradores"
+    if c2.button("💰 Valores por Função", use_container_width=True, key="cmc_btn_valores"):
+        st.session_state["cmc_modal"] = "valores"
+
+    modo = st.session_state.get("cmc_modal")
+    if modo == "colaboradores":
+        with st.container(border=True):
+            st.markdown("#### 👥 Cadastro de Colaboradores — CMC Bahia")
+            try:
+                dados = sb("GET", "rh_cmc_colaboradores", "select=id,colaborador,funcao&order=colaborador.asc") or []
+                dfc = pd.DataFrame(dados)
+                if dfc.empty:
+                    dfc = pd.DataFrame(columns=["id","colaborador","funcao"])
+                edit = st.data_editor(dfc, hide_index=True, use_container_width=True, num_rows="dynamic",
+                    disabled=["id"], column_config={
+                        "id": st.column_config.NumberColumn("ID", width="small"),
+                        "colaborador": st.column_config.TextColumn("COLABORADOR", width="large", required=True),
+                        "funcao": st.column_config.SelectboxColumn("FUNÇÃO", options=list(_VALORES_CMC.keys()), required=True, width="medium"),
+                    }, key="cmc_cadastro_editor")
+                a,b = st.columns([1,1])
+                if a.button("💾 Salvar cadastro", type="primary", use_container_width=True, key="cmc_salvar_cadastro"):
+                    for _, r in edit.iterrows():
+                        nome=_nome_cmc(r.get("colaborador")); func=str(r.get("funcao") or "").strip().upper()
+                        if not nome or not func: continue
+                        rid=r.get("id")
+                        if pd.notna(rid):
+                            sb("PATCH","rh_cmc_colaboradores",f"id=eq.{int(rid)}",{"colaborador":nome,"funcao":func},"return=minimal")
+                        else:
+                            sb("POST","rh_cmc_colaboradores","",{"colaborador":nome,"funcao":func},"return=minimal")
+                    st.success("Cadastro salvo."); st.rerun()
+                if b.button("✖ Fechar", use_container_width=True, key="cmc_fechar_cadastro"):
+                    st.session_state.pop("cmc_modal",None); st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível abrir o cadastro: {e}")
+    elif modo == "valores":
+        with st.container(border=True):
+            st.markdown("#### 💰 Valores por Função — CMC Bahia")
+            try:
+                dados = sb("GET", "rh_cmc_valores_funcao", "select=id,funcao,valor_mensal&order=funcao.asc") or []
+                dfv = pd.DataFrame(dados)
+                edit = st.data_editor(dfv, hide_index=True, use_container_width=True, disabled=["id","funcao"],
+                    column_config={"id":st.column_config.NumberColumn("ID",width="small"),"funcao":st.column_config.TextColumn("FUNÇÃO",width="large"),"valor_mensal":st.column_config.NumberColumn("VALOR MENSAL (R$)",min_value=0.0,format="R$ %.2f")}, key="cmc_valores_editor")
+                a,b=st.columns(2)
+                if a.button("💾 Salvar valores", type="primary", use_container_width=True, key="cmc_salvar_valores"):
+                    for _,r in edit.iterrows():
+                        sb("PATCH","rh_cmc_valores_funcao",f"id=eq.{int(r['id'])}",{"valor_mensal":float(r.get('valor_mensal') or 0)},"return=minimal")
+                    st.success("Valores atualizados."); st.rerun()
+                if b.button("✖ Fechar", use_container_width=True, key="cmc_fechar_valores"):
+                    st.session_state.pop("cmc_modal",None); st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível abrir os valores: {e}")
+
 def tela_fechamento_cmc_bahia():
     st.markdown("### 🏭 Fechamento CMC Bahia")
     st.caption("Importe a planilha do ponto eletrônico. O Portal monta automaticamente a matriz mensal por colaborador e dia, sem PROCV/PROCX.")
+
+    # Administração do fechamento — deve aparecer mesmo antes de importar a planilha.
+    st.markdown("#### ⚙️ Cadastros do Fechamento")
+    _cadastros_cmc_ui()
+    st.divider()
     arq = st.file_uploader("Planilha do ponto eletrônico — CMC Bahia", type=["xlsx","xls"], key="upload_ponto_cmc_bahia")
     if not arq:
         st.info("Envie a planilha do ponto eletrônico para iniciar a apuração.")
