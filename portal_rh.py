@@ -2265,6 +2265,26 @@ def _seed_cadastros_cmc():
     except Exception:
         pass
 
+def _carregar_cadastros_cmc():
+    """Atualiza em memória os cadastros oficiais da CMC a partir do Supabase."""
+    global _FUNCOES_CMC, _VALORES_CMC
+    try:
+        dados = sb("GET", "rh_cmc_colaboradores", "select=colaborador,funcao") or []
+        if dados:
+            _FUNCOES_CMC = {
+                _nome_cmc(x.get("colaborador")): str(x.get("funcao") or "").strip().upper()
+                for x in dados if _nome_cmc(x.get("colaborador"))
+            }
+        valores = sb("GET", "rh_cmc_valores_funcao", "select=funcao,valor_mensal") or []
+        if valores:
+            _VALORES_CMC = {
+                str(x.get("funcao") or "").strip().upper(): float(x.get("valor_mensal") or 0)
+                for x in valores if str(x.get("funcao") or "").strip()
+            }
+    except Exception:
+        # Mantém os valores de fallback do código se o banco estiver temporariamente indisponível.
+        pass
+
 def _cadastros_cmc_ui():
     _seed_cadastros_cmc()
     c1, c2 = st.columns(2)
@@ -2298,6 +2318,7 @@ def _cadastros_cmc_ui():
                             sb("PATCH","rh_cmc_colaboradores",f"id=eq.{int(rid)}",{"colaborador":nome,"funcao":func},"return=minimal")
                         else:
                             sb("POST","rh_cmc_colaboradores","",{"colaborador":nome,"funcao":func},"return=minimal")
+                    _carregar_cadastros_cmc()
                     st.success("Cadastro salvo."); st.rerun()
                 if b.button("✖ Fechar", use_container_width=True, key="cmc_fechar_cadastro"):
                     st.session_state.pop("cmc_modal",None); st.rerun()
@@ -2315,6 +2336,7 @@ def _cadastros_cmc_ui():
                 if a.button("💾 Salvar valores", type="primary", use_container_width=True, key="cmc_salvar_valores"):
                     for _,r in edit.iterrows():
                         sb("PATCH","rh_cmc_valores_funcao",f"id=eq.{int(r['id'])}",{"valor_mensal":float(r.get('valor_mensal') or 0)},"return=minimal")
+                    _carregar_cadastros_cmc()
                     st.success("Valores atualizados."); st.rerun()
                 if b.button("✖ Fechar", use_container_width=True, key="cmc_fechar_valores"):
                     st.session_state.pop("cmc_modal",None); st.rerun()
@@ -2328,6 +2350,8 @@ def tela_fechamento_cmc_bahia():
     # Administração do fechamento — deve aparecer mesmo antes de importar a planilha.
     st.markdown("#### ⚙️ Cadastros do Fechamento")
     _cadastros_cmc_ui()
+    # O cadastro do Supabase é a fonte oficial. Recarrega antes de montar o fechamento.
+    _carregar_cadastros_cmc()
     st.divider()
     arq = st.file_uploader("Planilha do ponto eletrônico — CMC Bahia", type=["xlsx","xls"], key="upload_ponto_cmc_bahia")
     if not arq:
