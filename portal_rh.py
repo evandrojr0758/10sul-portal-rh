@@ -2335,6 +2335,87 @@ def _extrair_horas_extras_cmc(df):
             })
     return pd.DataFrame(linhas)
 
+def _extrair_faltas_cmc(df):
+    """Lista, uma a uma, as faltas que o fechamento CMC está considerando."""
+    cols = ["CONSIDERAR","COLABORADOR","DATA","INFORMAÇÃO DO PONTO","ORIGEM","_ID"]
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    linhas=[]
+    for _, r in df.iterrows():
+        if str(r.get("CODIGO") or "").upper().strip() != "FA":
+            continue
+        dt=r.get("Dt. Ponto")
+        data_txt=pd.to_datetime(dt).strftime("%d/%m/%Y") if pd.notna(dt) else ""
+        info=""
+        try:
+            if len(r.index) >= 7 and pd.notna(r.iloc[6]):
+                info=str(r.iloc[6]).strip()
+        except Exception:
+            pass
+        if not info:
+            marc=[str(r.get(c)).strip() for c in r.index if (str(c).startswith("Entrada") or str(c).startswith("Saída")) and pd.notna(r.get(c))]
+            info=" | ".join(marc)
+        nome=_nome_cmc(r.get("Nome"))
+        fid=f"{nome}|{pd.to_datetime(dt).strftime('%Y-%m-%d') if pd.notna(dt) else data_txt}"
+        linhas.append({"CONSIDERAR":True,"COLABORADOR":nome,"DATA":data_txt,"INFORMAÇÃO DO PONTO":info,"ORIGEM":"Coluna G / Ponto","_ID":fid})
+    return pd.DataFrame(linhas, columns=cols)
+
+
+def _modal_faltas_cmc(df, ano, mes):
+    @st.dialog("Avaliação de Faltas — CMC Bahia", width="large")
+    def _abrir_faltas():
+        base=_extrair_faltas_cmc(df)
+        if base.empty:
+            st.info("Não encontrei faltas no ponto para esta competência.")
+            return
+        estado_key=f"cmc_fa_estado_{ano}_{mes}"
+        versao_key=f"cmc_fa_editor_versao_{ano}_{mes}"
+        ids_base=base["_ID"].tolist()
+        if estado_key not in st.session_state or st.session_state.get(f"{estado_key}_ids") != ids_base:
+            inicial=base.copy()
+            aplicadas=st.session_state.get(f"cmc_fa_aprovadas_{ano}_{mes}")
+            if aplicadas is not None:
+                inicial["CONSIDERAR"]=inicial["_ID"].isin(set(aplicadas))
+            st.session_state[estado_key]=inicial
+            st.session_state[f"{estado_key}_ids"]=ids_base
+            st.session_state[versao_key]=0
+
+        estado=st.session_state[estado_key].copy().reset_index(drop=True)
+        tabela=estado[["CONSIDERAR","COLABORADOR","DATA","INFORMAÇÃO DO PONTO","ORIGEM"]].copy()
+        def _cor(linha):
+            return ["background-color: #d9f2df; color: #173b22"]*len(linha) if bool(linha.get("CONSIDERAR",False)) else [""]*len(linha)
+        estilizada=tabela.style.apply(_cor,axis=1)
+        editor_key=f"cmc_fa_editor_{ano}_{mes}_{st.session_state.get(versao_key,0)}"
+        def _sync():
+            ws=st.session_state.get(editor_key,{}) or {}
+            edits=ws.get("edited_rows",{}) if isinstance(ws,dict) else {}
+            novo=st.session_state[estado_key].copy().reset_index(drop=True)
+            for idx,mud in edits.items():
+                try:i=int(idx)
+                except:continue
+                if 0<=i<len(novo) and "CONSIDERAR" in (mud or {}): novo.at[i,"CONSIDERAR"]=bool(mud["CONSIDERAR"])
+            st.session_state[estado_key]=novo
+        edit=st.data_editor(estilizada,hide_index=True,use_container_width=True,
+            disabled=["COLABORADOR","DATA","INFORMAÇÃO DO PONTO","ORIGEM"],on_change=_sync,
+            column_config={"CONSIDERAR":st.column_config.CheckboxColumn("CONSIDERAR"),"COLABORADOR":st.column_config.TextColumn("COLABORADOR",width="large"),"DATA":st.column_config.TextColumn("DATA",width="small"),"INFORMAÇÃO DO PONTO":st.column_config.TextColumn("INFORMAÇÃO DO PONTO",width="medium"),"ORIGEM":st.column_config.TextColumn("ORIGEM",width="medium")},key=editor_key)
+        b1,b2=st.columns(2)
+        if b1.button("☑️ Marcar tudo",use_container_width=True,key=f"cmc_fa_all_{ano}_{mes}"):
+            novo=estado.copy(); novo["CONSIDERAR"]=True; st.session_state[estado_key]=novo; st.session_state[versao_key]=st.session_state.get(versao_key,0)+1; st.rerun(scope="fragment")
+        if b2.button("⬜ Desmarcar tudo",use_container_width=True,key=f"cmc_fa_none_{ano}_{mes}"):
+            novo=estado.copy(); novo["CONSIDERAR"]=False; st.session_state[estado_key]=novo; st.session_state[versao_key]=st.session_state.get(versao_key,0)+1; st.rerun(scope="fragment")
+        atual=st.session_state[estado_key].copy().reset_index(drop=True)
+        # incorpora edição visível atual antes de calcular/aplicar
+        for i in range(min(len(atual),len(edit))): atual.at[i,"CONSIDERAR"]=bool(edit.iloc[i].get("CONSIDERAR",False))
+        st.session_state[estado_key]=atual
+        c1,c2=st.columns(2); c1.metric("Faltas encontradas",len(base)); c2.metric("Faltas consideradas",int(atual["CONSIDERAR"].sum()))
+        if st.button("💾 Aplicar faltas consideradas",type="primary",use_container_width=True,key=f"cmc_aplicar_fa_{ano}_{mes}"):
+            selecionadas=atual.loc[atual["CONSIDERAR"],"_ID"].tolist()
+            st.session_state[f"cmc_fa_aprovadas_{ano}_{mes}"]=selecionadas
+            st.session_state[f"cmc_fa_qtd_{ano}_{mes}"]=len(selecionadas)
+            st.success(f"{len(selecionadas)} falta(s) aplicada(s) ao fechamento.")
+            st.rerun()
+    _abrir_faltas()
+
 def _modal_horas_extras_cmc(df, ano, mes):
     @st.dialog("Avaliação de Horas Extras — CMC Bahia", width="large")
     def _abrir_he():
@@ -2576,6 +2657,23 @@ def tela_fechamento_cmc_bahia():
             subset=["Nome", "Dt. Ponto"], keep="last"
         ).reset_index(drop=True)
 
+        # Competência para os controles de conferência antes de montar a matriz.
+        _periodo_cmc = df["Dt. Ponto"].dt.to_period("M").mode().iloc[0]
+        ano, mes = int(_periodo_cmc.year), int(_periodo_cmc.month)
+
+        # Auditoria de faltas: por padrão todas entram. Depois de aplicar no modal,
+        # somente as faltas marcadas permanecem como FA no fechamento.
+        faltas_encontradas = _extrair_faltas_cmc(df)
+        faltas_aplicadas = st.session_state.get(f"cmc_fa_aprovadas_{ano}_{mes}")
+        if faltas_aplicadas is not None:
+            _ids_ok=set(faltas_aplicadas)
+            for _idx,_r in df.iterrows():
+                if str(_r.get("CODIGO") or "").upper().strip() == "FA":
+                    _dt=_r.get("Dt. Ponto"); _nome=_nome_cmc(_r.get("Nome"))
+                    _fid=f"{_nome}|{pd.to_datetime(_dt).strftime('%Y-%m-%d') if pd.notna(_dt) else ''}"
+                    if _fid not in _ids_ok:
+                        df.at[_idx,"CODIGO"]=""
+
         matriz, ano, mes = _montar_matriz_cmc(df)
         if matriz.empty:
             st.warning("Nenhum registro válido foi encontrado nas planilhas.")
@@ -2587,6 +2685,15 @@ def tela_fechamento_cmc_bahia():
         with st.expander("📄 Arquivos considerados", expanded=False):
             for item in abas_lidas:
                 st.write(f"• {item}")
+        # Conferências antes da grade: faltas e horas extras.
+        c_fa1, c_fa2 = st.columns([1, 3])
+        if c_fa1.button(f"🔎 Avaliar Faltas ({len(faltas_encontradas)})", type="secondary", use_container_width=True, key=f"cmc_btn_fa_{ano}_{mes}"):
+            _modal_faltas_cmc(df, ano, mes)
+        if faltas_aplicadas is None:
+            c_fa2.info(f"{len(faltas_encontradas)} falta(s) encontrada(s) no ponto aguardando conferência.")
+        else:
+            c_fa2.success(f"Faltas consideradas no fechamento: {len(faltas_aplicadas)} de {len(faltas_encontradas)} encontradas.")
+
         he_encontradas = _extrair_horas_extras_cmc(df)
         c_he1, c_he2 = st.columns([1, 3])
         if c_he1.button(f"⏱️ Avaliar Horas Extras ({len(he_encontradas)})", type="secondary", use_container_width=True, key=f"cmc_btn_he_{ano}_{mes}"):
