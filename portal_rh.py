@@ -2336,28 +2336,67 @@ def _extrair_horas_extras_cmc(df):
     return pd.DataFrame(linhas)
 
 def _extrair_faltas_cmc(df):
-    """Lista, uma a uma, as faltas que o fechamento CMC está considerando."""
-    cols = ["CONSIDERAR","COLABORADOR","DATA","INFORMAÇÃO DO PONTO","ORIGEM","_ID"]
+    """Lista, uma a uma, as faltas consideradas no CMC e exibe as colunas G/H/I/J do ponto."""
+    cols = ["CONSIDERAR","COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA","INFORMAÇÃO DO PONTO","ORIGEM","_ID"]
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)
+
+    def _valor_ponto(v):
+        if pd.isna(v):
+            return ""
+        # Mantém horários legíveis sem transformar marcações textuais como D. Falt.
+        if isinstance(v, (pd.Timestamp, datetime)):
+            return v.strftime("%H:%M:%S")
+        if isinstance(v, time):
+            return v.strftime("%H:%M:%S")
+        try:
+            if isinstance(v, pd.Timedelta):
+                total = int(v.total_seconds())
+                h = (total // 3600) % 24
+                m = (total % 3600) // 60
+                sec = total % 60
+                return f"{h:02d}:{m:02d}:{sec:02d}"
+        except Exception:
+            pass
+        txt = str(v).strip()
+        return "" if txt.lower() in {"nan", "nat", "none"} else txt
+
     linhas=[]
-    for _, r in df.iterrows():
+    for pos, (_, r) in enumerate(df.iterrows()):
         if str(r.get("CODIGO") or "").upper().strip() != "FA":
             continue
         dt=r.get("Dt. Ponto")
         data_txt=pd.to_datetime(dt).strftime("%d/%m/%Y") if pd.notna(dt) else ""
-        info=""
-        try:
-            if len(r.index) >= 7 and pd.notna(r.iloc[6]):
-                info=str(r.iloc[6]).strip()
-        except Exception:
-            pass
+
+        # O arquivo de ponto usa G/H/I/J como as quatro marcações da jornada.
+        # Índices posicionais: G=6, H=7, I=8, J=9.
+        valores=[]
+        for idx in (6,7,8,9):
+            try:
+                valores.append(_valor_ponto(r.iloc[idx]) if len(r.index) > idx else "")
+            except Exception:
+                valores.append("")
+        g,h,i,j = valores
+
+        info = g
         if not info:
             marc=[str(r.get(c)).strip() for c in r.index if (str(c).startswith("Entrada") or str(c).startswith("Saída")) and pd.notna(r.get(c))]
             info=" | ".join(marc)
         nome=_nome_cmc(r.get("Nome"))
-        fid=f"{nome}|{pd.to_datetime(dt).strftime('%Y-%m-%d') if pd.notna(dt) else data_txt}"
-        linhas.append({"CONSIDERAR":True,"COLABORADOR":nome,"DATA":data_txt,"INFORMAÇÃO DO PONTO":info,"ORIGEM":"Coluna G / Ponto","_ID":fid})
+        data_id=pd.to_datetime(dt).strftime("%Y-%m-%d") if pd.notna(dt) else data_txt
+        fid=f"{nome}|{data_id}|{pos}"
+        linhas.append({
+            "CONSIDERAR":True,
+            "COLABORADOR":nome,
+            "DATA":data_txt,
+            "G — ENTRADA":g,
+            "H — SAÍDA":h,
+            "I — ENTRADA":i,
+            "J — SAÍDA":j,
+            "INFORMAÇÃO DO PONTO":info,
+            "ORIGEM":"Colunas G/H/I/J / Ponto",
+            "_ID":fid,
+        })
     return pd.DataFrame(linhas, columns=cols)
 
 
@@ -2381,7 +2420,7 @@ def _modal_faltas_cmc(df, ano, mes):
             st.session_state[versao_key]=0
 
         estado=st.session_state[estado_key].copy().reset_index(drop=True)
-        tabela=estado[["CONSIDERAR","COLABORADOR","DATA","INFORMAÇÃO DO PONTO","ORIGEM"]].copy()
+        tabela=estado[["CONSIDERAR","COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA","INFORMAÇÃO DO PONTO","ORIGEM"]].copy()
         def _cor(linha):
             return ["background-color: #d9f2df; color: #173b22"]*len(linha) if bool(linha.get("CONSIDERAR",False)) else [""]*len(linha)
         estilizada=tabela.style.apply(_cor,axis=1)
@@ -2396,8 +2435,18 @@ def _modal_faltas_cmc(df, ano, mes):
                 if 0<=i<len(novo) and "CONSIDERAR" in (mud or {}): novo.at[i,"CONSIDERAR"]=bool(mud["CONSIDERAR"])
             st.session_state[estado_key]=novo
         edit=st.data_editor(estilizada,hide_index=True,use_container_width=True,
-            disabled=["COLABORADOR","DATA","INFORMAÇÃO DO PONTO","ORIGEM"],on_change=_sync,
-            column_config={"CONSIDERAR":st.column_config.CheckboxColumn("CONSIDERAR"),"COLABORADOR":st.column_config.TextColumn("COLABORADOR",width="large"),"DATA":st.column_config.TextColumn("DATA",width="small"),"INFORMAÇÃO DO PONTO":st.column_config.TextColumn("INFORMAÇÃO DO PONTO",width="medium"),"ORIGEM":st.column_config.TextColumn("ORIGEM",width="medium")},key=editor_key)
+            disabled=["COLABORADOR","DATA","G — ENTRADA","H — SAÍDA","I — ENTRADA","J — SAÍDA","INFORMAÇÃO DO PONTO","ORIGEM"],on_change=_sync,
+            column_config={
+                "CONSIDERAR":st.column_config.CheckboxColumn("CONSIDERAR"),
+                "COLABORADOR":st.column_config.TextColumn("COLABORADOR",width="large"),
+                "DATA":st.column_config.TextColumn("DATA",width="small"),
+                "G — ENTRADA":st.column_config.TextColumn("G — ENTRADA",width="small"),
+                "H — SAÍDA":st.column_config.TextColumn("H — SAÍDA",width="small"),
+                "I — ENTRADA":st.column_config.TextColumn("I — ENTRADA",width="small"),
+                "J — SAÍDA":st.column_config.TextColumn("J — SAÍDA",width="small"),
+                "INFORMAÇÃO DO PONTO":st.column_config.TextColumn("INFORMAÇÃO DO PONTO",width="medium"),
+                "ORIGEM":st.column_config.TextColumn("ORIGEM",width="medium")
+            },key=editor_key)
         b1,b2=st.columns(2)
         if b1.button("☑️ Marcar tudo",use_container_width=True,key=f"cmc_fa_all_{ano}_{mes}"):
             novo=estado.copy(); novo["CONSIDERAR"]=True; st.session_state[estado_key]=novo; st.session_state[versao_key]=st.session_state.get(versao_key,0)+1; st.rerun(scope="fragment")
