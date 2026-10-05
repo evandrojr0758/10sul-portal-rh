@@ -1169,131 +1169,6 @@ def tela_publica_aprovacao_gratificacao(token):
             st.success(f"✅ GRATIFICAÇÃO AUTORIZADA em {reg.get('autorizado_em') or ''}.")
         else: st.info(f"Status: {status}")
 
-
-
-# ==========================================================
-# INSPEÇÕES DE CARRETAS — TEMPO DE ENTREGA POR EQUIPE
-# ==========================================================
-def ler_inspecoes_carretas(ano, mes):
-    ini=f"{int(ano):04d}-{int(mes):02d}-01T00:00:00"
-    ultimo=calendar.monthrange(int(ano), int(mes))[1]
-    fim=f"{int(ano):04d}-{int(mes):02d}-{ultimo:02d}T23:59:59"
-    try:
-        return sb("GET", "rh_inspecoes_carretas",
-                  "select=*&inicio=gte."+urllib.parse.quote(ini)+"&inicio=lte."+urllib.parse.quote(fim)+"&order=inicio.desc") or []
-    except Exception:
-        return []
-
-def salvar_inspecao_carreta(carreta, equipe, inicio, fim, usuario):
-    if fim <= inicio:
-        raise ValueError("O FIM precisa ser posterior ao INÍCIO.")
-    payload={
-        "carreta": str(carreta or "").strip().upper(),
-        "equipe": str(equipe or "").strip().upper(),
-        "inicio": inicio.isoformat(timespec="minutes"),
-        "fim": fim.isoformat(timespec="minutes"),
-        "duracao_horas": round((fim-inicio).total_seconds()/3600, 6),
-        "registrado_por": str(usuario or "").strip() or None,
-        "registrado_em": datetime.now().isoformat(timespec="seconds"),
-    }
-    if not payload["carreta"]:
-        raise ValueError("Informe a carreta.")
-    if payload["equipe"] not in ("EQUIPE 1","EQUIPE 2"):
-        raise ValueError("Selecione EQUIPE 1 ou EQUIPE 2.")
-    sb("POST", "rh_inspecoes_carretas", "", payload, "return=minimal")
-
-def excluir_inspecao_carreta(registro_id):
-    sb("DELETE", "rh_inspecoes_carretas", f"id=eq.{int(registro_id)}")
-
-def medias_inspecoes_por_equipe(ano, mes):
-    regs=ler_inspecoes_carretas(ano, mes)
-    out={}
-    for equipe in ("EQUIPE 1","EQUIPE 2"):
-        vals=[]
-        for r in regs:
-            if str(r.get("equipe") or "").upper().strip()!=equipe:
-                continue
-            try:
-                h=float(r.get("duracao_liquida_horas") if r.get("duracao_liquida_horas") is not None else r.get("duracao_horas"))
-            except Exception:
-                try:
-                    di=pd.to_datetime(r.get("inicio")); df=pd.to_datetime(r.get("fim")); h=(df-di).total_seconds()/3600
-                except Exception:
-                    continue
-            if h >= 0: vals.append(h)
-        out[equipe]={
-            "media": (sum(vals)/len(vals)) if vals else None,
-            "total": sum(vals),
-            "quantidade": len(vals),
-        }
-    return out
-
-def _hhmm_horas(valor):
-    if valor is None: return "—"
-    minutos=int(round(float(valor)*60))
-    return f"{minutos//60:02d}:{minutos%60:02d}"
-
-def tela_inspecoes_carretas():
-    usr=st.session_state.get("usuario_logado") or {}
-    st.markdown("### ⏱️ Lançamento de Inspeções das Carretas")
-    st.caption("Informe CARRETA, EQUIPE, INÍCIO e FIM. O sistema calcula o tempo e a média mensal de cada equipe automaticamente para a gratificação.")
-    hoje=date.today(); meses_i=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
-    a,b,c=st.columns([1.2,.8,2.5])
-    mes_i=a.selectbox("Mês", range(1,13), index=hoje.month-1, format_func=lambda x: meses_i[x-1], key="insp_mes")
-    ano_i=int(b.number_input("Ano", min_value=2025, max_value=2100, value=hoje.year, step=1, key="insp_ano"))
-    c.markdown(f"### {meses_i[mes_i-1].upper()} / {ano_i}")
-
-    with st.form("form_nova_inspecao", clear_on_submit=True):
-        st.markdown("#### ➕ Nova inspeção")
-        c1,c2=st.columns(2)
-        carreta=c1.text_input("CARRETA", placeholder="Ex.: 13633")
-        equipe=c2.selectbox("EQUIPE", ["EQUIPE 1","EQUIPE 2"])
-        c3,c4,c5,c6=st.columns(4)
-        d_ini=c3.date_input("INÍCIO — Data", value=hoje)
-        h_ini=c4.time_input("INÍCIO — Hora")
-        d_fim=c5.date_input("FIM — Data", value=hoje)
-        h_fim=c6.time_input("FIM — Hora")
-        gravar=st.form_submit_button("💾 Salvar inspeção", type="primary", use_container_width=True)
-    if gravar:
-        try:
-            inicio=datetime.combine(d_ini,h_ini); fim=datetime.combine(d_fim,h_fim)
-            salvar_inspecao_carreta(carreta,equipe,inicio,fim,usr.get("nome") or usr.get("usuario"))
-            st.success(f"Inspeção da carreta {str(carreta).upper()} salva com sucesso. Tempo: {_hhmm_horas((fim-inicio).total_seconds()/3600)}.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Não foi possível salvar a inspeção: {e}")
-
-    regs=ler_inspecoes_carretas(ano_i,mes_i)
-    medias=medias_inspecoes_por_equipe(ano_i,mes_i)
-    st.markdown("#### 📊 Fechamento automático por equipe")
-    m1,m2=st.columns(2)
-    for box,equipe in ((m1,"EQUIPE 1"),(m2,"EQUIPE 2")):
-        x=medias[equipe]
-        with box:
-            st.markdown(f"**{equipe}**")
-            k1,k2,k3=st.columns(3)
-            k1.metric("Inspeções",x["quantidade"]); k2.metric("Tempo total",_hhmm_horas(x["total"])); k3.metric("Média",_hhmm_horas(x["media"]))
-
-    st.markdown("#### 📋 Lançamentos do mês")
-    if not regs:
-        st.info("Nenhuma inspeção lançada nesta competência.")
-        return
-    dados=[]
-    for r in regs:
-        di=pd.to_datetime(r.get("inicio"),errors="coerce"); df=pd.to_datetime(r.get("fim"),errors="coerce")
-        try: horas=float(r.get("duracao_horas"))
-        except Exception: horas=(df-di).total_seconds()/3600 if pd.notna(di) and pd.notna(df) else None
-        dados.append({"ID":r.get("id"),"CARRETA":r.get("carreta"),"EQUIPE":r.get("equipe"),"INÍCIO":di.strftime("%d/%m/%Y %H:%M") if pd.notna(di) else "","FIM":df.strftime("%d/%m/%Y %H:%M") if pd.notna(df) else "","TEMPO":_hhmm_horas(horas)})
-    st.dataframe(pd.DataFrame(dados).drop(columns=["ID"]),use_container_width=True,hide_index=True)
-    with st.expander("🗑️ Excluir lançamento incorreto",expanded=False):
-        op={f"{x['CARRETA']} | {x['EQUIPE']} | {x['INÍCIO']} → {x['FIM']}":x['ID'] for x in dados}
-        esc=st.selectbox("Lançamento",list(op.keys()),key=f"insp_excluir_{ano_i}_{mes_i}")
-        if st.button("Excluir lançamento",type="secondary",key=f"btn_excluir_insp_{ano_i}_{mes_i}"):
-            try:
-                excluir_inspecao_carreta(op[esc]); st.success("Lançamento excluído."); st.rerun()
-            except Exception as e: st.error(f"Não foi possível excluir: {e}")
-
-
 # APURAÇÃO MENSAL DE GRATIFICAÇÃO
 # ==========================================================
 def ler_apuracao_gratificacao(ano, mes):
@@ -1353,96 +1228,67 @@ def tela_apuracao_gratificacao():
     dna_por={int(r["colaborador_id"]):int(r.get("quantidade") or 0) for r in dna_regs if r.get("colaborador_id") is not None}
     ap_por={int(r["colaborador_id"]):r for r in ap_regs if r.get("colaborador_id") is not None}
 
-    # Médias mensais da REVISÃO vêm automaticamente dos lançamentos de inspeções.
-    medias_auto=medias_inspecoes_por_equipe(ano_g,mes_g)
-    media_eq1=medias_auto["EQUIPE 1"]["media"]
-    media_eq2=medias_auto["EQUIPE 2"]["media"]
-    st.markdown("#### ⏱️ Média mensal por equipe — Revisão")
-    st.caption("Calculada automaticamente a partir de CARRETA | EQUIPE | INÍCIO | FIM lançados na tela de Inspeções.")
-    _ma1,_ma2=st.columns(2)
-    with _ma1:
-        st.metric("EQUIPE 1 — Média", _hhmm_horas(media_eq1), help=f"{medias_auto['EQUIPE 1']['quantidade']} inspeção(ões) • Total {_hhmm_horas(medias_auto['EQUIPE 1']['total'])}")
-    with _ma2:
-        st.metric("EQUIPE 2 — Média", _hhmm_horas(media_eq2), help=f"{medias_auto['EQUIPE 2']['quantidade']} inspeção(ões) • Total {_hhmm_horas(medias_auto['EQUIPE 2']['total'])}")
-    if media_eq1 is None or media_eq2 is None:
-        st.warning("Ainda faltam lançamentos de inspeção para uma ou mais equipes nesta competência. A gratificação da Revisão ficará pendente onde não houver média.")
-
-    # Lançamento manual em lote continua disponível, mas a média das inspeções tem prioridade.
-    # Quando já existe média automática, a substituição exige confirmação explícita do ADMIN.
-    def _override_manual_equipe(nome_equipe):
+    # Médias mensais da REVISÃO são informadas em lote, uma vez por equipe.
+    def _media_salva_equipe(nome_equipe):
         vals=[]
         for c in colabs:
-            if str(c.get("frente") or "").upper().strip() != "REVISÃO":
-                continue
-            if str(c.get("equipe_revisao") or "").upper().strip() != nome_equipe:
-                continue
-            reg=ap_por.get(int(c["id"]), {})
-            obs=str(reg.get("observacao") or "").upper()
-            v=reg.get("media_tempo_entrega_horas")
-            if "SUBSTITUIÇÃO MANUAL" in obs and v not in (None, ""):
-                try: vals.append(float(v))
-                except Exception: pass
-        return vals[0] if vals else None
+            if str(c.get("frente") or "").upper().strip()=="REVISÃO" and str(c.get("equipe_revisao") or "").upper().strip()==nome_equipe:
+                reg=ap_por.get(int(c["id"]), {})
+                v=reg.get("media_tempo_entrega_horas")
+                if v not in (None, ""):
+                    try: vals.append(float(v))
+                    except Exception: pass
+        return vals[0] if vals else 0.0
 
-    override_eq1=_override_manual_equipe("EQUIPE 1")
-    override_eq2=_override_manual_equipe("EQUIPE 2")
+    st.markdown("#### ⏱️ Média mensal por equipe — Revisão")
+    st.caption("Informe a média uma única vez para cada equipe. O sistema aplica automaticamente a todos os colaboradores conforme a equipe cadastrada.")
+    # Controles em lote alinhados e próximos aos campos das médias.
+    _mc1,_mc2,_mc3,_mc4=st.columns([1,1,.58,.48], vertical_alignment="bottom")
+    media_eq1=_mc1.number_input("Média EQUIPE 1 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 1")), format="%.2f", key=f"media_eq1_{ano_g}_{mes_g}")
+    media_eq2=_mc2.number_input("Média EQUIPE 2 (h)", min_value=0.0, step=0.1, value=float(_media_salva_equipe("EQUIPE 2")), format="%.2f", key=f"media_eq2_{ano_g}_{mes_g}")
 
-    st.markdown("##### ✏️ Ajuste manual em lote")
-    st.caption("Use somente quando precisar substituir deliberadamente a média calculada pelas inspeções. Havendo média de inspeções, o sistema pedirá confirmação antes de alterar.")
-    _ml1,_ml2,_ml3,_ml4=st.columns([1,1,.65,.72], vertical_alignment="bottom")
-    manual_eq1=_ml1.number_input("Manual EQUIPE 1 (h)", min_value=0.0, step=0.1, value=float(override_eq1 if override_eq1 is not None else (media_eq1 or 0.0)), format="%.2f", key=f"manual_media_eq1_{ano_g}_{mes_g}")
-    manual_eq2=_ml2.number_input("Manual EQUIPE 2 (h)", min_value=0.0, step=0.1, value=float(override_eq2 if override_eq2 is not None else (media_eq2 or 0.0)), format="%.2f", key=f"manual_media_eq2_{ano_g}_{mes_g}")
+    limpar_key=f"confirmar_limpeza_medias_{ano_g}_{mes_g}"
+    if _mc4.button("🧹 Limpar médias", key=f"limpar_medias_{ano_g}_{mes_g}", use_container_width=True):
+        st.session_state[limpar_key]=True
 
-    def _aplicar_override_lote():
-        usuario=usr.get("nome") or usr.get("usuario")
-        qtd=0
-        for c in colabs:
-            if str(c.get("frente") or "").upper().strip() != "REVISÃO":
-                continue
-            eq=str(c.get("equipe_revisao") or "").upper().strip()
-            if eq not in ("EQUIPE 1","EQUIPE 2"):
-                continue
-            med=manual_eq1 if eq=="EQUIPE 1" else manual_eq2
-            salvar_apuracao_manual(int(c["id"]), ano_g, mes_g, eq, med, "SUBSTITUIÇÃO MANUAL DA MÉDIA DE INSPEÇÕES", usuario)
-            qtd+=1
-        return qtd
-
-    precisa_confirmar=(media_eq1 is not None or media_eq2 is not None)
-    if _ml3.button("💾 Aplicar médias", type="primary", key=f"aplicar_manual_lote_{ano_g}_{mes_g}", use_container_width=True):
-        if precisa_confirmar:
-            st.session_state[f"confirm_override_inspecoes_{ano_g}_{mes_g}"]=True
-        else:
+    if st.session_state.get(limpar_key, False):
+        st.warning(f"⚠️ Confirma limpar as médias aplicadas em lote de {meses_g[mes_g-1]} / {ano_g}? A equipe cadastrada dos colaboradores NÃO será alterada.")
+        _lc1,_lc2,_lc3=st.columns([1,1,3])
+        if _lc1.button("✅ Sim, limpar", type="primary", key=f"confirmar_limpar_medias_{ano_g}_{mes_g}"):
             try:
-                qtd=_aplicar_override_lote(); st.success(f"Médias manuais aplicadas a {qtd} colaborador(es)."); st.rerun()
-            except Exception as e: st.error(f"Não foi possível aplicar as médias: {e}")
+                params=("ano=eq."+urllib.parse.quote(str(int(ano_g)))+"&mes=eq."+urllib.parse.quote(str(int(mes_g))))
+                sb("DELETE", "rh_gratificacao_apuracao", params)
+                st.session_state.pop(f"media_eq1_{ano_g}_{mes_g}", None)
+                st.session_state.pop(f"media_eq2_{ano_g}_{mes_g}", None)
+                st.session_state.pop(limpar_key, None)
+                st.success("Médias da competência removidas. As equipes cadastradas nos colaboradores foram mantidas.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível limpar as médias: {e}")
+        if _lc2.button("Cancelar", key=f"cancelar_limpar_medias_{ano_g}_{mes_g}"):
+            st.session_state.pop(limpar_key, None)
+            st.rerun()
 
-    if _ml4.button("↩️ Usar inspeções", key=f"restaurar_auto_{ano_g}_{mes_g}", use_container_width=True):
+    if _mc3.button("💾 Aplicar médias", type="primary", key=f"aplicar_medias_{ano_g}_{mes_g}", use_container_width=True):
         try:
             usuario=usr.get("nome") or usr.get("usuario")
             qtd=0
             for c in colabs:
-                if str(c.get("frente") or "").upper().strip()=="REVISÃO" and str(c.get("equipe_revisao") or "").upper().strip() in ("EQUIPE 1","EQUIPE 2"):
-                    salvar_apuracao_manual(int(c["id"]), ano_g, mes_g, c.get("equipe_revisao"), None, None, usuario); qtd+=1
-            st.success("Substituição manual removida. A média das inspeções voltou a ser a prioridade."); st.rerun()
-        except Exception as e: st.error(f"Não foi possível restaurar as médias das inspeções: {e}")
+                if str(c.get("frente") or "").upper().strip() != "REVISÃO":
+                    continue
+                eq=str(c.get("equipe_revisao") or "").upper().strip()
+                if eq not in ("EQUIPE 1","EQUIPE 2"):
+                    continue
+                med=media_eq1 if eq=="EQUIPE 1" else media_eq2
+                salvar_apuracao_manual(int(c["id"]),ano_g,mes_g,eq,med,None,usuario)
+                qtd+=1
+            st.success(f"Médias aplicadas a {qtd} colaborador(es) da Revisão.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível aplicar as médias: {e}")
 
-    conf_key=f"confirm_override_inspecoes_{ano_g}_{mes_g}"
-    if st.session_state.get(conf_key):
-        @st.dialog("⚠️ Substituir média das inspeções?", width="large")
-        def _confirmar_override():
-            st.warning("Já existe média calculada pela tela de **Inspeções das Carretas** nesta competência. O lançamento manual em lote substituirá esse resultado na gratificação.")
-            c1,c2=st.columns(2)
-            c1.metric("EQUIPE 1 — Inspeções", _hhmm_horas(media_eq1))
-            c2.metric("EQUIPE 2 — Inspeções", _hhmm_horas(media_eq2))
-            st.write(f"**Novo valor manual:** EQUIPE 1 = {manual_eq1:.2f} h | EQUIPE 2 = {manual_eq2:.2f} h")
-            a,b=st.columns(2)
-            if a.button("✅ Sim, substituir", type="primary", use_container_width=True, key=f"sim_override_{ano_g}_{mes_g}"):
-                try:
-                    qtd=_aplicar_override_lote(); st.session_state.pop(conf_key,None); st.success(f"Média manual aplicada a {qtd} colaborador(es)."); st.rerun()
-                except Exception as e: st.error(f"Não foi possível aplicar as médias: {e}")
-            if b.button("Cancelar", use_container_width=True, key=f"cancel_override_{ano_g}_{mes_g}"):
-                st.session_state.pop(conf_key,None); st.rerun()
-        _confirmar_override()
+    # A média individual agora é editada diretamente na linha da apuração.
+    # O lançamento em lote acima continua disponível e pode ser usado normalmente.
 
     # A gratificação SEMPRE usa somente a frequência já persistida no Supabase.
     # Se existir rascunho/alteração pendente na tela de frequência desta mesma competência,
@@ -1499,11 +1345,10 @@ def tela_apuracao_gratificacao():
         sal=float(c.get("salario_base") or 0); fa=faltas.get(cid,0); at=atest.get(cid,0); dna=dna_por.get(cid,0); des=desvios.get(cid,0)
         manual=ap_por.get(cid,{})
         equipe=str(c.get("equipe_revisao") or "").upper().strip() if frente=="REVISÃO" else ""
-        # Prioridade: inspeções. Só usa valor manual quando houve substituição explicitamente confirmada.
-        _obs_manual=str(manual.get("observacao") or "").upper()
-        _v_manual=manual.get("media_tempo_entrega_horas")
-        if frente=="REVISÃO" and "SUBSTITUIÇÃO MANUAL" in _obs_manual and _v_manual not in (None, ""):
-            try: media=float(_v_manual)
+        # Valor individual salvo prevalece sobre o valor digitado nos campos de lote.
+        _media_manual = manual.get("media_tempo_entrega_horas") if frente=="REVISÃO" else None
+        if _media_manual not in (None, ""):
+            try: media=float(_media_manual)
             except Exception: media=None
         elif frente=="REVISÃO" and equipe=="EQUIPE 1": media=media_eq1
         elif frente=="REVISÃO" and equipe=="EQUIPE 2": media=media_eq2
@@ -1582,7 +1427,8 @@ def tela_apuracao_gratificacao():
         and str(o.get("tipo") or "").upper().strip() not in tipos_nao_penalizam
     ]
 
-    # A MÉDIA TEMPO é automática e vem dos lançamentos de inspeções; a grade fica protegida.
+    # Edição individual diretamente na própria linha.
+    # Apenas MÉDIA TEMPO (h) fica editável; os demais campos continuam protegidos.
     df_editor = df_view.drop(columns=["EMPRESA", "FUNÇÃO"], errors="ignore").copy()
     df_editor["VER DESVIOS"] = False
     # Deixa a ação de visualizar os desvios junto do motivo/cálculo, no fim da linha.
@@ -1598,7 +1444,7 @@ def tela_apuracao_gratificacao():
         use_container_width=True,
         hide_index=True,
         height=min(760,90+max(1,len(df_editor))*35),
-        disabled=[c for c in df_editor.columns if c != "VER DESVIOS"],
+        disabled=[c for c in df_editor.columns if c not in ("MÉDIA TEMPO (h)", "VER DESVIOS")],
         column_config={
             "VER DESVIOS": st.column_config.CheckboxColumn("🔎 VER", help="Clique aqui para abrir quais ocorrências retiraram a gratificação."),
             "SALÁRIO":st.column_config.NumberColumn("SALÁRIO",format="R$ %.2f"),
@@ -1606,13 +1452,39 @@ def tela_apuracao_gratificacao():
             "GRATIFICAÇÃO":st.column_config.NumberColumn("GRATIFICAÇÃO",format="R$ %.2f"),
             "MÉDIA TEMPO (h)":st.column_config.NumberColumn(
                 "MÉDIA TEMPO (h)", min_value=0.0, step=0.1, format="%.2f",
-                help="Calculada automaticamente pelos lançamentos de inspeções da equipe."
+                help="Na REVISÃO, altere aqui para lançar uma média individual."
             ),
         },
         key=f"grat_editor_{ano_g}_{mes_g}",
     )
 
-    # MÉDIA TEMPO não é editável aqui: é recalculada automaticamente pelas inspeções.
+    # Salva automaticamente qualquer alteração individual feita na coluna MÉDIA TEMPO.
+    # Para frentes diferentes de REVISÃO, a média não se aplica e a edição é descartada.
+    alterou_media = False
+    for pos in range(min(len(df_editor), len(editado_grat))):
+        antes = df_editor.iloc[pos]
+        depois = editado_grat.iloc[pos]
+        nome_ed = str(antes["COLABORADOR"])
+        frente_ed = str(antes["FRENTE"] or "").upper().strip()
+        va = antes.get("MÉDIA TEMPO (h)")
+        vd = depois.get("MÉDIA TEMPO (h)")
+        va_cmp = None if pd.isna(va) else float(va)
+        vd_cmp = None if pd.isna(vd) else float(vd)
+        if va_cmp != vd_cmp:
+            if frente_ed != "REVISÃO":
+                st.warning(f"Média de tempo individual é utilizada somente para REVISÃO. Alteração de {nome_ed} ignorada.")
+                alterou_media = True
+                continue
+            try:
+                cid_ed = int(ids[nome_ed])
+                colab_ed = next(c for c in colabs if int(c["id"]) == cid_ed)
+                equipe_ed = str(colab_ed.get("equipe_revisao") or "").upper().strip() or None
+                usuario_ed = usr.get("nome") or usr.get("usuario")
+                salvar_apuracao_manual(cid_ed, ano_g, mes_g, equipe_ed, vd_cmp, None, usuario_ed)
+                st.toast(f"Média de {nome_ed} salva: {vd_cmp:.2f} h" if vd_cmp is not None else f"Média de {nome_ed} removida.")
+                alterou_media = True
+            except Exception as e:
+                st.error(f"Não foi possível salvar a média individual de {nome_ed}: {e}")
 
     # Abre o detalhamento de desvios somente uma vez por marcação.
     # Isso evita reabrir o dialog em todo rerun e impede conflito com a Ficha do Colaborador.
@@ -1638,9 +1510,8 @@ def tela_apuracao_gratificacao():
     else:
         st.session_state[_chave_desvio_tratado] = list(_tratados)
 
-    # Alterações de média em lote já executam st.rerun() no próprio fluxo de confirmação.
-    # Não usar a antiga flag `alterou_media`, pois ela deixou de existir após a integração
-    # das médias automáticas vindas das inspeções.
+    if alterou_media:
+        st.rerun()
 
     # Fluxo de envio/autorização. Depois de enviado, esta competência fica somente leitura.
     _apr = _grat_aprovacao(ano_g, mes_g)
@@ -2225,13 +2096,16 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         faltas=int(resumo["FALTAS"].sum()) if "FALTAS" in resumo else 0
         valor_falta=st.number_input("Valor por falta (R$)", min_value=0.0, value=307.21, step=0.01, format="%.2f", key=f"cmc_vfalta_{ano}_{mes}")
         total_geral=total+t50+t50a+t100
+        total_faltas=faltas*valor_falta
+        total_liquido=total_geral-total_faltas
         html2=f"""<table style='width:100%;border-collapse:collapse;font-size:16px'>
         <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50)}</td></tr>
         <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50% APÓS 01:28</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50apos}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50a)}</td></tr>
         <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 100%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he100}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v100)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t100)}</td></tr>
         </table><br>
         <div style='display:flex;justify-content:space-between;font-size:20px;font-weight:800;padding:8px 0'><span>TOTAL COLABORADOR</span><span>{_fmt_qtd(sum(x[1] for x in linhas))}</span><span>{_fmt_brl(total_geral)}</span></div>
-        <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;color:red;padding:8px 0'><span>FALTAS</span><span>{faltas}</span><span>{_fmt_brl(valor_falta)}</span><span>({_fmt_brl(faltas*valor_falta)})</span></div>
+        <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;color:red;padding:8px 0'><span>FALTAS</span><span>{faltas}</span><span>{_fmt_brl(valor_falta)}</span><span>({_fmt_brl(total_faltas)})</span></div>
+        <div style='margin-top:10px;border-top:2px solid #2f7d1f;padding-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:23px;font-weight:900;color:#1f2937'><span>TOTAL</span><span>{_fmt_brl(total_liquido)}</span></div>
         """
         st.markdown(html2, unsafe_allow_html=True)
         faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _FUNCOES_CMC]
@@ -2488,8 +2362,6 @@ st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorr
 # Controles da sessão ficam DEPOIS do título/subtítulo.
 # Assim não são capturados/empurrados pela área superior do Streamlit.
 cabecalho_sessao(mostrar_ajuda=True)
-
-# As inspeções são lançadas em aplicativo separado. O Portal RH apenas consulta automaticamente o Supabase.
 
 # Módulo CMC Bahia: página exclusiva e disponível somente para ADMIN.
 if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "CMC_BAHIA":
