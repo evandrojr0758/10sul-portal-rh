@@ -2503,6 +2503,24 @@ for r in freq:
     except Exception:
         pass
 
+# Acesso rápido à ficha individual. O campo é pesquisável e não interfere no filtro da grade.
+_ficha_col1, _ficha_col2 = st.columns([4, 1], gap="medium")
+with _ficha_col1:
+    _mapa_ficha = {_nome_colaborador(c): c for c in _colaboradores_todos}
+    _nome_ficha = st.selectbox(
+        "👤 Ficha / ocorrências do colaborador",
+        options=list(_mapa_ficha.keys()),
+        index=None,
+        placeholder="Selecione ou digite o nome do colaborador...",
+        key=f"rh_ficha_colaborador_{int(ano)}_{mes}",
+    )
+with _ficha_col2:
+    st.write("")
+    st.write("")
+    if st.button("Abrir ficha", use_container_width=True, disabled=not bool(_nome_ficha), key=f"rh_abrir_ficha_{int(ano)}_{mes}"):
+        abrir_ficha_colaborador(_mapa_ficha[_nome_ficha])
+
+
 # Filtros VISUAIS da grade. Não alteram cadastro, indicadores ou dados salvos.
 # A busca pode ser feita por qualquer parte do nome do colaborador.
 _colaboradores_todos = list(colaboradores)
@@ -2555,23 +2573,6 @@ colaboradores = _colaboradores_filtrados
 if _busca_colaborador and not colaboradores:
     st.info(f'Nenhum colaborador encontrado para "{_busca_colaborador}" com o filtro selecionado.')
 
-
-# Acesso rápido à ficha individual. O campo é pesquisável e não interfere no filtro da grade.
-_ficha_col1, _ficha_col2 = st.columns([4, 1], gap="medium")
-with _ficha_col1:
-    _mapa_ficha = {_nome_colaborador(c): c for c in _colaboradores_todos}
-    _nome_ficha = st.selectbox(
-        "👤 Ficha / ocorrências do colaborador",
-        options=list(_mapa_ficha.keys()),
-        index=None,
-        placeholder="Selecione ou digite o nome do colaborador...",
-        key=f"rh_ficha_colaborador_{int(ano)}_{mes}",
-    )
-with _ficha_col2:
-    st.write("")
-    st.write("")
-    if st.button("Abrir ficha", use_container_width=True, disabled=not bool(_nome_ficha), key=f"rh_abrir_ficha_{int(ano)}_{mes}"):
-        abrir_ficha_colaborador(_mapa_ficha[_nome_ficha])
 
 # Área de análises recolhível para manter a tela principal compacta.
 _analises_expander = st.expander("📊 Análises de Frequência", expanded=False)
@@ -2715,6 +2716,10 @@ editado = st.data_editor(
 )
 # Mantém o que está visualmente na grade como rascunho oficial.
 st.session_state[_draft_key] = editado.copy()
+
+# O botão de salvamento fica sempre visível logo abaixo da grade.
+# Ele é preenchido mais abaixo, depois que o sistema calcula as alterações e validações.
+_salvar_grade_slot = st.empty()
 
 # Conta diretamente o que está aparecendo na grade, inclusive alterações ainda não salvas.
 contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0, "COMP": 0}
@@ -3076,7 +3081,7 @@ if alteracoes:
     if pendentes_obs and not pode_salvar and not modal_aberto:
         st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
-    if st.button("💾 Salvar alterações", type="primary", disabled=(not pode_salvar) or bool(edicoes_salvas)):
+    if _salvar_grade_slot.button("💾 Salvar alterações", type="primary", use_container_width=True, disabled=(not pode_salvar) or bool(edicoes_salvas), key=f"rh_salvar_grade_{int(ano)}_{mes}"):
         # Células vazias geram ALERTA, mas não bloqueiam o salvamento parcial.
         # Dias futuros não entram porque a grade contém somente até ultimo_visivel.
         celulas_vazias = []
@@ -3137,6 +3142,17 @@ if alteracoes:
             st.rerun()
         except Exception as e:
             st.error(f"Não foi possível salvar: {e}")
+
+# Mantém o botão visível mesmo quando ainda não há alteração pendente.
+# Assim o RH sempre sabe onde salvar; ele habilita automaticamente ao editar a grade.
+if not alteracoes:
+    _salvar_grade_slot.button(
+        "💾 Salvar alterações",
+        type="primary",
+        use_container_width=True,
+        disabled=True,
+        key=f"rh_salvar_grade_sem_alt_{int(ano)}_{mes}",
+    )
 
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
