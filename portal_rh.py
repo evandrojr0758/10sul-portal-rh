@@ -2103,133 +2103,11 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 50% APÓS 01:28</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he50apos}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t50a)}</td></tr>
         <tr><td style='border:1px solid #222;padding:6px'>QUANTIDADE HORA EXTRA 100%</td><td style='border:1px solid #222;padding:6px;text-align:center'>{he100}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(v100)}</td><td style='border:1px solid #222;padding:6px;text-align:right'>{_fmt_brl(t100)}</td></tr>
         </table><br>
-        <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;padding:8px 0'><span>QUANTIDADE DE COLABORADORES</span><span>{int(resumo['COLABORADOR'].nunique())}</span></div>
         <div style='display:flex;justify-content:space-between;font-size:20px;font-weight:800;padding:8px 0'><span>TOTAL COLABORADOR</span><span>{_fmt_qtd(sum(x[1] for x in linhas))}</span><span>{_fmt_brl(total_geral)}</span></div>
         <div style='display:flex;justify-content:space-between;font-size:19px;font-weight:800;color:red;padding:8px 0'><span>FALTAS</span><span>{faltas}</span><span>{_fmt_brl(valor_falta)}</span><span>({_fmt_brl(total_faltas)})</span></div>
         <div style='margin-top:10px;border-top:2px solid #2f7d1f;padding-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:23px;font-weight:900;color:#1f2937'><span>TOTAL</span><span>{_fmt_brl(total_liquido)}</span></div>
         """
         st.markdown(html2, unsafe_allow_html=True)
-
-        # Imagem do resumo financeiro pronta para envio ao cliente
-        try:
-            from PIL import Image, ImageDraw, ImageFont
-            from io import BytesIO
-
-            def _fonte(tamanho, negrito=False):
-                caminhos = [
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if negrito else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if negrito else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-                ]
-                for caminho in caminhos:
-                    try:
-                        return ImageFont.truetype(caminho, tamanho)
-                    except Exception:
-                        pass
-                return ImageFont.load_default()
-
-            W = 1500
-            margem = 55
-            row_h = 54
-            header_h = 70
-            tabela_h = 62 + (len(linhas) + 1) * row_h
-            extras_h = 3 * row_h + 45
-            totais_h = 245
-            H = margem * 2 + header_h + tabela_h + extras_h + totais_h
-            img = Image.new("RGB", (W, H), "white")
-            d = ImageDraw.Draw(img)
-            verde = (47, 125, 31)
-            cinza = (245, 246, 248)
-            preto = (31, 41, 55)
-            vermelho = (220, 38, 38)
-            borda = (60, 60, 60)
-            f_titulo = _fonte(30, True)
-            f_head = _fonte(20, True)
-            f_txt = _fonte(20, False)
-            f_bold = _fonte(22, True)
-            f_total = _fonte(29, True)
-
-            x0, x1 = margem, W - margem
-            y = margem
-            d.rectangle([x0, y, x1, y + header_h], fill=verde)
-            titulo = f"FECHAMENTO {mes_nome} - {ano} 01/{mes:02d} A {dias_contabilizados:02d}/{mes:02d}"
-            box = d.textbbox((0,0), titulo, font=f_titulo)
-            d.text(((W-(box[2]-box[0]))/2, y+18), titulo, fill="white", font=f_titulo)
-            y += header_h
-
-            cols = [x0, x0+330, x0+690, x0+1070, x1]
-            cab = ["Função", "Quantidade de\nColaboradores", "Valor Mensal por\nColaborador (R$)", "Total Mensal por\nFunção (R$)"]
-            for i in range(4):
-                d.rectangle([cols[i], y, cols[i+1], y+62], fill=cinza, outline=borda, width=1)
-                d.multiline_text((cols[i]+12, y+9), cab[i], fill=preto, font=f_head, spacing=3)
-            y += 62
-            for f,q,v,t in linhas:
-                vals=[f, _fmt_qtd(q), _fmt_brl(v), _fmt_brl(t)]
-                for i,val in enumerate(vals):
-                    d.rectangle([cols[i], y, cols[i+1], y+row_h], fill="white", outline=borda, width=1)
-                    if i == 0:
-                        d.text((cols[i]+12, y+14), val, fill=preto, font=f_txt)
-                    else:
-                        bb=d.textbbox((0,0), val, font=f_txt)
-                        d.text((cols[i+1]-12-(bb[2]-bb[0]), y+14), val, fill=preto, font=f_txt)
-                y += row_h
-
-            y += 38
-            ecols=[x0, x0+770, x0+920, x0+1160, x1]
-            extras=[
-                ("QUANTIDADE HORA EXTRA 50%", he50, _fmt_brl(v50), _fmt_brl(t50)),
-                ("QUANTIDADE HORA EXTRA 50% APÓS 01:28", he50apos, _fmt_brl(v50), _fmt_brl(t50a)),
-                ("QUANTIDADE HORA EXTRA 100%", he100, _fmt_brl(v100), _fmt_brl(t100)),
-            ]
-            for linha in extras:
-                for i,val in enumerate(linha):
-                    d.rectangle([ecols[i], y, ecols[i+1], y+row_h], fill="white", outline=borda, width=1)
-                    if i == 0:
-                        d.text((ecols[i]+12,y+14), val, fill=preto, font=f_txt)
-                    else:
-                        bb=d.textbbox((0,0), val, font=f_txt)
-                        d.text((ecols[i+1]-12-(bb[2]-bb[0]),y+14), val, fill=preto, font=f_txt)
-                y += row_h
-
-            y += 40
-            d.text((x0,y), "QUANTIDADE DE COLABORADORES", fill=preto, font=f_bold)
-            qtd_colab_txt=str(int(resumo["COLABORADOR"].nunique()))
-            bb=d.textbbox((0,0),qtd_colab_txt,font=f_bold)
-            d.text((x1-(bb[2]-bb[0]),y), qtd_colab_txt, fill=preto, font=f_bold)
-            y += 55
-            d.text((x0,y), "TOTAL COLABORADOR", fill=preto, font=f_bold)
-            qtdtxt=_fmt_qtd(sum(x[1] for x in linhas)); bb=d.textbbox((0,0),qtdtxt,font=f_bold)
-            d.text((W//2-(bb[2]-bb[0])//2,y), qtdtxt, fill=preto, font=f_bold)
-            totaltxt=_fmt_brl(total_geral); bb=d.textbbox((0,0),totaltxt,font=f_bold)
-            d.text((x1-(bb[2]-bb[0]),y), totaltxt, fill=preto, font=f_bold)
-            y += 55
-            d.text((x0,y), "FALTAS", fill=vermelho, font=f_bold)
-            ft=str(faltas); bb=d.textbbox((0,0),ft,font=f_bold)
-            d.text((x0+460-(bb[2]-bb[0])//2,y), ft, fill=vermelho, font=f_bold)
-            vf=_fmt_brl(valor_falta); bb=d.textbbox((0,0),vf,font=f_bold)
-            d.text((x0+930-(bb[2]-bb[0])//2,y), vf, fill=vermelho, font=f_bold)
-            tf=f"({_fmt_brl(total_faltas)})"; bb=d.textbbox((0,0),tf,font=f_bold)
-            d.text((x1-(bb[2]-bb[0]),y), tf, fill=vermelho, font=f_bold)
-            y += 62
-            d.line([x0,y,x1,y], fill=verde, width=3)
-            y += 20
-            d.text((x0,y), "TOTAL", fill=preto, font=f_total)
-            liq=_fmt_brl(total_liquido); bb=d.textbbox((0,0),liq,font=f_total)
-            d.text((x1-(bb[2]-bb[0]),y), liq, fill=preto, font=f_total)
-
-            buffer=BytesIO()
-            img.save(buffer, format="PNG", optimize=True)
-            st.download_button(
-                "📷 Baixar resumo como imagem",
-                data=buffer.getvalue(),
-                file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.png",
-                mime="image/png",
-                use_container_width=True,
-                type="primary",
-                key=f"baixar_img_cmc_{ano}_{mes}",
-            )
-        except Exception as e:
-            st.error(f"Não foi possível gerar a imagem do resumo: {e}")
-
         faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _FUNCOES_CMC]
         if faltantes:
             st.warning("Função não cadastrada para: " + ", ".join(faltantes))
@@ -2261,13 +2139,9 @@ def _codigo_ponto_prestadora(row):
     textos = " | ".join(valores).upper()
 
     # Ocorrências explícitas do ponto têm prioridade sobre horários.
-    # O relatório da Prestadora usa várias grafias para falta na coluna Entrada 1/G,
-    # por exemplo: Falta, Falt, FALTA, D.Falt, D. Falt, D.Falta e D. Falta.
-    # Todas essas variações devem ser classificadas como FA.
     if "ATEST" in textos:
         return "A"
-    textos_falta = (textos.replace(".", " ").replace("-", " ").replace("_", " "))
-    if any(token.startswith("FALT") for token in textos_falta.split()):
+    if "FALTA" in textos:
         return "FA"
     if "FERIAS" in textos or "FÉRIAS" in textos:
         return "FE"
@@ -2375,110 +2249,9 @@ def _excel_cmc(matriz, ano, mes):
     ws2.column_dimensions["B"].width = 18
     bio=BytesIO(); wb.save(bio); bio.seek(0); return bio.getvalue()
 
-def _seed_cadastros_cmc():
-    """Garante que o cadastro do Supabase receba os colaboradores/valores já existentes no código."""
-    try:
-        existentes = sb("GET", "rh_cmc_colaboradores", "select=colaborador") or []
-        nomes = {_nome_cmc(x.get("colaborador")) for x in existentes}
-        faltantes = [{"colaborador": n, "funcao": f} for n, f in _FUNCOES_CMC.items() if _nome_cmc(n) not in nomes]
-        if faltantes:
-            sb("POST", "rh_cmc_colaboradores", "", faltantes, "return=minimal")
-        vals = sb("GET", "rh_cmc_valores_funcao", "select=funcao") or []
-        funcoes = {str(x.get("funcao") or "").upper() for x in vals}
-        novos = [{"funcao": f, "valor_mensal": v} for f, v in _VALORES_CMC.items() if f not in funcoes]
-        if novos:
-            sb("POST", "rh_cmc_valores_funcao", "", novos, "return=minimal")
-    except Exception:
-        pass
-
-def _carregar_cadastros_cmc():
-    """Atualiza em memória os cadastros oficiais da CMC a partir do Supabase."""
-    global _FUNCOES_CMC, _VALORES_CMC
-    try:
-        dados = sb("GET", "rh_cmc_colaboradores", "select=colaborador,funcao") or []
-        if dados:
-            _FUNCOES_CMC = {
-                _nome_cmc(x.get("colaborador")): str(x.get("funcao") or "").strip().upper()
-                for x in dados if _nome_cmc(x.get("colaborador"))
-            }
-        valores = sb("GET", "rh_cmc_valores_funcao", "select=funcao,valor_mensal") or []
-        if valores:
-            _VALORES_CMC = {
-                str(x.get("funcao") or "").strip().upper(): float(x.get("valor_mensal") or 0)
-                for x in valores if str(x.get("funcao") or "").strip()
-            }
-    except Exception:
-        # Mantém os valores de fallback do código se o banco estiver temporariamente indisponível.
-        pass
-
-def _cadastros_cmc_ui():
-    _seed_cadastros_cmc()
-    c1, c2 = st.columns(2)
-    if c1.button("👥 Cadastro de Colaboradores", use_container_width=True, key="cmc_btn_cad_colab"):
-        st.session_state["cmc_modal"] = "colaboradores"
-    if c2.button("💰 Valores por Função", use_container_width=True, key="cmc_btn_valores"):
-        st.session_state["cmc_modal"] = "valores"
-
-    modo = st.session_state.get("cmc_modal")
-    if modo == "colaboradores":
-        with st.container(border=True):
-            st.markdown("#### 👥 Cadastro de Colaboradores — CMC Bahia")
-            try:
-                dados = sb("GET", "rh_cmc_colaboradores", "select=id,colaborador,funcao&order=colaborador.asc") or []
-                dfc = pd.DataFrame(dados)
-                if dfc.empty:
-                    dfc = pd.DataFrame(columns=["id","colaborador","funcao"])
-                edit = st.data_editor(dfc, hide_index=True, use_container_width=True, num_rows="dynamic",
-                    disabled=["id"], column_config={
-                        "id": st.column_config.NumberColumn("ID", width="small"),
-                        "colaborador": st.column_config.TextColumn("COLABORADOR", width="large", required=True),
-                        "funcao": st.column_config.SelectboxColumn("FUNÇÃO", options=list(_VALORES_CMC.keys()), required=True, width="medium"),
-                    }, key="cmc_cadastro_editor")
-                a,b = st.columns([1,1])
-                if a.button("💾 Salvar cadastro", type="primary", use_container_width=True, key="cmc_salvar_cadastro"):
-                    for _, r in edit.iterrows():
-                        nome=_nome_cmc(r.get("colaborador")); func=str(r.get("funcao") or "").strip().upper()
-                        if not nome or not func: continue
-                        rid=r.get("id")
-                        if pd.notna(rid):
-                            sb("PATCH","rh_cmc_colaboradores",f"id=eq.{int(rid)}",{"colaborador":nome,"funcao":func},"return=minimal")
-                        else:
-                            sb("POST","rh_cmc_colaboradores","",{"colaborador":nome,"funcao":func},"return=minimal")
-                    _carregar_cadastros_cmc()
-                    st.success("Cadastro salvo."); st.rerun()
-                if b.button("✖ Fechar", use_container_width=True, key="cmc_fechar_cadastro"):
-                    st.session_state.pop("cmc_modal",None); st.rerun()
-            except Exception as e:
-                st.error(f"Não foi possível abrir o cadastro: {e}")
-    elif modo == "valores":
-        with st.container(border=True):
-            st.markdown("#### 💰 Valores por Função — CMC Bahia")
-            try:
-                dados = sb("GET", "rh_cmc_valores_funcao", "select=id,funcao,valor_mensal&order=funcao.asc") or []
-                dfv = pd.DataFrame(dados)
-                edit = st.data_editor(dfv, hide_index=True, use_container_width=True, disabled=["id","funcao"],
-                    column_config={"id":st.column_config.NumberColumn("ID",width="small"),"funcao":st.column_config.TextColumn("FUNÇÃO",width="large"),"valor_mensal":st.column_config.NumberColumn("VALOR MENSAL (R$)",min_value=0.0,format="R$ %.2f")}, key="cmc_valores_editor")
-                a,b=st.columns(2)
-                if a.button("💾 Salvar valores", type="primary", use_container_width=True, key="cmc_salvar_valores"):
-                    for _,r in edit.iterrows():
-                        sb("PATCH","rh_cmc_valores_funcao",f"id=eq.{int(r['id'])}",{"valor_mensal":float(r.get('valor_mensal') or 0)},"return=minimal")
-                    _carregar_cadastros_cmc()
-                    st.success("Valores atualizados."); st.rerun()
-                if b.button("✖ Fechar", use_container_width=True, key="cmc_fechar_valores"):
-                    st.session_state.pop("cmc_modal",None); st.rerun()
-            except Exception as e:
-                st.error(f"Não foi possível abrir os valores: {e}")
-
 def tela_fechamento_cmc_bahia():
     st.markdown("### 🏭 Fechamento CMC Bahia")
     st.caption("Importe a planilha do ponto eletrônico. O Portal monta automaticamente a matriz mensal por colaborador e dia, sem PROCV/PROCX.")
-
-    # Administração do fechamento — deve aparecer mesmo antes de importar a planilha.
-    st.markdown("#### ⚙️ Cadastros do Fechamento")
-    _cadastros_cmc_ui()
-    # O cadastro do Supabase é a fonte oficial. Recarrega antes de montar o fechamento.
-    _carregar_cadastros_cmc()
-    st.divider()
     arq = st.file_uploader("Planilha do ponto eletrônico — CMC Bahia", type=["xlsx","xls"], key="upload_ponto_cmc_bahia")
     if not arq:
         st.info("Envie a planilha do ponto eletrônico para iniciar a apuração.")
@@ -2533,10 +2306,13 @@ def tela_fechamento_cmc_bahia():
         dias_contabilizados = len(dias_cols)
         total_contabilizado = int(resumo["TOTAL CONTABILIZADO"].sum())
         media_colaboradores = total_contabilizado / dias_contabilizados if dias_contabilizados else 0
-        c1, c2, c3 = st.columns(3)
+        quantidade_colaboradores = int(resumo["COLABORADOR"].nunique()) if "COLABORADOR" in resumo.columns else int(len(resumo))
+
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Registros considerados", f"{total_contabilizado}")
         c2.metric("Dias contabilizados", f"{dias_contabilizados}")
-        c3.metric("Média de colaboradores", f"{media_colaboradores:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        c3.metric("Quantidade de colaboradores", f"{quantidade_colaboradores}")
+        c4.metric("Média de colaboradores", f"{media_colaboradores:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
         st.caption("TOTAL CONTABILIZADO = OK + FA + A + FO. MÉDIA CONTABILIZADA = TOTAL CONTABILIZADO ÷ dias contabilizados no arquivo. A Média de Colaboradores é a soma dessas médias individuais. FÉRIAS não entra na conta.")
 
         b1, b2 = st.columns([1, 1])
