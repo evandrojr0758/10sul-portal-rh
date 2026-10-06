@@ -2076,7 +2076,7 @@ def _chaves_cmc(ano, mes):
     return [f"{prefixo}_{ano}_{mes}" for prefixo in (
         "cmc_fa_estado", "cmc_fa_aprovadas", "cmc_fa_qtd", "cmc_he_estado",
         "cmc_he_aprovadas", "cmc_he50", "cmc_he50apos", "cmc_he100", "cmc_vfalta",
-        "cmc_matriz_ajustes")]
+        "cmc_matriz_ajustes", "cmc_he50_manual", "cmc_he100_manual")]
 
 def _salvar_fechamento_cmc(ano, mes):
     try:
@@ -2319,6 +2319,19 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         he50=c1.text_input("Quantidade Hora Extra 50%", key=f"cmc_he50_{ano}_{mes}")
         he50apos=c2.text_input("Hora Extra 50% após 01:28", key=f"cmc_he50apos_{ano}_{mes}")
         he100=c3.text_input("Quantidade Hora Extra 100%", key=f"cmc_he100_{ano}_{mes}")
+        st.caption("Horas adicionais: informe somente o acréscimo às horas aprovadas no ponto.")
+        ma, mb = st.columns(2)
+        st.session_state.setdefault(f"cmc_he50_manual_{ano}_{mes}", "00:00")
+        st.session_state.setdefault(f"cmc_he100_manual_{ano}_{mes}", "00:00")
+        adicional50 = ma.text_input("Hora extra adicional 50% (HH:MM)", key=f"cmc_he50_manual_{ano}_{mes}")
+        adicional100 = mb.text_input("Hora extra adicional 100% (HH:MM)", key=f"cmc_he100_manual_{ano}_{mes}")
+        for valor in (adicional50, adicional100):
+            if not re.fullmatch(r"\d+:[0-5]\d", valor.strip()):
+                st.error("Informe as horas adicionais no formato HH:MM, por exemplo 02:30.")
+                return
+        he50 = _hhmm_cmc(round((_horas_decimal(he50) + _horas_decimal(adicional50)) * 60))
+        he100 = _hhmm_cmc(round((_horas_decimal(he100) + _horas_decimal(adicional100)) * 60))
+        st.caption(f"Total com adicionais: 50% = {he50} • 100% = {he100}")
         v50=96.54; v100=135.80
         t50=_horas_decimal(he50)*v50; t50a=_horas_decimal(he50apos)*v50; t100=_horas_decimal(he100)*v100
         faltas=int(resumo["FALTAS"].sum()) if "FALTAS" in resumo else 0
@@ -2339,6 +2352,14 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
             b1.download_button("🖼️ Baixar resumo como imagem",data=png_bytes,file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.png",mime="image/png",use_container_width=True)
             if b2.button("📧 Enviar fechamento por e-mail",use_container_width=True,type="primary"):
                 _modal_email_cmc(png_bytes,mes_nome,ano,total_liquido)
+        wb_fin = Workbook()
+        wb_fin.remove(wb_fin.active)
+        _aba_financeiro_cmc(wb_fin, resumo, ano, mes, dias_contabilizados)
+        excel_fin = BytesIO()
+        wb_fin.save(excel_fin)
+        st.download_button("📥 Baixar Resumo Financeiro em Excel", data=excel_fin.getvalue(),
+                           file_name=f"RESUMO_FINANCEIRO_CMC_BAHIA_{mes:02d}_{ano}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _funcoes_cmc_ativas()]
         if faltantes: st.warning("Função não cadastrada para: " + ", ".join(faltantes))
     _abrir()
@@ -2836,6 +2857,92 @@ def _resumo_matriz_cmc(matriz):
     r["MÉDIA CONTABILIZADA"] = (r["TOTAL CONTABILIZADO"] / dias_contabilizados).round(2) if dias_contabilizados else 0.0
     return r
 
+def _aba_financeiro_cmc(wb, resumo, ano, mes, dias_contabilizados):
+    ws = wb.create_sheet("RESUMO FINANCEIRO", 0)
+    ws.sheet_view.showGridLines = False
+    verde = "2F7D1F"
+    moeda = '"R$" #,##0.00;[Red]("R$" #,##0.00)'
+    ws.merge_cells("A1:D1")
+    ws["A1"] = "10 SUL | FECHAMENTO CMC BAHIA"
+    ws["A1"].font = Font(name="Calibri", size=17, bold=True, color="FFFFFF")
+    ws["A1"].fill = PatternFill("solid", fgColor=verde)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 36
+    meses = ["", "JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"]
+    ws.merge_cells("A2:D2")
+    ws["A2"] = f"{meses[mes]} / {ano} • Período: 01/{mes:02d} a {dias_contabilizados:02d}/{mes:02d}"
+    ws["A2"].alignment = Alignment(horizontal="center")
+    ws["A2"].font = Font(size=11, color="475569")
+    ws.row_dimensions[2].height = 25
+    headers = ["Função", "Quantidade de colaboradores", "Valor mensal por colaborador", "Total mensal por função"]
+    for col, title in enumerate(headers, 1):
+        ws.cell(4, col, title)
+    linhas = _resumo_financeiro_cmc(resumo)
+    for row, (funcao, qtd, valor, total) in enumerate(linhas, 5):
+        for col, value in enumerate((funcao, float(qtd), float(valor), float(total)), 1):
+            ws.cell(row, col, value)
+        ws.cell(row, 2).number_format = "0.00"
+        for col in (3, 4): ws.cell(row, col).number_format = moeda
+    fim = 4 + len(linhas)
+    if linhas:
+        tabela = Table(displayName="FinanceiroCMCBahia", ref=f"A4:D{fim}")
+        tabela.tableStyleInfo = TableStyleInfo(name="TableStyleMedium4", showRowStripes=True)
+        ws.add_table(tabela)
+    row = fim + 2
+    for col, title in enumerate(("Horas extras", "Quantidade (HH:MM)", "Valor por hora", "Total"), 1):
+        ws.cell(row, col, title)
+    he_header = row
+    extras = [("HORA EXTRA 50%", "cmc_he50", 96.54), ("HORA EXTRA 50% APÓS 01:28", "cmc_he50apos", 96.54), ("HORA EXTRA 100%", "cmc_he100", 135.80)]
+    total_he = 0.0
+    for label, prefixo, valor in extras:
+        row += 1
+        hora = str(st.session_state.get(f"{prefixo}_{ano}_{mes}", "00:00"))
+        if prefixo in ("cmc_he50", "cmc_he100"):
+            adicional = str(st.session_state.get(f"{prefixo}_manual_{ano}_{mes}", "00:00"))
+            hora = _hhmm_cmc(round((_horas_decimal(hora) + _horas_decimal(adicional)) * 60))
+        total = _horas_decimal(hora) * valor
+        total_he += total
+        for col, value in enumerate((label, hora, valor, total), 1): ws.cell(row, col, value)
+        for col in (3, 4): ws.cell(row, col).number_format = moeda
+    tab_he = Table(displayName="HorasExtrasCMCBahia", ref=f"A{he_header}:D{row}")
+    tab_he.tableStyleInfo = TableStyleInfo(name="TableStyleMedium4", showRowStripes=True)
+    ws.add_table(tab_he)
+    total_colab = sum(float(l[3]) for l in linhas) + total_he
+    faltas = int(resumo["FALTAS"].sum()) if "FALTAS" in resumo else 0
+    valor_falta = float(st.session_state.get(f"cmc_vfalta_{ano}_{mes}", 307.21))
+    row += 2
+    totais = [("TOTAL COLABORADOR", sum(float(l[1]) for l in linhas), None, total_colab),
+              ("FALTAS", faltas, valor_falta, -faltas * valor_falta),
+              ("TOTAL DO FECHAMENTO", None, None, total_colab - faltas * valor_falta)]
+    for label, qtd, unitario, total in totais:
+        for col, value in enumerate((label, qtd, unitario, total), 1):
+            cell = ws.cell(row, col, value)
+            cell.font = Font(name="Calibri", size=12, bold=True, color="DC2626" if label == "FALTAS" else "FFFFFF" if label == "TOTAL DO FECHAMENTO" else "1F2937")
+            cell.fill = PatternFill("solid", fgColor=verde if label == "TOTAL DO FECHAMENTO" else "F1F5F9")
+        ws.cell(row, 2).number_format = "0" if label == "FALTAS" else "0.00"
+        for col in (3, 4): ws.cell(row, col).number_format = moeda
+        ws.row_dimensions[row].height = 30
+        row += 1
+    for header_row in (4, he_header):
+        ws.row_dimensions[header_row].height = 34
+        for cell in ws[header_row]:
+            cell.fill = PatternFill("solid", fgColor=verde)
+            cell.font = Font(name="Calibri", bold=True, color="FFFFFF")
+            cell.alignment = Alignment(wrap_text=True, vertical="center")
+    for cells in ws.iter_rows(min_row=5, max_row=row-1, max_col=4):
+        for cell in cells:
+            cell.alignment = Alignment(horizontal="left" if cell.column == 1 else "right", vertical="center", wrap_text=True)
+    for col, width in (("A", 38), ("B", 27), ("C", 30), ("D", 29)):
+        ws.column_dimensions[col].width = width
+    ws.freeze_panes = "B5"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.print_options.horizontalCentered = True
+    ws.print_area = f"A1:D{row-1}"
+
 def _excel_cmc(matriz, ano, mes):
     resumo = _resumo_matriz_cmc(matriz)
     dias_cols = [c for c in matriz.columns if str(c).isdigit()]
@@ -2867,6 +2974,7 @@ def _excel_cmc(matriz, ano, mes):
     ws2.cell(ws2.max_row, 2).number_format = "0.00"
     ws2.column_dimensions["A"].width = 28
     ws2.column_dimensions["B"].width = 18
+    _aba_financeiro_cmc(wb, resumo, ano, mes, dias_contabilizados)
     bio=BytesIO(); wb.save(bio); bio.seek(0); return bio.getvalue()
 
 def tela_fechamento_cmc_bahia():
