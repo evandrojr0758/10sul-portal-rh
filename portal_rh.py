@@ -4080,6 +4080,12 @@ if not alteracoes:
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
 
+    _cadastro_funcoes = sb("GET", "rh_colaboradores", "select=funcao") or []
+    _funcoes_novo = sorted({
+        str(c.get("funcao") or "").strip().upper()
+        for c in (_cadastro_funcoes + [{"funcao": f} for _, f in SEED_COLABORADORES])
+        if str(c.get("funcao") or "").strip()
+    })
     with st.form("form_novo_colaborador", clear_on_submit=True):
         cc1, cc2 = st.columns(2)
         with cc1:
@@ -4088,8 +4094,11 @@ with st.expander("👥 Cadastro de colaboradores"):
             novo_destra = st.text_input("DESTRA")
             novo_salario = st.number_input("Salário base (R$)", min_value=0.0, step=0.01, value=0.0)
         with cc2:
-            nova_funcao = st.text_input("Função")
-            nova_empresa = st.text_input("Empresa", value="10 SUL")
+            nova_funcao = st.selectbox("Função", [""] + _funcoes_novo)
+            nova_empresa = st.selectbox(
+                "Empresa", ["10 SUL SERVICE", "10 SUL PRESTADORA"],
+                format_func=lambda e: e.replace("10 SUL ", ""),
+            )
             nova_frente = st.selectbox("Frente", ["", "REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"])
             nova_equipe = st.selectbox("Equipe da Revisão", ["", "EQUIPE 1", "EQUIPE 2"], help="Preencha somente para colaboradores da frente REVISÃO.")
 
