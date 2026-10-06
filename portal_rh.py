@@ -2049,6 +2049,87 @@ _FUNCOES_CMC = {
 }
 _VALORES_CMC = {"MECANICO I":10476.96, "MECANICO II":11680.00, "SOLDADOR":11680.00, "BORRACHEIRO":9902.00, "ELETRICISTA":11680.00}
 
+# Persistência privada no Supabase Storage, independente da sessão do navegador.
+_CMC_BUCKET = "rh-fechamentos-cmc"
+
+def _storage_cmc(method, path, payload=None):
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        raise RuntimeError("Configure os Secrets do Supabase para salvar o fechamento.")
+    data = None if payload is None else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/{path}", data=data, method=method)
+    req.add_header("apikey", SUPABASE_SERVICE_KEY)
+    req.add_header("Authorization", f"Bearer {SUPABASE_SERVICE_KEY}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("x-upsert", "true")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+            return json.loads(raw.decode("utf-8")) if raw else None
+    except urllib.error.HTTPError as exc:
+        if method == "GET" and exc.code in (400, 404):
+            detalhe = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 404 or "not found" in detalhe.lower() or '"statusCode":"404"' in detalhe:
+                return None
+        raise RuntimeError(f"Não foi possível acessar o fechamento salvo (HTTP {exc.code}).") from exc
+
+def _chaves_cmc(ano, mes):
+    return [f"{prefixo}_{ano}_{mes}" for prefixo in (
+        "cmc_fa_estado", "cmc_fa_aprovadas", "cmc_fa_qtd", "cmc_he_estado",
+        "cmc_he_aprovadas", "cmc_he50", "cmc_he50apos", "cmc_he100", "cmc_vfalta",
+        "cmc_matriz_ajustes")]
+
+def _salvar_fechamento_cmc(ano, mes):
+    try:
+        if not st.session_state.get("cmc_storage_pronto"):
+            buckets = _storage_cmc("GET", "bucket") or []
+            if not any(b.get("id") == _CMC_BUCKET for b in buckets):
+                _storage_cmc("POST", "bucket", {"id": _CMC_BUCKET, "name": _CMC_BUCKET, "public": False})
+            st.session_state["cmc_storage_pronto"] = True
+        estado = {}
+        for key in _chaves_cmc(ano, mes):
+            if key in st.session_state:
+                value = st.session_state[key]
+                estado[key] = {"dataframe": value.to_json(orient="split", date_format="iso")} if isinstance(value, pd.DataFrame) else value
+        for key in ("cadastro_funcoes_cmc_bahia", "cadastro_valores_cmc_bahia"):
+            if key in st.session_state:
+                estado[key] = st.session_state[key]
+        base = st.session_state.get(f"cmc_base_{ano}_{mes}")
+        payload = {"versao": 1, "ano": int(ano), "mes": int(mes), "estado": estado,
+                   "base": base.to_json(orient="split", date_format="iso") if base is not None else None,
+                   "atualizado": datetime.now().isoformat()}
+        assinatura = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).replace(payload["atualizado"], "").encode()).hexdigest()
+        if st.session_state.get(f"cmc_salvo_hash_{ano}_{mes}") != assinatura:
+            _storage_cmc("POST", f"object/{_CMC_BUCKET}/{ano}-{mes:02d}.json", payload)
+            st.session_state[f"cmc_salvo_hash_{ano}_{mes}"] = assinatura
+        st.session_state[f"cmc_estado_salvo_{ano}_{mes}"] = estado
+        st.session_state["cmc_ultima_competencia"] = (ano, mes)
+        return True
+    except Exception as exc:
+        st.error(f"Fechamento ainda não salvo. Mantenha esta sessão aberta e tente novamente. {exc}")
+        return False
+
+def _carregar_fechamento_cmc(ano, mes):
+    from io import StringIO
+    marker = f"cmc_carregado_{ano}_{mes}"
+    if st.session_state.get(marker):
+        for key, value in st.session_state.get(f"cmc_estado_salvo_{ano}_{mes}", {}).items():
+            if key not in st.session_state:
+                st.session_state[key] = pd.read_json(StringIO(value["dataframe"]), orient="split") if isinstance(value, dict) and "dataframe" in value else value
+        return
+    payload = _storage_cmc("GET", f"object/{_CMC_BUCKET}/{ano}-{mes:02d}.json")
+    if payload:
+        st.session_state[f"cmc_estado_salvo_{ano}_{mes}"] = payload.get("estado", {})
+        for key, value in payload.get("estado", {}).items():
+            if key in _chaves_cmc(ano, mes) or key in ("cadastro_funcoes_cmc_bahia", "cadastro_valores_cmc_bahia"):
+                # Preserva conferências já realizadas na sessão antes desta atualização.
+                if key not in st.session_state:
+                    st.session_state[key] = pd.read_json(StringIO(value["dataframe"]), orient="split") if isinstance(value, dict) and "dataframe" in value else value
+        if payload.get("base"):
+            base = pd.read_json(StringIO(payload["base"]), orient="split", convert_dates=False)
+            base["Dt. Ponto"] = pd.to_datetime(base["Dt. Ponto"], errors="coerce")
+            st.session_state.setdefault(f"cmc_base_{ano}_{mes}", base)
+    st.session_state[marker] = True
+
 def _nome_cmc(txt):
     import re
     return re.sub(r"\s+", " ", str(txt or "").strip().upper())
@@ -2174,6 +2255,7 @@ def _gerar_png_resumo_cmc(linhas, mes_nome, ano, mes, dias_contabilizados, he50,
             for i,val in enumerate(vals):
                 d.rectangle((xs[i],y,xs[i+1],y+row_h),outline=grid,width=1); d.text((xs[i]+10,y+10),str(val),fill=dark,font=fn)
             y+=row_h
+        _salvar_fechamento_cmc(ano, mes)
         total_geral=total+t50+t50a+t100; total_faltas=faltas*valor_falta; total_liquido=total_geral-total_faltas
         y+=18
         d.text((30,y),"TOTAL COLABORADOR",fill=dark,font=fh); d.text((600,y),_fmt_qtd(sum(x[1] for x in linhas)),fill=dark,font=fh); d.text((1100,y),_fmt_brl(total_geral),fill=dark,font=fh); y+=45
@@ -2241,6 +2323,7 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
         t50=_horas_decimal(he50)*v50; t50a=_horas_decimal(he50apos)*v50; t100=_horas_decimal(he100)*v100
         faltas=int(resumo["FALTAS"].sum()) if "FALTAS" in resumo else 0
         valor_falta=st.number_input("Valor por falta (R$)", min_value=0.0, value=307.21, step=0.01, format="%.2f", key=f"cmc_vfalta_{ano}_{mes}")
+        _salvar_fechamento_cmc(ano, mes)
         total_geral=total+t50+t50a+t100; total_faltas=faltas*valor_falta; total_liquido=total_geral-total_faltas
         html2=f"""<table style='width:100%;border-collapse:collapse;font-size:14px;line-height:1.1;margin-top:4px'>
         <tr><td style='border:1px solid #222;padding:4px'>QUANTIDADE HORA EXTRA 50%</td><td style='border:1px solid #222;padding:4px;text-align:center'>{he50}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(v50)}</td><td style='border:1px solid #222;padding:4px;text-align:right'>{_fmt_brl(t50)}</td></tr>
@@ -2268,7 +2351,8 @@ def _normalizar_status_cmc(valor):
         "1": "OK", "1.0": "OK", "PRESENÇA": "OK", "PRESENCA": "OK", "OK": "OK",
         "FOLGA": "FO", "FO": "FO",
         "FALTA": "FA", "FA": "FA",
-        "ATESTADO": "A", "A": "A",
+        "ATESTADO": "A", "ATEST.": "A", "ATEST": "A", "ATE": "A",
+        "ATESTAD.": "A", "ATESTAD": "A", "A": "A",
         "FÉRIAS": "FE", "FERIAS": "FE", "FE": "FE",
         "LIBERADO": "LB", "LB": "LB",
         "COMPENSAÇÃO": "COMP", "COMPENSACAO": "COMP", "COMP": "COMP",
@@ -2300,7 +2384,7 @@ def _codigo_ponto_prestadora(row):
     ocorrencia_compacta = re.sub(r"[^A-ZÀ-Ú]", "", ocorrencia_g)
     if ocorrencia_compacta in {"FALTA", "FALT", "DFALTA", "DFALT"}:
         return "FA"
-    if "ATEST" in ocorrencia_g:
+    if "ATEST" in ocorrencia_g or ocorrencia_compacta == "ATE":
         return "A"
     if "FERIAS" in ocorrencia_g or "FÉRIAS" in ocorrencia_g:
         return "FE"
@@ -2308,7 +2392,7 @@ def _codigo_ponto_prestadora(row):
         return "FO"
 
     # Compatibilidade: se a ocorrência também vier escrita nas marcações.
-    if "ATEST" in textos:
+    if "ATEST" in textos or any(re.sub(r"[^A-Z]", "", v.upper()) == "ATE" for v in valores):
         return "A"
     if "FALTA" in textos or "FALT" in textos:
         return "FA"
@@ -2524,8 +2608,13 @@ def _modal_faltas_cmc(df, ano, mes):
         if estado_key not in st.session_state or st.session_state.get(f"{estado_key}_ids") != ids_base:
             inicial=base.copy()
             aplicadas=st.session_state.get(f"cmc_fa_aprovadas_{ano}_{mes}")
+            anterior = st.session_state.get(estado_key)
+            escolhas = dict(zip(anterior["_ID"], anterior["CONSIDERAR"])) if anterior is not None else {}
             if aplicadas is not None:
                 inicial["CONSIDERAR"]=inicial["_ID"].isin(set(aplicadas))
+            for i, row in inicial.iterrows():
+                if row["_ID"] in escolhas:
+                    inicial.at[i, "CONSIDERAR"] = bool(escolhas[row["_ID"]])
             st.session_state[estado_key]=inicial
             st.session_state[f"{estado_key}_ids"]=ids_base
             st.session_state[versao_key]=0
@@ -2565,12 +2654,15 @@ def _modal_faltas_cmc(df, ano, mes):
         # incorpora edição visível atual antes de calcular/aplicar
         for i in range(min(len(atual),len(edit))): atual.at[i,"CONSIDERAR"]=bool(edit.iloc[i].get("CONSIDERAR",False))
         st.session_state[estado_key]=atual
+        _salvar_fechamento_cmc(ano, mes)
         c1,c2=st.columns(2); c1.metric("Faltas encontradas",len(base)); c2.metric("Faltas consideradas",int(atual["CONSIDERAR"].sum()))
         if st.button("💾 Aplicar faltas consideradas",type="primary",use_container_width=True,key=f"cmc_aplicar_fa_{ano}_{mes}"):
             selecionadas=atual.loc[atual["CONSIDERAR"],"_ID"].tolist()
             st.session_state[f"cmc_fa_aprovadas_{ano}_{mes}"]=selecionadas
             st.session_state[f"cmc_fa_qtd_{ano}_{mes}"]=len(selecionadas)
-            st.success(f"{len(selecionadas)} falta(s) aplicada(s) ao fechamento.")
+            if not _salvar_fechamento_cmc(ano, mes):
+                return
+            st.success(f"{len(selecionadas)} falta(s) aplicada(s) e salva(s) no fechamento.")
             st.rerun()
     _abrir_faltas()
 
@@ -2587,9 +2679,21 @@ def _modal_horas_extras_cmc(df, ano, mes):
 
         # Mantém a seleção do modal durante os reruns do Streamlit.
         # Reinicia automaticamente se mudar a quantidade de lançamentos encontrados.
-        if estado_key not in st.session_state or len(st.session_state[estado_key]) != len(base):
-            st.session_state[estado_key] = base.copy()
-            st.session_state[versao_key] = 0
+        identidade = ["COLABORADOR", "DATA", "ORIGEM"]
+        assinatura_base = base[identidade + ["HORAS"]].astype(str).values.tolist()
+        if st.session_state.get(f"{estado_key}_ids") != assinatura_base:
+            inicial = base.copy()
+            anterior = st.session_state.get(estado_key)
+            if anterior is not None:
+                escolhas = {tuple(str(r[c]) for c in identidade): r for _, r in anterior.iterrows()}
+                for i, r in inicial.iterrows():
+                    escolha = escolhas.get(tuple(str(r[c]) for c in identidade))
+                    if escolha is not None:
+                        inicial.at[i, "CONSIDERAR"] = bool(escolha["CONSIDERAR"])
+                        inicial.at[i, "TIPO"] = escolha["TIPO"]
+            st.session_state[estado_key] = inicial
+            st.session_state[f"{estado_key}_ids"] = assinatura_base
+            st.session_state[versao_key] = st.session_state.get(versao_key, 0) + 1
 
         estado = st.session_state[estado_key].copy().reset_index(drop=True)
         # MINUTOS vem sempre da leitura original do ponto.
@@ -2674,6 +2778,7 @@ def _modal_horas_extras_cmc(df, ano, mes):
         atual = edit.copy().reset_index(drop=True)
         atual["MINUTOS"] = base.reset_index(drop=True)["MINUTOS"]
         st.session_state[estado_key] = atual
+        _salvar_fechamento_cmc(ano, mes)
 
         total50 = total100 = 0
         for _, r in atual.iterrows():
@@ -2694,7 +2799,8 @@ def _modal_horas_extras_cmc(df, ano, mes):
             st.session_state[f"cmc_he100_{ano}_{mes}"] = _hhmm_cmc(total100)
             st.session_state[f"cmc_he50apos_{ano}_{mes}"] = "00:00"
             st.session_state[f"cmc_he_aprovadas_{ano}_{mes}"] = {"50": total50, "100": total100}
-            st.success("Horas extras aprovadas aplicadas ao Resumo Financeiro.")
+            if _salvar_fechamento_cmc(ano, mes):
+                st.success("Horas extras aprovadas aplicadas e salvas no fechamento.")
     _abrir_he()
 
 def _montar_matriz_cmc(df):
@@ -2781,14 +2887,31 @@ def tela_fechamento_cmc_bahia():
         accept_multiple_files=True,
         key="upload_ponto_cmc_bahia",
     )
+    retomada = None
     if not arquivos:
-        st.info("Envie uma ou mais planilhas do ponto eletrônico para iniciar a apuração.")
-        return
+        st.caption("Retome um fechamento salvo sem importar novamente as planilhas.")
+        a, m = st.columns(2)
+        ret_ano = int(a.number_input("Ano do fechamento", min_value=2020, max_value=2100, value=date.today().year))
+        ret_mes = int(m.selectbox("Mês do fechamento", list(range(1, 13)), index=date.today().month-1))
+        if st.button("📂 Retomar fechamento salvo", type="primary"):
+            try:
+                _carregar_fechamento_cmc(ret_ano, ret_mes)
+                if f"cmc_base_{ret_ano}_{ret_mes}" in st.session_state:
+                    st.session_state["cmc_retomada"] = (ret_ano, ret_mes)
+                else:
+                    st.info("Não há fechamento salvo para essa competência.")
+            except Exception as exc:
+                st.error(str(exc))
+        periodo = st.session_state.get("cmc_retomada")
+        if periodo:
+            retomada = st.session_state.get(f"cmc_base_{periodo[0]}_{periodo[1]}")
+        if retomada is None:
+            return
     try:
         partes = []
         abas_lidas = []
         competencias = set()
-        for arquivo in arquivos:
+        for arquivo in (arquivos or []):
             df_parte, aba_parte = _ler_ponto_cmc(arquivo)
             if not df_parte.empty:
                 partes.append(df_parte)
@@ -2798,6 +2921,9 @@ def tela_fechamento_cmc_bahia():
                     for x in df_parte["Dt. Ponto"].dropna().dt.to_period("M").unique()
                 )
 
+        if retomada is not None:
+            partes = [retomada.copy()]
+            abas_lidas = ["Base do fechamento salvo"]
         if not partes:
             st.warning("Nenhum registro válido foi encontrado nas planilhas.")
             return
@@ -2819,6 +2945,10 @@ def tela_fechamento_cmc_bahia():
         _periodo_cmc = df["Dt. Ponto"].dt.to_period("M").mode().iloc[0]
         ano, mes = int(_periodo_cmc.year), int(_periodo_cmc.month)
 
+        _carregar_fechamento_cmc(ano, mes)
+        st.session_state[f"cmc_base_{ano}_{mes}"] = df.copy()
+        df_original = df.copy()
+
         # Auditoria de faltas: por padrão todas entram. Depois de aplicar no modal,
         # somente as faltas marcadas permanecem como FA no fechamento.
         faltas_encontradas = _extrair_faltas_cmc(df)
@@ -2837,7 +2967,7 @@ def tela_fechamento_cmc_bahia():
             st.warning("Nenhum registro válido foi encontrado nas planilhas.")
             return
         st.success(
-            f"{len(arquivos)} arquivo(s) consolidado(s) com sucesso • "
+            f"{len(arquivos) if arquivos else 1} base(s) carregada(s) com sucesso • "
             f"Competência {mes:02d}/{ano} • {len(matriz)} colaboradores"
         )
         with st.expander("📄 Arquivos considerados", expanded=False):
@@ -2846,7 +2976,7 @@ def tela_fechamento_cmc_bahia():
         # Conferências antes da grade: faltas e horas extras.
         c_fa1, c_fa2 = st.columns([1, 3])
         if c_fa1.button(f"🔎 Avaliar Faltas ({len(faltas_encontradas)})", type="secondary", use_container_width=True, key=f"cmc_btn_fa_{ano}_{mes}"):
-            _modal_faltas_cmc(df, ano, mes)
+            _modal_faltas_cmc(df_original, ano, mes)
         if faltas_aplicadas is None:
             c_fa2.info(f"{len(faltas_encontradas)} falta(s) encontrada(s) no ponto aguardando conferência.")
         else:
@@ -2869,7 +2999,21 @@ def tela_fechamento_cmc_bahia():
             "FUNÇÃO": st.column_config.TextColumn("FUNÇÃO", disabled=True, width="medium"),
         }
         for c in dias_cols: cfg[c]=st.column_config.SelectboxColumn(c, options=opcoes, required=False, width="small")
+        ajustes = st.session_state.get(f"cmc_matriz_ajustes_{ano}_{mes}", {})
+        for idx, row in matriz.iterrows():
+            for col, valor in ajustes.get(_nome_cmc(row["COLABORADOR"]), {}).items():
+                if col in dias_cols:
+                    matriz.at[idx, col] = valor
         edit = st.data_editor(matriz, use_container_width=True, hide_index=True, disabled=["COLABORADOR", "FUNÇÃO"], column_config=cfg, key=f"cmc_editor_{ano}_{mes}")
+        ajustes = {nome: dict(valores) for nome, valores in ajustes.items()}
+        for idx, row in edit.iterrows():
+            nome = _nome_cmc(row["COLABORADOR"])
+            for col in dias_cols:
+                if row[col] != matriz.loc[idx, col]:
+                    ajustes.setdefault(nome, {})[col] = row[col]
+        st.session_state[f"cmc_matriz_ajustes_{ano}_{mes}"] = ajustes
+        if _salvar_fechamento_cmc(ano, mes):
+            st.caption("💾 Fechamento salvo automaticamente por competência.")
         resumo=_resumo_matriz_cmc(edit)
         st.markdown("#### Resumo do fechamento")
 
@@ -3977,3 +4121,4 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
