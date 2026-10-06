@@ -2969,9 +2969,9 @@ def _excel_cmc(matriz, ano, mes):
     for col in ["PRESENTES","FALTAS","ATESTADOS","FOLGAS","FÉRIAS","TOTAL CONTABILIZADO"]:
         ws2.append([col, int(resumo[col].sum()) if col in resumo else 0])
     total_contabilizado = int(resumo["TOTAL CONTABILIZADO"].sum()) if "TOTAL CONTABILIZADO" in resumo else 0
-    media_colaboradores = total_contabilizado / dias_contabilizados if dias_contabilizados else 0
+    media_colaboradores = float(resumo["MÉDIA CONTABILIZADA"].sum()) if "MÉDIA CONTABILIZADA" in resumo else 0.0
     ws2.append(["DIAS CONTABILIZADOS", dias_contabilizados])
-    ws2.append(["MÉDIA DE COLABORADORES", media_colaboradores])
+    ws2.append(["SOMA DAS MÉDIAS INDIVIDUAIS", media_colaboradores])
     ws2.cell(ws2.max_row, 2).number_format = "0.00"
     ws2.column_dimensions["A"].width = 28
     ws2.column_dimensions["B"].width = 18
@@ -3161,15 +3161,15 @@ def tela_fechamento_cmc_bahia():
 
         dias_contabilizados = len(dias_cols)
         total_contabilizado = int(resumo["TOTAL CONTABILIZADO"].sum())
-        media_colaboradores = total_contabilizado / dias_contabilizados if dias_contabilizados else 0
+        media_colaboradores = float(resumo["MÉDIA CONTABILIZADA"].sum()) if "MÉDIA CONTABILIZADA" in resumo else 0.0
         quantidade_colaboradores = int(resumo["COLABORADOR"].nunique()) if "COLABORADOR" in resumo.columns else int(len(resumo))
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Registros considerados", f"{total_contabilizado}")
         c2.metric("Dias contabilizados", f"{dias_contabilizados}")
         c3.metric("Quantidade de colaboradores", f"{quantidade_colaboradores}")
-        c4.metric("Média de colaboradores", f"{media_colaboradores:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        st.caption("TOTAL CONTABILIZADO = OK + FA + A + FO. MÉDIA CONTABILIZADA = TOTAL CONTABILIZADO ÷ dias contabilizados no arquivo. A Média de Colaboradores é a soma dessas médias individuais. FÉRIAS não entra na conta.")
+        c4.metric("Soma das médias individuais", f"{media_colaboradores:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        st.caption("TOTAL CONTABILIZADO = OK + FA + A + FO. MÉDIA CONTABILIZADA = TOTAL CONTABILIZADO ÷ dias contabilizados no arquivo. TOTAL DE COLABORADORES PARA O FECHAMENTO = soma da coluna MÉDIA de todos os colaboradores. FÉRIAS não entra na conta.")
 
         b1, b2 = st.columns([1, 1])
         if b1.button("💰 Gerar Resumo Financeiro", key=f"gerar_resumo_fin_cmc_{ano}_{mes}", type="primary", use_container_width=True):
