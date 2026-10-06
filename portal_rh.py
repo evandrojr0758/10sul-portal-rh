@@ -414,10 +414,10 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_
     existentes = sb(
         "GET",
         "rh_colaboradores",
-        "select=id,colaborador&colaborador=eq." + urllib.parse.quote(nome)
+        "select=id,colaborador,ativo,data_desligamento&colaborador=eq." + urllib.parse.quote(nome)
     ) or []
     if existentes:
-        raise ValueError("Este colaborador já está cadastrado.")
+        raise ValueError("Este colaborador já está cadastrado. No cadastro, marque 'Mostrar colaboradores inativos' e confira o status e a data de desligamento antes de alterar o registro existente.")
 
     payload = {
         "colaborador": nome,
@@ -3287,16 +3287,15 @@ if ultimo_visivel == 0:
 # momento do mês selecionado. Após a data de desligamento, a grade mostra DEM.
 try:
     _todos_cad = sb("GET", "rh_colaboradores", "select=*") or []
-    _fim_mes_ref = date(int(ano), mes, calendar.monthrange(int(ano), mes)[1])
+    _inicio_mes_ref = date(int(ano), mes, 1)
     _ids_ativos = {int(c["id"]) for c in colaboradores if c.get("id") is not None}
     for _c in _todos_cad:
         if _c.get("id") is None or int(_c["id"]) in _ids_ativos:
             continue
         _dd = pd.to_datetime(_c.get("data_desligamento"), errors="coerce")
-        if pd.notna(_dd) and _dd.date() <= _fim_mes_ref:
-            # Só é necessário exibir no mês em que ocorreu o desligamento.
-            if _dd.year == int(ano) and _dd.month == mes:
-                colaboradores.append(_c)
+        if pd.notna(_dd) and _dd.date() >= _inicio_mes_ref:
+            # Preserva a consulta dos meses anteriores e do mês do desligamento.
+            colaboradores.append(_c)
     colaboradores = sorted(colaboradores, key=lambda r: _nome_colaborador(r).upper())
 except Exception:
     pass
@@ -3416,6 +3415,26 @@ if _busca_colaborador:
 colaboradores = _colaboradores_filtrados
 if _busca_colaborador and not colaboradores:
     st.info(f'Nenhum colaborador encontrado para "{_busca_colaborador}" com o filtro selecionado.')
+    try:
+        _cadastros_busca = sb("GET", "rh_colaboradores", "select=*") or []
+        _encontrados_cadastro = [
+            c for c in _cadastros_busca
+            if _termo in _texto_busca_colaborador(_nome_colaborador(c))
+        ]
+        for _cad in _encontrados_cadastro:
+            _situacao = "ATIVO" if _cad.get("ativo") else "INATIVO"
+            _desligamento = pd.to_datetime(_cad.get("data_desligamento"), errors="coerce")
+            _detalhe = (
+                f" · Desligamento: {_desligamento.strftime('%d/%m/%Y')}"
+                if pd.notna(_desligamento) else ""
+            )
+            st.warning(
+                f"{_nome_colaborador(_cad)} já consta no cadastro: {_situacao}{_detalhe}. "
+                "Confira o filtro da grade e, na seção de cadastro, marque "
+                "'Mostrar colaboradores inativos' para revisar o registro existente."
+            )
+    except Exception as _erro_busca:
+        st.warning(f"Não foi possível consultar os cadastros fora da grade: {_erro_busca}")
 
 
 # Área de análises recolhível para manter a tela principal compacta.
