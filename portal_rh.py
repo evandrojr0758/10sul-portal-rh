@@ -3468,6 +3468,49 @@ if _busca_colaborador and not colaboradores:
         st.warning(f"Não foi possível consultar os cadastros fora da grade: {_erro_busca}")
 
 
+with st.expander("✏️ Alterar função e status do fechamento", expanded=False):
+    st.caption("Disponível para RH e ADMIN. Selecione o colaborador, altere os campos e salve.")
+    _registros_edicao = sb("GET", "rh_colaboradores", "select=*") or []
+    _registros_edicao = sorted(_registros_edicao, key=lambda c: _nome_colaborador(c).upper())
+    _por_id_edicao = {str(c["id"]): c for c in _registros_edicao}
+    _id_edicao = st.selectbox(
+        "Colaborador para alterar",
+        list(_por_id_edicao),
+        format_func=lambda cid: _nome_colaborador(_por_id_edicao[cid]),
+        index=None,
+        placeholder="Digite ou selecione o nome...",
+        key="rh_edicao_rapida_colaborador",
+    )
+    if _id_edicao is not None:
+        _reg_edicao = _por_id_edicao[_id_edicao]
+        _funcoes_edicao = sorted({
+            str(c.get("funcao") or c.get("funcao_padrao") or "").strip().upper()
+            for c in (_registros_edicao + [{"funcao": f} for _, f in SEED_COLABORADORES])
+            if str(c.get("funcao") or c.get("funcao_padrao") or "").strip()
+        })
+        _funcao_atual = str(_reg_edicao.get("funcao") or _reg_edicao.get("funcao_padrao") or "").strip().upper()
+        with st.form(f"rh_edicao_rapida_{_id_edicao}"):
+            _e_status, _e_funcao = st.columns(2)
+            _status_novo = _e_status.selectbox(
+                "Status do fechamento", ["OUTROS", "OPERACIONAL"],
+                index=1 if _classificacao_colaborador(_reg_edicao) == "OPERACIONAL" else 0,
+            )
+            _opcoes_funcao = [""] + _funcoes_edicao
+            _funcao_nova = _e_funcao.selectbox(
+                "Função", _opcoes_funcao, index=_opcoes_funcao.index(_funcao_atual),
+            )
+            _salvar_edicao = st.form_submit_button("💾 Salvar função e status", type="primary")
+        if _salvar_edicao:
+            try:
+                if _funcao_nova != _funcao_atual:
+                    sb("PATCH", "rh_colaboradores", "id=eq." + _id_edicao, {"funcao": _funcao_nova or None}, "return=minimal")
+                if _status_novo != _classificacao_colaborador(_reg_edicao):
+                    _salvar_classificacoes_aracruz({_id_edicao: _status_novo})
+                st.success("Função e status do fechamento salvos.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível salvar: {exc}")
+
 # Área de análises recolhível para manter a tela principal compacta.
 _analises_expander = st.expander("📊 Análises de Frequência", expanded=False)
 with _analises_expander:
