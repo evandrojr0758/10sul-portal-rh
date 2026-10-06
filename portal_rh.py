@@ -332,6 +332,9 @@ def _nome_colaborador(registro):
 
 def _classificacao_colaborador(registro):
     """Classificação real da aba BaseFuncionário (STATUS: OPERACIONAL/OUTROS)."""
+    escolha = st.session_state.get("rh_classificacoes_aracruz", {}).get(str(registro.get("id")))
+    if escolha in ("OPERACIONAL", "OUTROS"):
+        return escolha
     nome = _nome_colaborador(registro).strip().upper()
     if nome in CLASSIFICACAO_REFERENCIA:
         return CLASSIFICACAO_REFERENCIA[nome]
@@ -2074,6 +2077,19 @@ def _storage_cmc(method, path, payload=None):
                 return None
         raise RuntimeError(f"Não foi possível acessar o fechamento salvo (HTTP {exc.code}).") from exc
 
+def _carregar_classificacoes_aracruz():
+    estado = _storage_cmc("GET", "object/rh-cadastro-aracruz/classificacoes.json") or {}
+    st.session_state["rh_classificacoes_aracruz"] = estado
+
+def _salvar_classificacoes_aracruz(alteracoes):
+    buckets = _storage_cmc("GET", "bucket") or []
+    if not any(b.get("id") == "rh-cadastro-aracruz" for b in buckets):
+        _storage_cmc("POST", "bucket", {"id": "rh-cadastro-aracruz", "name": "rh-cadastro-aracruz", "public": False})
+    estado = _storage_cmc("GET", "object/rh-cadastro-aracruz/classificacoes.json") or {}
+    estado.update(alteracoes)
+    _storage_cmc("POST", "object/rh-cadastro-aracruz/classificacoes.json", estado)
+    st.session_state["rh_classificacoes_aracruz"] = estado
+
 def _chaves_cmc(ano, mes):
     return [f"{prefixo}_{ano}_{mes}" for prefixo in (
         "cmc_fa_estado", "cmc_fa_aprovadas", "cmc_fa_qtd", "cmc_he_estado",
@@ -3251,6 +3267,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
 # Inicialização segura
 try:
     garantir_ocorrencias()
+    _carregar_classificacoes_aracruz()
     colaboradores = ler_colaboradores()
     # Snapshot mestre de Aracruz criado imediatamente após a leitura do banco.
     _colaboradores_todos = list(colaboradores)
@@ -4175,6 +4192,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         opcoes_empresas_cadastro = sorted(
             {"SERVICE", "PRESTADORA"} | {str(e) for e in cadastro_df["empresa"].dropna() if str(e)}
         )
+        original_classificacao = {str(c["id"]): _classificacao_colaborador(c) for c in todos_cadastro}
         original_empresa = {str(c["id"]): _empresa_colaborador(c, visual=True) for c in todos_cadastro}
         original_funcao = {
             str(r["id"]): str(r.get("funcao") or r.get("funcao_padrao") or "").strip().upper()
@@ -4197,13 +4215,13 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("empresa", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
+            disabled=[c for c in cols_editor if c not in ("classificacao_fechamento", "empresa", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
                 "destra": st.column_config.TextColumn("DESTRA"),
                 "colaborador": st.column_config.TextColumn("Colaborador"),
-                "classificacao_fechamento": st.column_config.TextColumn("Status do fechamento", width="medium"),
+                "classificacao_fechamento": st.column_config.SelectboxColumn("Status do fechamento", options=["OUTROS", "OPERACIONAL"], required=True, width="medium"),
                 "funcao": st.column_config.SelectboxColumn("Função", options=opcoes_funcoes_cadastro, required=False),
                 "empresa": st.column_config.SelectboxColumn("Empresa", options=opcoes_empresas_cadastro, required=True),
                 "salario_base": st.column_config.NumberColumn("Salário base (R$)", min_value=0.0, step=0.01, format="R$ %.2f"),
@@ -4260,7 +4278,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             nova_funcao = "" if pd.isna(funcao_val) else str(funcao_val or "").strip().upper()
             empresa_val = linha.get("empresa")
             nova_empresa = "" if pd.isna(empresa_val) else str(empresa_val or "").strip().upper()
-            mudou = (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
+            mudou = (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
             if mudou:
                 if novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
@@ -4283,6 +4301,11 @@ with st.expander("👥 Cadastro de colaboradores"):
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
                         sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None}, "return=minimal")
+                    _salvar_classificacoes_aracruz({
+                        str(linha["id"]): str(linha["classificacao_fechamento"])
+                        for linha, *_ in alteracoes
+                        if str(linha["classificacao_fechamento"]) != original_classificacao.get(str(linha["id"]))
+                    })
                     st.success("Cadastro atualizado com sucesso.")
                     st.rerun()
                 except Exception as e:
