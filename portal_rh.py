@@ -4199,7 +4199,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         ).dt.date
         cadastro_df["salario_base"] = pd.to_numeric(cadastro_df["salario_base"], errors="coerce").astype(float)
         for _campo_texto in ("funcao", "empresa", "classificacao_fechamento", "status", "frente", "equipe_revisao", "destra"):
-            cadastro_df[_campo_texto] = cadastro_df[_campo_texto].astype("string")
+            cadastro_df[_campo_texto] = cadastro_df[_campo_texto].fillna("").astype(str)
         original_classificacao = {str(c["id"]): _classificacao_colaborador(c) for c in todos_cadastro}
         original_empresa = {str(c["id"]): _empresa_colaborador(c, visual=True) for c in todos_cadastro}
         original_funcao = {
