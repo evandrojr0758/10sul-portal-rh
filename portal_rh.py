@@ -345,7 +345,7 @@ def _empresa_colaborador(registro, visual=False):
     """Usa a empresa real da BaseFuncionário como referência sem alterar o cadastro no banco."""
     nome = _nome_colaborador(registro).strip().upper()
     empresa_banco = str(registro.get("empresa") or "").strip().upper()
-    empresa = EMPRESA_REFERENCIA.get(nome, empresa_banco)
+    empresa = empresa_banco if empresa_banco in ("10 SUL SERVICE", "10 SUL PRESTADORA", "SERVICE", "PRESTADORA") else EMPRESA_REFERENCIA.get(nome, empresa_banco)
     if visual:
         return {
             "10 SUL SERVICE": "SERVICE",
@@ -4162,6 +4162,11 @@ with st.expander("👥 Cadastro de colaboradores"):
             lambda r: str(r.get("funcao") or r.get("funcao_padrao") or "").strip().upper() or None,
             axis=1,
         )
+        cadastro_df["empresa"] = [_empresa_colaborador(c, visual=True) or None for c in todos_cadastro]
+        opcoes_empresas_cadastro = sorted(
+            {"SERVICE", "PRESTADORA"} | {str(e) for e in cadastro_df["empresa"].dropna() if str(e)}
+        )
+        original_empresa = {str(c["id"]): _empresa_colaborador(c, visual=True) for c in todos_cadastro}
         original_funcao = {
             str(r["id"]): str(r.get("funcao") or r.get("funcao_padrao") or "").strip().upper()
             for r in todos_cadastro
@@ -4183,7 +4188,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
+            disabled=[c for c in cols_editor if c not in ("empresa", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
@@ -4191,7 +4196,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "colaborador": st.column_config.TextColumn("Colaborador"),
                 "classificacao_fechamento": st.column_config.TextColumn("Status do fechamento", width="medium"),
                 "funcao": st.column_config.SelectboxColumn("Função", options=opcoes_funcoes_cadastro, required=False),
-                "empresa": st.column_config.TextColumn("Empresa"),
+                "empresa": st.column_config.SelectboxColumn("Empresa", options=opcoes_empresas_cadastro, required=True),
                 "salario_base": st.column_config.NumberColumn("Salário base (R$)", min_value=0.0, step=0.01, format="R$ %.2f"),
                 "frente": st.column_config.SelectboxColumn("Frente", options=["REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"], required=False),
                 "equipe_revisao": st.column_config.SelectboxColumn("Equipe Revisão", options=["EQUIPE 1", "EQUIPE 2"], required=False),
@@ -4244,7 +4249,9 @@ with st.expander("👥 Cadastro de colaboradores"):
                 novo_status = "INATIVO"
             funcao_val = linha.get("funcao")
             nova_funcao = "" if pd.isna(funcao_val) else str(funcao_val or "").strip().upper()
-            mudou = (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
+            empresa_val = linha.get("empresa")
+            nova_empresa = "" if pd.isna(empresa_val) else str(empresa_val or "").strip().upper()
+            mudou = (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
             if mudou:
                 if novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
@@ -4266,7 +4273,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                     for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None}, "return=minimal")
+                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None}, "return=minimal")
                     st.success("Cadastro atualizado com sucesso.")
                     st.rerun()
                 except Exception as e:
