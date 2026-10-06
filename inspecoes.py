@@ -1,5 +1,6 @@
 import os, json, urllib.request, urllib.error
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
@@ -63,9 +64,26 @@ def hhmm(v):
     if v is None: return '—'
     m=int(round(float(v)*60)); return f'{m//60:02d}:{m%60:02d}'
 
+def tempos_inspecao(registro, agora=None):
+    inicio = pd.to_datetime(registro.get('inicio'), errors='coerce')
+    fim = pd.to_datetime(registro.get('fim'), errors='coerce')
+    if pd.isna(inicio):
+        return None, None
+    def local(valor):
+        if valor.tzinfo is None:
+            return valor.tz_localize('America/Sao_Paulo')
+        return valor.tz_convert('America/Sao_Paulo')
+    inicio = local(inicio)
+    referencia = local(fim) if pd.notna(fim) else local(
+        pd.Timestamp(agora if agora is not None else datetime.now(ZoneInfo('America/Sao_Paulo')))
+    )
+    horas = max(0.0, (referencia - inicio).total_seconds() / 3600)
+    impacto = max(0.0, float(registro.get('impacto_horas') or 0))
+    return horas, max(0.0, horas - impacto)
+
 st.title('⏱️ Lançamento de Inspeções — Revisão 60 mil km')
 st.caption('Registre a carreta, a equipe responsável e o início/fim da inspeção. As médias são enviadas automaticamente ao Portal RH.')
-hoje=date.today(); meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+hoje=datetime.now(ZoneInfo('America/Sao_Paulo')).date(); meses=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
 with st.form('nova',clear_on_submit=True):
     a,b=st.columns(2)
@@ -101,15 +119,15 @@ for eq,col in zip(['EQUIPE 1','EQUIPE 2'],st.columns(2)):
 
 if not regs: st.info('Nenhuma inspeção lançada nesta competência.')
 else:
+    st.button('🔄 Atualizar tempos', key='atualizar_tempos_inspecoes')
+    agora_tabela = datetime.now(ZoneInfo('America/Sao_Paulo'))
+    st.caption('Em andamento: tempo do início até agora, descontando os impactos no tempo líquido. Atualizado em ' + agora_tabela.strftime('%d/%m/%Y %H:%M') + '.')
     dados=[]
     for r in regs:
         ini=pd.to_datetime(r.get('inicio'),errors='coerce'); fim=pd.to_datetime(r.get('fim'),errors='coerce')
         finalizada=pd.notna(fim)
-        try: h=float(r.get('duracao_horas')) if r.get('duracao_horas') is not None else None
-        except: h=(fim-ini).total_seconds()/3600 if pd.notna(ini) and pd.notna(fim) else None
+        h, liquido = tempos_inspecao(r, agora=agora_tabela)
         impacto=float(r.get('impacto_horas') or 0)
-        try: liquido=float(r.get('duracao_liquida_horas')) if r.get('duracao_liquida_horas') is not None else (h-impacto if h is not None else None)
-        except: liquido=None
         dados.append({'ID':r.get('id'),'CARRETA':r.get('carreta'),'EQUIPE':r.get('equipe'),'INÍCIO':ini.strftime('%d/%m/%Y %H:%M') if pd.notna(ini) else '','FIM':fim.strftime('%d/%m/%Y %H:%M') if finalizada else '','STATUS':'🟢 FINALIZADA' if finalizada else '🟡 EM ANDAMENTO','TEMPO TOTAL':hhmm(h),'IMPACTO':hhmm(impacto),'TEMPO LÍQUIDO':hhmm(liquido),'OBSERVAÇÃO / DESVIO':r.get('observacao') or '', '_raw':r})
     st.dataframe(pd.DataFrame([{k:v for k,v in x.items() if k not in ('ID','_raw')} for x in dados]),use_container_width=True,hide_index=True)
 
@@ -130,7 +148,7 @@ else:
             finalizar=st.checkbox('🟢 Informar FIM e finalizar esta inspeção',value=pd.notna(fim0))
             if finalizar:
                 f1,f2=st.columns(2)
-                base_fim=fim0 if pd.notna(fim0) else pd.Timestamp.now()
+                base_fim=fim0 if pd.notna(fim0) else pd.Timestamp.now(tz='America/Sao_Paulo')
                 edf=f1.date_input('FIM — Data',value=base_fim.date()); ehf=f2.time_input('FIM — Hora',value=base_fim.time().replace(second=0,microsecond=0))
             salvar_ed=st.form_submit_button('💾 Salvar alterações',type='primary',use_container_width=True)
         if salvar_ed:
