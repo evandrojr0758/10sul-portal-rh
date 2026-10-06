@@ -391,15 +391,17 @@ def sincronizar_salarios_referencia():
 
 
 def garantir_ocorrencias():
-    for r in STATUS_PADRAO:
-        try:
-            sb("POST", "rh_ocorrencias", "on_conflict=codigo", r,
-               "resolution=merge-duplicates,return=minimal")
-        except Exception:
-            # Compatibilidade com tabela sem ordem/exige_observacao.
-            minimo = {k: r[k] for k in ("codigo", "descricao", "ativo")}
-            sb("POST", "rh_ocorrencias", "on_conflict=codigo", minimo,
-               "resolution=merge-duplicates,return=minimal")
+    if st.session_state.get("rh_ocorrencias_inicializadas"):
+        return
+    try:
+        sb("POST", "rh_ocorrencias", "on_conflict=codigo", STATUS_PADRAO,
+           "resolution=merge-duplicates,return=minimal")
+    except Exception:
+        # Compatibilidade com tabelas sem as colunas opcionais.
+        minimos = [{k: r[k] for k in ("codigo", "descricao", "ativo")} for r in STATUS_PADRAO]
+        sb("POST", "rh_ocorrencias", "on_conflict=codigo", minimos,
+           "resolution=merge-duplicates,return=minimal")
+    st.session_state["rh_ocorrencias_inicializadas"] = True
 
 def ler_colaboradores():
     rows = sb("GET", "rh_colaboradores", "select=*&ativo=eq.true") or []
