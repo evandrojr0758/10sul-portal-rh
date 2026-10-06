@@ -4192,6 +4192,14 @@ with st.expander("👥 Cadastro de colaboradores"):
         opcoes_empresas_cadastro = sorted(
             {"SERVICE", "PRESTADORA"} | {str(e) for e in cadastro_df["empresa"].dropna() if str(e)}
         )
+        # Tipos explícitos evitam incompatibilidade do editor em buscas pequenas
+        # e quando registros inativos trazem datas como texto.
+        cadastro_df["data_desligamento"] = pd.to_datetime(
+            cadastro_df["data_desligamento"], errors="coerce"
+        ).dt.date
+        cadastro_df["salario_base"] = pd.to_numeric(cadastro_df["salario_base"], errors="coerce").astype(float)
+        for _campo_texto in ("funcao", "empresa", "classificacao_fechamento", "status", "frente", "equipe_revisao", "destra"):
+            cadastro_df[_campo_texto] = cadastro_df[_campo_texto].astype("string")
         original_classificacao = {str(c["id"]): _classificacao_colaborador(c) for c in todos_cadastro}
         original_empresa = {str(c["id"]): _empresa_colaborador(c, visual=True) for c in todos_cadastro}
         original_funcao = {
