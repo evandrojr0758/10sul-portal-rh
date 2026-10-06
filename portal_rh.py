@@ -3361,6 +3361,11 @@ with _ficha_col2:
         abrir_ficha_colaborador(_mapa_ficha[_nome_ficha])
 
 
+def _texto_busca_colaborador(valor):
+    import unicodedata
+    texto = unicodedata.normalize("NFKD", str(valor or "").casefold())
+    return "".join(c for c in texto if not unicodedata.combining(c)).strip()
+
 # Filtros VISUAIS da grade. Não alteram cadastro, indicadores ou dados salvos.
 # A busca pode ser feita por qualquer parte do nome do colaborador.
 _col_busca, _col_status = st.columns([2, 1], gap="medium")
@@ -3402,10 +3407,10 @@ if _filtro_status != "TODOS":
     ]
 
 if _busca_colaborador:
-    _termo = _busca_colaborador.casefold()
+    _termo = _texto_busca_colaborador(_busca_colaborador)
     _colaboradores_filtrados = [
         c for c in _colaboradores_filtrados
-        if _termo in _nome_colaborador(c).casefold()
+        if _termo in _texto_busca_colaborador(_nome_colaborador(c))
     ]
 
 colaboradores = _colaboradores_filtrados
@@ -3469,8 +3474,9 @@ for c in colaboradores:
             row[f"{dia:02d}"] = mapa.get((cid, dia), "") or PENDENTE_VISUAL
     linhas.append(row)
 
-df = pd.DataFrame(linhas)
 colunas_dia = [f"{d:02d}" for d in range(1, ultimo_visivel + 1)]
+# Mantém as colunas mesmo quando a busca não encontra nenhum colaborador.
+df = pd.DataFrame(linhas, columns=["COLABORADOR", "STATUS", "FUNÇÃO", "EMPRESA"] + colunas_dia)
 
 # Mapa estável de nomes por ID. Modais não devem depender da posição/colunas
 # do data_editor, pois o Streamlit pode reconstruir o editor durante um rerun.
