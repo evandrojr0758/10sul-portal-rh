@@ -527,7 +527,7 @@ def gerar_excel_frequencia(ano, mes, colaboradores, freq, ocorrencia_codigo_por_
         ws_base.cell(idx, 2, c.get("cracha") or "")
         ws_base.cell(idx, 3, _nome_colaborador(c))
         ws_base.cell(idx, 4, "OPERACIONAL")
-        ws_base.cell(idx, 5, "OPERACIONAL" if ativo and status_cad != "INATIVO" else "INATIVO")
+        ws_base.cell(idx, 5, _classificacao_colaborador(c))
         ws_base.cell(idx, 6, funcao)
         ws_base.cell(idx, 7, str(c.get("local") or "CMC ARA"))
         ws_base.cell(idx, 8, "REGISTRO" if ativo else (c.get("data_desligamento") or "DESLIGAMENTO"))
@@ -3523,7 +3523,7 @@ def _nome_grade_por_cid(cid, fallback=""):
 
 config = {
     "COLABORADOR": st.column_config.TextColumn("COLABORADOR", width="large", disabled=True),
-    "STATUS": st.column_config.TextColumn("STATUS", width="small", disabled=True),
+    "STATUS": st.column_config.TextColumn("STATUS", width="medium", disabled=True),
     "FUNÇÃO": st.column_config.TextColumn("FUNÇÃO", width="medium", disabled=True),
     "EMPRESA": st.column_config.TextColumn("EMPRESA", width="small", disabled=True),
 }
