@@ -4093,6 +4093,11 @@ with st.expander("👥 Cadastro de colaboradores"):
         st.warning("Salário-base ainda não disponível no banco. Execute o SQL de atualização do Supabase uma única vez e recarregue a página.")
     st.caption("Altere o status e/ou a data de desligamento diretamente na tabela. Se houver data de desligamento, ela prevalece: do dia seguinte em diante a frequência será DEM, mesmo que o status ainda esteja ATIVO.")
 
+    busca_cadastro = st.text_input(
+        "🔎 Buscar colaborador no cadastro",
+        placeholder="Digite o nome ou parte do nome...",
+        key="rh_busca_colaborador_cadastro",
+    ).strip()
     mostrar_inativos = st.checkbox("Mostrar colaboradores inativos", value=False)
 
     # Para permitir reativação, quando marcado traz ativos e inativos.
@@ -4101,6 +4106,14 @@ with st.expander("👥 Cadastro de colaboradores"):
         params_cadastro += "&ativo=eq.true"
     todos_cadastro = sb("GET", "rh_colaboradores", params_cadastro) or []
     todos_cadastro = sorted(todos_cadastro, key=lambda r: _nome_colaborador(r).upper())
+    if busca_cadastro:
+        termo_cadastro = _texto_busca_colaborador(busca_cadastro)
+        todos_cadastro = [
+            c for c in todos_cadastro
+            if termo_cadastro in _texto_busca_colaborador(_nome_colaborador(c))
+        ]
+    st.caption(f"{len(todos_cadastro)} colaborador(es) encontrado(s).")
+
 
     if todos_cadastro:
         cadastro_df = pd.DataFrame(todos_cadastro)
@@ -4163,7 +4176,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                     format="DD/MM/YYYY",
                 ),
             },
-            key="editor_colaboradores",
+            key="editor_colaboradores_" + "_".join(str(c["id"]) for c in todos_cadastro),
         )
 
         alteracoes = []
