@@ -2351,7 +2351,8 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
             b1,b2=st.columns(2)
             b1.download_button("🖼️ Baixar resumo como imagem",data=png_bytes,file_name=f"FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.png",mime="image/png",use_container_width=True)
             if b2.button("📧 Enviar fechamento por e-mail",use_container_width=True,type="primary"):
-                _modal_email_cmc(png_bytes,mes_nome,ano,total_liquido)
+                st.session_state["cmc_email_pendente"] = (png_bytes, mes_nome, ano, total_liquido)
+                st.rerun()
         wb_fin = Workbook()
         wb_fin.remove(wb_fin.active)
         _aba_financeiro_cmc(wb_fin, resumo, ano, mes, dias_contabilizados)
@@ -2979,6 +2980,10 @@ def _excel_cmc(matriz, ano, mes):
 
 def tela_fechamento_cmc_bahia():
     st.markdown("### 🏭 Fechamento CMC Bahia")
+    # Abre o e-mail em uma execução completa, fora do diálogo financeiro.
+    email_pendente = st.session_state.pop("cmc_email_pendente", None)
+    if email_pendente is not None:
+        _modal_email_cmc(*email_pendente)
     st.caption("Importe a planilha do ponto eletrônico. O Portal monta automaticamente a matriz mensal por colaborador e dia, sem PROCV/PROCX.")
 
     st.markdown("#### 👥 Cadastros do Fechamento")
