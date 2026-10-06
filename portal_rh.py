@@ -4131,6 +4131,7 @@ with st.expander("👥 Cadastro de colaboradores"):
 
     if todos_cadastro:
         cadastro_df = pd.DataFrame(todos_cadastro)
+        cadastro_df["classificacao_fechamento"] = [_classificacao_colaborador(c) for c in todos_cadastro]
 
         # Garante colunas usadas pela interface.
         if "status" not in cadastro_df.columns:
@@ -4148,7 +4149,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df["equipe_revisao"] = None
 
         cols_editor = [c for c in [
-            "id", "cracha", "destra", "colaborador", "funcao", "empresa", "salario_base", "frente", "equipe_revisao",
+            "id", "cracha", "destra", "colaborador", "classificacao_fechamento", "funcao", "empresa", "salario_base", "frente", "equipe_revisao",
             "status", "data_desligamento"
         ] if c in cadastro_df.columns]
 
@@ -4175,6 +4176,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "cracha": st.column_config.TextColumn("Crachá"),
                 "destra": st.column_config.TextColumn("DESTRA"),
                 "colaborador": st.column_config.TextColumn("Colaborador"),
+                "classificacao_fechamento": st.column_config.TextColumn("Status do fechamento", width="medium"),
                 "funcao": st.column_config.TextColumn("Função"),
                 "empresa": st.column_config.TextColumn("Empresa"),
                 "salario_base": st.column_config.NumberColumn("Salário base (R$)", min_value=0.0, step=0.01, format="R$ %.2f"),
