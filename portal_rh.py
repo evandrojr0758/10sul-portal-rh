@@ -3367,9 +3367,9 @@ def _texto_busca_colaborador(valor):
     texto = unicodedata.normalize("NFKD", str(valor or "").casefold())
     return "".join(c for c in texto if not unicodedata.combining(c)).strip()
 
-# Filtros VISUAIS da grade. Não alteram cadastro, indicadores ou dados salvos.
+# A empresa delimita o fechamento; nome e status filtram a grade.
 # A busca pode ser feita por qualquer parte do nome do colaborador.
-_col_busca, _col_status = st.columns([2, 1], gap="medium")
+_col_busca, _col_status, _col_empresa = st.columns([2, 1, 1], gap="medium")
 with _col_busca:
     # Busca em tempo real: atualiza a grade a cada digitação (debounce curto),
     # sem exigir Enter. Ao apagar o texto, a lista completa volta automaticamente.
@@ -3399,6 +3399,18 @@ with _col_status:
         index=0,
         key=f"rh_filtro_status_{int(ano)}_{mes}",
     )
+
+with _col_empresa:
+    _filtro_empresa = st.selectbox(
+        "Filtrar por EMPRESA",
+        ["TODAS", "SERVICE", "PRESTADORA"],
+        key=f"rh_filtro_empresa_{int(ano)}_{mes}",
+    )
+if _filtro_empresa != "TODAS":
+    _colaboradores_todos = [
+        c for c in _colaboradores_todos
+        if _empresa_colaborador(c, visual=True) == _filtro_empresa
+    ]
 
 _colaboradores_filtrados = _colaboradores_todos
 if _filtro_status != "TODOS":
