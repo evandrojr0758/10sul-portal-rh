@@ -4181,6 +4181,11 @@ with st.expander("👥 Cadastro de colaboradores"):
         placeholder="Digite o nome ou parte do nome...",
         key="rh_busca_colaborador_cadastro",
     ).strip()
+    filtro_frente_cadastro = st.selectbox(
+        "Frente",
+        ["Todos", "Sem frente preenchida", "Com frente preenchida"],
+        key="rh_filtro_frente_cadastro",
+    )
     mostrar_inativos = st.checkbox("Mostrar colaboradores inativos", value=False)
 
     # Para permitir reativação, quando marcado traz ativos e inativos.
@@ -4195,6 +4200,17 @@ with st.expander("👥 Cadastro de colaboradores"):
             c for c in todos_cadastro
             if termo_cadastro in _texto_busca_colaborador(_nome_colaborador(c))
         ]
+
+    # Filtro de preenchimento da Frente.
+    def _frente_preenchida(c):
+        valor = str(c.get("frente") or "").strip()
+        return bool(valor) and valor.upper() not in ("NONE", "NULL", "NAN")
+
+    if filtro_frente_cadastro == "Sem frente preenchida":
+        todos_cadastro = [c for c in todos_cadastro if not _frente_preenchida(c)]
+    elif filtro_frente_cadastro == "Com frente preenchida":
+        todos_cadastro = [c for c in todos_cadastro if _frente_preenchida(c)]
+
     st.caption(f"{len(todos_cadastro)} colaborador(es) encontrado(s).")
 
 
