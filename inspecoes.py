@@ -137,20 +137,22 @@ else:
         item=op[esc]; raw=item['_raw']
         ini0=pd.to_datetime(raw.get('inicio'))
         fim0=pd.to_datetime(raw.get('fim'),errors='coerce')
-        with st.form('editar_inspecao'):
+        # Widgets fora de st.form: o checkbox precisa atualizar os campos imediatamente.
+        edit_key=f"editar_inspecao_{item['ID']}"
+        with st.container():
             e1,e2=st.columns(2)
-            car=e1.text_input('CARRETA',value=str(raw.get('carreta') or ''))
-            eq=e2.selectbox('EQUIPE',['EQUIPE 1','EQUIPE 2'],index=0 if str(raw.get('equipe')).upper()=='EQUIPE 1' else 1)
+            car=e1.text_input('CARRETA',value=str(raw.get('carreta') or ''),key=f'{edit_key}_carreta')
+            eq=e2.selectbox('EQUIPE',['EQUIPE 1','EQUIPE 2'],index=0 if str(raw.get('equipe')).upper()=='EQUIPE 1' else 1,key=f'{edit_key}_equipe')
             i1,i2=st.columns(2)
-            edi=i1.date_input('INÍCIO — Data',value=ini0.date()); ehi=i2.time_input('INÍCIO — Hora',value=ini0.time().replace(second=0,microsecond=0))
-            obs=st.text_area('OBSERVAÇÃO / DESVIO',value=str(raw.get('observacao') or ''),placeholder='Atualize os desvios ao longo da manutenção...')
-            imp=st.text_input('TEMPO DE IMPACTO (HH:MM)',value=hhmm(float(raw.get('impacto_horas') or 0)).replace('—','00:00'))
-            finalizar=st.checkbox('🟢 Informar FIM e finalizar esta inspeção',value=pd.notna(fim0))
+            edi=i1.date_input('INÍCIO — Data',value=ini0.date(),key=f'{edit_key}_inicio_data'); ehi=i2.time_input('INÍCIO — Hora',value=ini0.time().replace(second=0,microsecond=0),key=f'{edit_key}_inicio_hora')
+            obs=st.text_area('OBSERVAÇÃO / DESVIO',value=str(raw.get('observacao') or ''),placeholder='Atualize os desvios ao longo da manutenção...',key=f'{edit_key}_observacao')
+            imp=st.text_input('TEMPO DE IMPACTO (HH:MM)',value=hhmm(float(raw.get('impacto_horas') or 0)).replace('—','00:00'),key=f'{edit_key}_impacto')
+            finalizar=st.checkbox('🟢 Informar FIM e finalizar esta inspeção',value=pd.notna(fim0),key=f'{edit_key}_finalizar')
             if finalizar:
                 f1,f2=st.columns(2)
                 base_fim=fim0 if pd.notna(fim0) else pd.Timestamp.now(tz='America/Sao_Paulo')
-                edf=f1.date_input('FIM — Data',value=base_fim.date()); ehf=f2.time_input('FIM — Hora',value=base_fim.time().replace(second=0,microsecond=0))
-            salvar_ed=st.form_submit_button('💾 Salvar alterações',type='primary',use_container_width=True)
+                edf=f1.date_input('FIM — Data',value=base_fim.date(),key=f'{edit_key}_fim_data'); ehf=f2.time_input('FIM — Hora',value=base_fim.time().replace(second=0,microsecond=0),key=f'{edit_key}_fim_hora')
+            salvar_ed=st.button('💾 Salvar alterações',type='primary',use_container_width=True,key=f'{edit_key}_salvar')
         if salvar_ed:
             try:
                 impacto_h=_impacto_para_horas(imp)
