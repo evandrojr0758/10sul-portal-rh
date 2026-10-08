@@ -3751,6 +3751,25 @@ for _c in _colaboradores_todos:
             _total_recebiveis += 1
 _media_diaria = (_total_recebiveis / ultimo_visivel) if ultimo_visivel else 0
 
+# Absenteísmo operacional: ausências / dias com frequência efetivamente apurada.
+# Folgas, desligamentos e pendências não entram no denominador.
+_abs_faltas = _abs_atestados = _abs_dias_apurados = 0
+for _c in _colaboradores_todos:
+    if _classificacao_colaborador(_c) != "OPERACIONAL":
+        continue
+    _cid = int(_c["id"])
+    for _dia in range(1, ultimo_visivel + 1):
+        _cod = _codigo_grade(_mapa_media.get((_cid, _dia), ""))
+        if _cod in ("OK", "FA", "A", "LB", "COMP"):
+            _abs_dias_apurados += 1
+            if _cod == "FA":
+                _abs_faltas += 1
+            elif _cod == "A":
+                _abs_atestados += 1
+_taxa_abs = 100 * (_abs_faltas + _abs_atestados) / _abs_dias_apurados if _abs_dias_apurados else None
+_taxa_faltas = 100 * _abs_faltas / _abs_dias_apurados if _abs_dias_apurados else None
+_taxa_atestados = 100 * _abs_atestados / _abs_dias_apurados if _abs_dias_apurados else None
+
 with resumo_topo:
     st.markdown("#### Resumo do mês")
     k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
@@ -3761,6 +3780,15 @@ with resumo_topo:
     k5.metric("Liberados", contagens["LB"])
     k6.metric("Compensações", contagens["COMP"])
     k7.metric("Média de Colaboradores", f"{_media_diaria:.2f}".replace(".", ","))
+    st.markdown("##### Indicadores de absenteísmo — Operacional")
+    _abs_col1, _abs_col2, _abs_col3 = st.columns(3)
+    _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
+    _abs_col1.metric("Taxa de absenteísmo", _fmt_abs(_taxa_abs),
+        help="(Faltas + Atestados) ÷ dias apurados × 100. Considera apenas OPERACIONAL.")
+    _abs_col2.metric("Taxa de faltas", _fmt_abs(_taxa_faltas))
+    _abs_col3.metric("Taxa de atestados", _fmt_abs(_taxa_atestados))
+    st.caption(f"Base: {_abs_dias_apurados} dias de trabalho apurados, {_abs_faltas} faltas e {_abs_atestados} atestados. Exclui folgas, desligamentos e dias pendentes. Inclui lançamentos ainda não salvos.")
+
 
     # Quadro compacto do efetivo cadastrado. Independente do filtro visual da grade.
     _qtd_registrados = len(_colaboradores_todos)
