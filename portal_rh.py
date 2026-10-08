@@ -2106,6 +2106,85 @@ def _salvar_classificacoes_aracruz(alteracoes):
     _storage_cmc("POST", "object/rh-cadastro-aracruz/classificacoes.json", estado)
     st.session_state["rh_classificacoes_aracruz"] = estado
 
+
+def _normalizar_funcao(valor):
+    return " ".join(str(valor or "").strip().upper().split())
+
+
+def _salvar_catalogo_funcoes(funcoes):
+    buckets = _storage_cmc("GET", "bucket") or []
+    if not any(b.get("id") == "rh-cadastro-aracruz" for b in buckets):
+        _storage_cmc("POST", "bucket", {"id": "rh-cadastro-aracruz", "name": "rh-cadastro-aracruz", "public": False})
+    _storage_cmc("POST", "object/rh-cadastro-aracruz/funcoes.json", sorted(set(funcoes)))
+
+
+def ler_funcoes():
+    funcoes = _storage_cmc("GET", "object/rh-cadastro-aracruz/funcoes.json")
+    if funcoes is None:
+        registros = sb("GET", "rh_colaboradores", "select=*") or []
+        funcoes = sorted({_normalizar_funcao(c.get("funcao") or c.get("funcao_padrao"))
+                          for c in registros} - {""})
+        _salvar_catalogo_funcoes(funcoes)
+    return sorted({_normalizar_funcao(f) for f in funcoes} - {""})
+
+
+def salvar_funcao(nome, anterior=None, excluir=False):
+    funcoes = ler_funcoes()
+    nome = _normalizar_funcao(nome)
+    anterior = _normalizar_funcao(anterior)
+    if not excluir and not nome:
+        raise ValueError("Informe a função.")
+    if not excluir and nome != anterior and nome in funcoes:
+        raise ValueError("Esta função já está cadastrada.")
+    if anterior and anterior not in funcoes:
+        raise ValueError("A função foi alterada em outra sessão. Atualize a página.")
+    registros = sb("GET", "rh_colaboradores", "select=*") or []
+    vinculados = [c for c in registros if _normalizar_funcao(c.get("funcao") or c.get("funcao_padrao")) == anterior] if anterior else []
+    if excluir and vinculados:
+        raise ValueError("Esta função está vinculada a colaboradores. Altere os vínculos antes de excluir.")
+    if anterior and nome != anterior and not excluir:
+        for c in vinculados:
+            payload = {"funcao": nome}
+            if "funcao_padrao" in c and _normalizar_funcao(c.get("funcao_padrao")) == anterior:
+                payload["funcao_padrao"] = nome
+            sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(c["id"])), payload, "return=minimal")
+    novas = [f for f in funcoes if f != anterior]
+    if not excluir:
+        novas.append(nome)
+    _salvar_catalogo_funcoes(novas)
+
+
+def tela_cadastro_funcoes():
+    st.caption("Cadastre as funções e selecione no cadastro do colaborador. Disponível para RH e Admin.")
+    funcoes = ler_funcoes()
+    with st.form("rh_nova_funcao", clear_on_submit=True):
+        nome = st.text_input("Função", key="rh_nome_nova_funcao")
+        cadastrar = st.form_submit_button("Cadastrar função", type="primary")
+    if cadastrar:
+        try:
+            salvar_funcao(nome)
+        except Exception as exc:
+            st.error(str(exc))
+        else:
+            st.rerun()
+    if not funcoes:
+        st.info("Nenhuma função cadastrada.")
+        return
+    atual = st.selectbox("Funções cadastradas", funcoes, key="rh_funcao_selecionada")
+    with st.form("rh_editar_funcao_" + atual):
+        novo = st.text_input("Função", value=atual)
+        c1, c2 = st.columns(2)
+        editar = c1.form_submit_button("Salvar alteração")
+        excluir = c2.form_submit_button("Excluir função")
+    if editar or excluir:
+        try:
+            salvar_funcao(novo, anterior=atual, excluir=excluir)
+        except Exception as exc:
+            st.error(str(exc))
+        else:
+            st.rerun()
+
+
 def _chaves_cmc(ano, mes):
     return [f"{prefixo}_{ano}_{mes}" for prefixo in (
         "cmc_fa_estado", "cmc_fa_aprovadas", "cmc_fa_qtd", "cmc_he_estado",
@@ -3500,11 +3579,7 @@ with st.expander("✏️ Alterar função e status do fechamento", expanded=Fals
     )
     if _id_edicao is not None:
         _reg_edicao = _por_id_edicao[_id_edicao]
-        _funcoes_edicao = sorted({
-            str(c.get("funcao") or c.get("funcao_padrao") or "").strip().upper()
-            for c in (_registros_edicao + [{"funcao": f} for _, f in SEED_COLABORADORES])
-            if str(c.get("funcao") or c.get("funcao_padrao") or "").strip()
-        })
+        _funcoes_edicao = ler_funcoes()
         _funcao_atual = str(_reg_edicao.get("funcao") or _reg_edicao.get("funcao_padrao") or "").strip().upper()
         with st.form(f"rh_edicao_rapida_{_id_edicao}"):
             _e_status, _e_funcao = st.columns(2)
@@ -3514,7 +3589,7 @@ with st.expander("✏️ Alterar função e status do fechamento", expanded=Fals
             )
             _opcoes_funcao = [""] + _funcoes_edicao
             _funcao_nova = _e_funcao.selectbox(
-                "Função", _opcoes_funcao, index=_opcoes_funcao.index(_funcao_atual),
+                "Função", _opcoes_funcao, index=_opcoes_funcao.index(_funcao_atual) if _funcao_atual in _opcoes_funcao else 0,
             )
             _salvar_edicao = st.form_submit_button("💾 Salvar função e status", type="primary")
         if _salvar_edicao:
@@ -4360,15 +4435,16 @@ if not alteracoes:
         key=f"rh_salvar_grade_sem_alt_{int(ano)}_{mes}",
     )
 
+with st.expander("📋 Cadastro de funções", expanded=False):
+    try:
+        tela_cadastro_funcoes()
+    except Exception as exc:
+        st.error(f"Não foi possível carregar o cadastro de funções: {exc}")
+
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
 
-    _cadastro_funcoes = sb("GET", "rh_colaboradores", "select=funcao") or []
-    _funcoes_novo = sorted({
-        str(c.get("funcao") or "").strip().upper()
-        for c in (_cadastro_funcoes + [{"funcao": f} for _, f in SEED_COLABORADORES])
-        if str(c.get("funcao") or "").strip()
-    })
+    _funcoes_novo = ler_funcoes()
     with st.form("form_novo_colaborador", clear_on_submit=True):
         cc1, cc2 = st.columns(2)
         with cc1:
@@ -4513,11 +4589,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             "status", "data_desligamento"
         ] if c in cadastro_df.columns]
 
-        opcoes_funcoes_cadastro = sorted({
-            str(c.get("funcao") or c.get("funcao_padrao") or "").strip().upper()
-            for c in (todos_cadastro + [{"funcao": f} for _, f in SEED_COLABORADORES])
-            if str(c.get("funcao") or c.get("funcao_padrao") or "").strip()
-        })
+        opcoes_funcoes_cadastro = ler_funcoes()
         cadastro_df["funcao"] = cadastro_df.apply(
             lambda r: str(r.get("funcao") or r.get("funcao_padrao") or "").strip().upper() or None,
             axis=1,
@@ -4719,5 +4791,6 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
