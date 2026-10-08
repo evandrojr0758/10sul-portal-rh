@@ -3708,31 +3708,54 @@ with _rankings_topo:
     if _rank_ocorrencias.empty:
         st.caption("Nenhuma falta ou atestado registrado no período.")
     else:
-        # Barras horizontais agrupadas com nomes legíveis e rótulos.
-        _rank_longo = _rank_ocorrencias.melt(
-            id_vars=["COLABORADOR"], value_vars=["FALTAS", "ATESTADOS"],
-            var_name="TIPO", value_name="QTD",
+        # Nome acima das barras: preserva a largura útil em telas pequenas.
+        _rank_max = max(1, int(_rank_ocorrencias[["FALTAS", "ATESTADOS"]].max().max()))
+        _rank_rows = []
+        for _, _row in _rank_ocorrencias.iterrows():
+            _nome_rank = html.escape(str(_row["COLABORADOR"]))
+            _series_rank = []
+            for _tipo_rank, _classe_rank, _rotulo_rank in [
+                ("FALTAS", "rh-rank-falta", "Faltas"),
+                ("ATESTADOS", "rh-rank-atestado", "Atestados"),
+            ]:
+                _qtd_rank = int(_row[_tipo_rank])
+                if _qtd_rank <= 0:
+                    continue
+                _largura_rank = 100 * _qtd_rank / _rank_max
+                _series_rank.append(
+                    f'<div class="rh-rank-series" aria-label="{_rotulo_rank}: {_qtd_rank}">'
+                    f'<span class="rh-rank-kind">{_rotulo_rank}</span>'
+                    f'<div class="rh-rank-track"><div class="rh-rank-bar {_classe_rank}" '
+                    f'style="width:{_largura_rank:.2f}%"></div></div>'
+                    f'<strong class="rh-rank-count">{_qtd_rank}</strong></div>'
+                )
+            _rank_rows.append(
+                f'<div class="rh-rank-row"><div class="rh-rank-name">{_nome_rank}</div>'
+                + "".join(_series_rank) + '</div>'
+            )
+        st.markdown(
+            '<style>'
+            '.rh-rank {color:#243b53; width:100%; box-sizing:border-box;}'
+            '.rh-rank * {box-sizing:border-box;}'
+            '.rh-rank-legend {display:flex;flex-wrap:wrap;gap:1rem;font-size:.8rem;margin:0 0 .8rem;}'
+            '.rh-rank-dot {display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;}'
+            '.rh-rank-falta {background:#e53935;}'
+            '.rh-rank-atestado {background:#fb8c00;}'
+            '.rh-rank-row {padding:.65rem 0;border-bottom:1px solid #edf1f5;}'
+            '.rh-rank-name {font-size:.8rem;font-weight:600;line-height:1.4;overflow-wrap:anywhere;margin-bottom:.3rem;}'
+            '.rh-rank-series {display:grid;grid-template-columns:65px minmax(0,1fr) 28px;align-items:center;gap:.5rem;margin:.2rem 0;}'
+            '.rh-rank-kind {font-size:.7rem;color:#62748a;}'
+            '.rh-rank-track {height:12px;background:#f1f5f9;border-radius:4px;overflow:hidden;}'
+            '.rh-rank-bar {height:100%;border-radius:4px;}'
+            '.rh-rank-count {font-size:.8rem;text-align:right;font-variant-numeric:tabular-nums;}'
+            '</style><div class="rh-rank">'
+            '<div class="rh-rank-legend">'
+            '<span><i class="rh-rank-dot rh-rank-falta"></i>Faltas</span>'
+            '<span><i class="rh-rank-dot rh-rank-atestado"></i>Atestados</span>'
+            '</div>' + "".join(_rank_rows) + '</div>',
+            unsafe_allow_html=True,
         )
-        _rank_longo = _rank_longo[_rank_longo["QTD"] > 0]
-        _ordem_rank = _rank_ocorrencias["COLABORADOR"].tolist()
-        _base_rank = alt.Chart(_rank_longo).encode(
-            y=alt.Y("COLABORADOR:N", sort=_ordem_rank, title=None,
-                    axis=alt.Axis(labelLimit=270, labelFontSize=11)),
-            yOffset=alt.YOffset("TIPO:N", sort=["FALTAS", "ATESTADOS"]),
-            x=alt.X("QTD:Q", title="Quantidade", axis=alt.Axis(tickMinStep=1, format="d")),
-            color=alt.Color("TIPO:N", title=None,
-                scale=alt.Scale(domain=["FALTAS", "ATESTADOS"], range=["#E53935", "#FB8C00"]),
-                legend=alt.Legend(orient="bottom")),
-            tooltip=["COLABORADOR:N", "TIPO:N", alt.Tooltip("QTD:Q", format="d")],
-        )
-        _barras_rank = _base_rank.mark_bar(cornerRadiusEnd=4, size=12)
-        _rotulos_rank = _base_rank.mark_text(
-            align="left", dx=5, fontSize=11, fontWeight="bold"
-        ).encode(text=alt.Text("QTD:Q", format="d"), color=alt.value("#333333"))
-        _chart_rank = (_barras_rank + _rotulos_rank).properties(
-            height=max(240, len(_ordem_rank) * 36)
-        ).configure_view(strokeWidth=0)
-        st.altair_chart(_chart_rank, use_container_width=True)
+        st.caption("Top 10 · Quantidade de ocorrências por colaborador. Barras na mesma escala.")
 
 # Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
 # Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
