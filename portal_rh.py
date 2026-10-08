@@ -3755,7 +3755,7 @@ _media_diaria = (_total_recebiveis / ultimo_visivel) if ultimo_visivel else 0
 # Folgas, desligamentos e pendências não entram no denominador.
 _abs_faltas = _abs_atestados = _abs_dias_apurados = 0
 for _c in _colaboradores_todos:
-    if _classificacao_colaborador(_c) != "OPERACIONAL":
+    if _classificacao_colaborador(_c) != "OPERACIONAL" or str(_c.get("tipo_contratacao") or "").strip().upper() != "CONTRATO":
         continue
     _cid = int(_c["id"])
     for _dia in range(1, ultimo_visivel + 1):
@@ -3780,7 +3780,7 @@ _abs_anterior_erro = None
 try:
     _freq_anterior = ler_frequencia(_ano_anterior, _mes_anterior)
     _ids_operacionais = {int(c["id"]) for c in _colaboradores_todos
-                         if _classificacao_colaborador(c) == "OPERACIONAL"}
+                         if _classificacao_colaborador(c) == "OPERACIONAL" and str(c.get("tipo_contratacao") or "").strip().upper() == "CONTRATO"}
     for _registro in _freq_anterior:
         _id = int(_registro.get("colaborador_id") or 0)
         _data = pd.to_datetime(_registro.get("data"), errors="coerce")
@@ -3811,7 +3811,7 @@ with resumo_topo:
     k5.metric("Liberados", contagens["LB"])
     k6.metric("Compensações", contagens["COMP"])
     k7.metric("Média de Colaboradores", f"{_media_diaria:.2f}".replace(".", ","))
-    st.markdown("##### Indicadores de absenteísmo — Operacional")
+    st.markdown("##### Indicadores de absenteísmo — Operacional / Contrato")
     _abs_col1, _abs_col2, _abs_col3 = st.columns(3)
     _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
     _delta_abs = lambda atual, anterior: (f"{atual - anterior:+.2f} p.p.".replace(".", ",")
@@ -3829,7 +3829,7 @@ with resumo_topo:
         f"Faltas: {_fmt_abs(_taxa_faltas_anterior)} | "
         f"Atestados: {_fmt_abs(_taxa_atestados_anterior)}. "
         "Seta vermelha = aumento; verde = redução. "
-        "Utiliza a classificação operacional atual dos colaboradores."
+        "Utiliza somente colaboradores OPERACIONAIS classificados como CONTRATO; exclui SPOT e não classificados."
     )
     if _abs_anterior_erro:
         st.warning("Não foi possível consultar a frequência do mês anterior.")
