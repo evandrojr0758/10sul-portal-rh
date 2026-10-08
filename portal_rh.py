@@ -4148,6 +4148,35 @@ if alteracoes:
                 st.session_state.pop("rh_modal_alvo", None)
                 st.rerun()
 
+    if "rh_atestados_periodo" not in st.session_state:
+        st.session_state.rh_atestados_periodo = {}
+
+    @st.dialog("Período do atestado")
+    def modal_periodo_atestado(cid, dia, nome):
+        chave = f"{cid}_{int(ano)}_{mes}_{dia}"
+        st.write(f"**{nome}** — dia {dia:02d}/{mes:02d}/{ano}")
+        periodo = st.radio(
+            "Classificação obrigatória",
+            ["MEIO PERÍODO", "DIA INTEIRO"],
+            index=None, key=f"rh_periodo_escolha_{chave}",
+        )
+        nota = st.text_area("Observação complementar (opcional)", key=f"rh_periodo_nota_{chave}")
+        if st.button("Confirmar atestado", type="primary", use_container_width=True):
+            if not periodo:
+                st.error("Selecione meio período ou dia inteiro.")
+            else:
+                st.session_state.rh_atestados_periodo[chave] = (periodo, nota.strip())
+                st.rerun()
+
+    # Só abre a classificação depois das autorizações de edição e LB/COMP.
+    _pendente_atestado = next((
+        (cid, dia) for _, cid, dia, _, _ in pendentes_atestado
+        if f"{cid}_{int(ano)}_{mes}_{dia}" not in st.session_state.rh_atestados_periodo
+    ), None)
+    if _pendente_atestado and not modal_senha_aberto:
+        _cid_at, _dia_at = _pendente_atestado
+        modal_periodo_atestado(_cid_at, _dia_at, _nome_grade_por_cid(_cid_at))
+
     # Abre automaticamente o primeiro LB/COMP ainda não confirmado.
     modal_aberto = False
     for i, cid, dia, antes, depois in ([] if modal_senha_aberto else pendentes_obs):
@@ -4184,6 +4213,10 @@ if alteracoes:
         if not str(st.session_state.rh_responsaveis_pendentes.get(chave, "")).strip():
             pode_salvar = False
         if not str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip():
+            pode_salvar = False
+
+    for _, cid, dia, _, _ in pendentes_atestado:
+        if f"{cid}_{int(ano)}_{mes}_{dia}" not in st.session_state.rh_atestados_periodo:
             pode_salvar = False
 
     if pendentes_obs and not pode_salvar and not modal_aberto:
@@ -4232,9 +4265,16 @@ if alteracoes:
                     obs = str(st.session_state.rh_observacoes_pendentes.get(chave, "")).strip()
                     if not responsavel or not obs:
                         raise ValueError("LB/COMP sem autorização confirmada. Operação bloqueada.")
+                elif depois == "A":
+                    responsavel = ""
+                    chave_at = f"{cid}_{int(ano)}_{mes}_{dia}"
+                    if chave_at not in st.session_state.rh_atestados_periodo:
+                        raise ValueError("Atestado sem classificação de período.")
+                    periodo_at, nota_at = st.session_state.rh_atestados_periodo[chave_at]
+                    obs = f"[ATESTADO: {periodo_at}]" + (f" | {nota_at}" if nota_at else "")
                 else:
                     responsavel = ""
-                    obs = "" if antes in ("LB", "COMP") else obs_mapa.get((cid, dia), "")
+                    obs = "" if antes in ("LB", "COMP", "A") else obs_mapa.get((cid, dia), "")
 
                 # Auditoria de alteração de registro já salvo: preserva o motivo no próprio
                 # registro, sem exigir mudança de estrutura no Supabase.
