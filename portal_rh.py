@@ -411,7 +411,7 @@ def ler_colaboradores():
     return sorted(rows, key=lambda r: _nome_colaborador(r).upper())
 
 
-def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None, destra=None, equipe_revisao=None):
+def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None, destra=None, equipe_revisao=None, tipo_contratacao=None):
     nome = str(nome or "").strip().upper()
     if not nome:
         raise ValueError("Informe o nome do colaborador.")
@@ -435,6 +435,7 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_
         "frente": str(frente or "").strip().upper() or None,
         "destra": str(destra or "").strip() or None,
         "equipe_revisao": str(equipe_revisao or "").strip().upper() or None,
+        "tipo_contratacao": tipo_contratacao,
     }
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
@@ -2170,6 +2171,7 @@ def _modal_cadastro_colaboradores_cmc():
         df = pd.DataFrame(
             [{"COLABORADOR": n, "FUNÇÃO": f} for n, f in sorted(cadastro.items())]
         )
+        cadastro_df["tipo_contratacao"] = cadastro_df["tipo_contratacao"].fillna("").astype(str)
         editado = st.data_editor(
             df, num_rows="dynamic", use_container_width=True, hide_index=True,
             key="editor_cadastro_colaboradores_cmc",
@@ -3787,11 +3789,15 @@ with resumo_topo:
     _qtd_registrados = len(_colaboradores_todos)
     _qtd_operacionais = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OPERACIONAL")
     _qtd_outros = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OUTROS")
+    _qtd_contrato = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "CONTRATO")
+    _qtd_spot = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "SPOT")
     st.markdown(
         f"**👥 Colaboradores** &nbsp;&nbsp; | &nbsp;&nbsp; "
         f"**Registrados:** {_qtd_registrados} &nbsp;&nbsp; "
         f"**Operacionais:** {_qtd_operacionais} &nbsp;&nbsp; "
-        f"**Outros:** {_qtd_outros}",
+        f"**Outros:** {_qtd_outros} &nbsp;&nbsp; "
+        f"**Contrato:** {_qtd_contrato} &nbsp;&nbsp; "
+        f"**Spot:** {_qtd_spot}",
         unsafe_allow_html=True,
     )
 
@@ -4161,11 +4167,12 @@ with st.expander("👥 Cadastro de colaboradores"):
             )
             nova_frente = st.selectbox("Frente", ["", "REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"])
             nova_equipe = st.selectbox("Equipe da Revisão", ["", "EQUIPE 1", "EQUIPE 2"], help="Preencha somente para colaboradores da frente REVISÃO.")
+            novo_tipo_contratacao = st.selectbox("Tipo de contratação", ["", "CONTRATO", "SPOT"])
 
         incluir = st.form_submit_button("➕ Cadastrar colaborador", type="primary")
         if incluir:
             try:
-                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None, novo_destra or None, nova_equipe or None)
+                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None, novo_destra or None, nova_equipe or None, novo_tipo_contratacao or None)
                 st.success("Colaborador cadastrado com sucesso.")
                 st.rerun()
             except Exception as e:
@@ -4186,6 +4193,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         ["Todos", "Sem frente preenchida", "Com frente preenchida"],
         key="rh_filtro_frente_cadastro",
     )
+    filtro_tipo_cadastro = st.selectbox("Tipo de contratação", ["Todos", "CONTRATO", "SPOT", "Não classificado"], key="rh_filtro_tipo_cadastro")
     mostrar_inativos = st.checkbox("Mostrar colaboradores inativos", value=False)
 
     # Para permitir reativação, quando marcado traz ativos e inativos.
@@ -4211,6 +4219,8 @@ with st.expander("👥 Cadastro de colaboradores"):
     elif filtro_frente_cadastro == "Com frente preenchida":
         todos_cadastro = [c for c in todos_cadastro if _frente_preenchida(c)]
 
+    if filtro_tipo_cadastro != "Todos":
+        todos_cadastro = [c for c in todos_cadastro if (str(c.get("tipo_contratacao") or "").upper() == filtro_tipo_cadastro if filtro_tipo_cadastro != "Não classificado" else not c.get("tipo_contratacao"))]
     st.caption(f"{len(todos_cadastro)} colaborador(es) encontrado(s).")
 
 
@@ -4233,8 +4243,10 @@ with st.expander("👥 Cadastro de colaboradores"):
         if "equipe_revisao" not in cadastro_df.columns:
             cadastro_df["equipe_revisao"] = None
 
+        if "tipo_contratacao" not in cadastro_df.columns:
+            cadastro_df["tipo_contratacao"] = None
         cols_editor = [c for c in [
-            "id", "cracha", "destra", "colaborador", "classificacao_fechamento", "funcao", "empresa", "salario_base", "frente", "equipe_revisao",
+            "id", "cracha", "destra", "colaborador", "classificacao_fechamento", "funcao", "empresa", "tipo_contratacao", "salario_base", "frente", "equipe_revisao",
             "status", "data_desligamento"
         ] if c in cadastro_df.columns]
 
@@ -4259,6 +4271,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         cadastro_df["salario_base"] = pd.to_numeric(cadastro_df["salario_base"], errors="coerce").astype(float)
         for _campo_texto in ("funcao", "empresa", "classificacao_fechamento", "status", "frente", "equipe_revisao", "destra"):
             cadastro_df[_campo_texto] = cadastro_df[_campo_texto].fillna("").astype(str)
+        original_tipo = {str(c["id"]): str(c.get("tipo_contratacao") or "").upper() for c in todos_cadastro}
         original_classificacao = {str(c["id"]): _classificacao_colaborador(c) for c in todos_cadastro}
         original_empresa = {str(c["id"]): _empresa_colaborador(c, visual=True) for c in todos_cadastro}
         original_funcao = {
@@ -4282,7 +4295,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("classificacao_fechamento", "empresa", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
+            disabled=[c for c in cols_editor if c not in ("classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
@@ -4291,6 +4304,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "classificacao_fechamento": st.column_config.SelectboxColumn("Status do fechamento", options=["OUTROS", "OPERACIONAL"], required=True, width="medium"),
                 "funcao": st.column_config.SelectboxColumn("Função", options=opcoes_funcoes_cadastro, required=False),
                 "empresa": st.column_config.SelectboxColumn("Empresa", options=opcoes_empresas_cadastro, required=True),
+                "tipo_contratacao": st.column_config.SelectboxColumn("Tipo de contratação", options=["", "CONTRATO", "SPOT"], required=False),
                 "salario_base": st.column_config.NumberColumn("Salário base (R$)", min_value=0.0, step=0.01, format="R$ %.2f"),
                 "frente": st.column_config.SelectboxColumn("Frente", options=["REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"], required=False),
                 "equipe_revisao": st.column_config.SelectboxColumn("Equipe Revisão", options=["EQUIPE 1", "EQUIPE 2"], required=False),
@@ -4345,7 +4359,8 @@ with st.expander("👥 Cadastro de colaboradores"):
             nova_funcao = "" if pd.isna(funcao_val) else str(funcao_val or "").strip().upper()
             empresa_val = linha.get("empresa")
             nova_empresa = "" if pd.isna(empresa_val) else str(empresa_val or "").strip().upper()
-            mudou = (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
+            novo_tipo = str(linha.get("tipo_contratacao") or "").strip().upper()
+            mudou = (novo_tipo != original_tipo.get(cid, "")) or (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
             if mudou:
                 if novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
@@ -4367,7 +4382,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                     for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None}, "return=minimal")
+                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": str(linha.get("tipo_contratacao") or "").strip().upper() or None}, "return=minimal")
                     _salvar_classificacoes_aracruz({
                         str(linha["id"]): str(linha["classificacao_fechamento"])
                         for linha, *_ in alteracoes
