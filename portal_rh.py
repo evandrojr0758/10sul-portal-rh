@@ -3707,54 +3707,30 @@ with _rankings_topo:
     if _rank_ocorrencias.empty:
         st.caption("Nenhuma falta ou atestado registrado no período.")
     else:
-        # Barras verticais realmente coladas por colaborador.
-        # Usamos coordenadas contínuas (x/x2) para eliminar o espaço entre FALTA e ATESTADO.
+        # Barras horizontais agrupadas com nomes legíveis e rótulos.
+        _rank_longo = _rank_ocorrencias.melt(
+            id_vars=["COLABORADOR"], value_vars=["FALTAS", "ATESTADOS"],
+            var_name="TIPO", value_name="QTD",
+        )
+        _rank_longo = _rank_longo[_rank_longo["QTD"] > 0]
         _ordem_rank = _rank_ocorrencias["COLABORADOR"].tolist()
-        _linhas_chart = []
-        for _idx, _r in _rank_ocorrencias.reset_index(drop=True).iterrows():
-            _centro = float(_idx)
-            _falta = int(_r["FALTAS"])
-            _atestado = int(_r["ATESTADOS"])
-            if _falta > 0:
-                _linhas_chart.append({
-                    "COLABORADOR": _r["COLABORADOR"], "TIPO": "FALTAS", "QTD": _falta,
-                    "X0": _centro - 0.28, "X1": _centro, "XC": _centro - 0.14,
-                })
-            if _atestado > 0:
-                _linhas_chart.append({
-                    "COLABORADOR": _r["COLABORADOR"], "TIPO": "ATESTADOS", "QTD": _atestado,
-                    "X0": _centro, "X1": _centro + 0.28, "XC": _centro + 0.14,
-                })
-        _grafico_rank = pd.DataFrame(_linhas_chart)
-        _tick_vals = [float(i) for i in range(len(_ordem_rank))]
-        _label_expr = "datum.value >= 0 && datum.value < %d ? %s[datum.value] : ''" % (
-            len(_ordem_rank), repr(_ordem_rank).replace("'", '"')
-        )
-        _xscale = alt.Scale(domain=[-0.5, max(0.5, len(_ordem_rank) - 0.5)], nice=False)
-
-        _barras_rank = alt.Chart(_grafico_rank).mark_bar().encode(
-            x=alt.X("X0:Q", scale=_xscale, axis=alt.Axis(values=_tick_vals, labelExpr=_label_expr, labelAngle=-35, labelLimit=160, title=None)),
-            x2="X1:Q",
-            y=alt.Y("QTD:Q", title="Quantidade", axis=alt.Axis(tickMinStep=1, format="d")),
-            color=alt.Color(
-                "TIPO:N", title=None,
+        _base_rank = alt.Chart(_rank_longo).encode(
+            y=alt.Y("COLABORADOR:N", sort=_ordem_rank, title=None,
+                    axis=alt.Axis(labelLimit=270, labelFontSize=11)),
+            yOffset=alt.YOffset("TIPO:N", sort=["FALTAS", "ATESTADOS"]),
+            x=alt.X("QTD:Q", title="Quantidade", axis=alt.Axis(tickMinStep=1, format="d")),
+            color=alt.Color("TIPO:N", title=None,
                 scale=alt.Scale(domain=["FALTAS", "ATESTADOS"], range=["#E53935", "#FB8C00"]),
-                legend=alt.Legend(orient="bottom"),
-            ),
-            tooltip=[
-                alt.Tooltip("COLABORADOR:N", title="Colaborador"),
-                alt.Tooltip("TIPO:N", title="Tipo"),
-                alt.Tooltip("QTD:Q", title="Quantidade", format="d"),
-            ],
+                legend=alt.Legend(orient="bottom")),
+            tooltip=["COLABORADOR:N", "TIPO:N", alt.Tooltip("QTD:Q", format="d")],
         )
-        _rotulos_rank = alt.Chart(_grafico_rank).mark_text(
-            dy=-8, fontSize=13, fontWeight="bold", color="#333333"
-        ).encode(
-            x=alt.X("XC:Q", scale=_xscale, axis=None),
-            y=alt.Y("QTD:Q"),
-            text=alt.Text("QTD:Q", format="d"),
-        )
-        _chart_rank = (_barras_rank + _rotulos_rank).properties(height=300).configure_view(strokeWidth=0)
+        _barras_rank = _base_rank.mark_bar(cornerRadiusEnd=4, size=12)
+        _rotulos_rank = _base_rank.mark_text(
+            align="left", dx=5, fontSize=11, fontWeight="bold"
+        ).encode(text=alt.Text("QTD:Q", format="d"), color=alt.value("#333333"))
+        _chart_rank = (_barras_rank + _rotulos_rank).properties(
+            height=max(240, len(_ordem_rank) * 36)
+        ).configure_view(strokeWidth=0)
         st.altair_chart(_chart_rank, use_container_width=True)
 
 # Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
