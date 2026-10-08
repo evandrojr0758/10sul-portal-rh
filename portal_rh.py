@@ -3700,7 +3700,6 @@ if not _rank_ocorrencias.empty:
     _rank_ocorrencias = (
         _rank_ocorrencias
         .sort_values(["TOTAL", "COLABORADOR"], ascending=[False, True])
-        .head(10)
     )
 
 with _rankings_topo:
@@ -3708,6 +3707,21 @@ with _rankings_topo:
     if _rank_ocorrencias.empty:
         st.caption("Nenhuma falta ou atestado registrado no período.")
     else:
+        _rank_total_colaboradores = len(_rank_ocorrencias)
+        _rank_total_faltas = int(_rank_ocorrencias["FALTAS"].sum())
+        _rank_total_atestados = int(_rank_ocorrencias["ATESTADOS"].sum())
+        _rank_exibicao = st.selectbox(
+            "Exibir colaboradores", ["Todos com ocorrências", "Top 10"],
+            key="rh_rank_exibicao",
+        )
+        if _rank_exibicao == "Top 10":
+            _rank_ocorrencias = _rank_ocorrencias.head(10)
+        _rank_exibidas_faltas = int(_rank_ocorrencias["FALTAS"].sum())
+        _rank_exibidos_atestados = int(_rank_ocorrencias["ATESTADOS"].sum())
+        st.caption(
+            f"Total do período: {_rank_total_faltas} faltas · {_rank_total_atestados} atestados. "
+            f"Exibindo {len(_rank_ocorrencias)} de {_rank_total_colaboradores} colaboradores com ocorrências."
+        )
         # Nome acima das barras: preserva a largura útil em telas pequenas.
         _rank_max = max(1, int(_rank_ocorrencias[["FALTAS", "ATESTADOS"]].max().max()))
         _rank_rows = []
@@ -3755,7 +3769,10 @@ with _rankings_topo:
             '</div>' + "".join(_rank_rows) + '</div>',
             unsafe_allow_html=True,
         )
-        st.caption("Top 10 · Quantidade de ocorrências por colaborador. Barras na mesma escala.")
+        st.caption(
+            f"Soma das barras exibidas: {_rank_exibidas_faltas} faltas · {_rank_exibidos_atestados} atestados. "
+            "Barras na mesma escala."
+        )
 
 # Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
 # Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
