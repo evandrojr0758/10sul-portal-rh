@@ -1317,11 +1317,20 @@ def tela_apuracao_gratificacao():
             "e clique em **💾 Salvar alterações** antes de conferir a gratificação."
         )
 
-    faltas={}; atest={}
+    faltas={}; atest={}; atest_sem_classificacao={}
     for f in freq:
         cid=int(f.get("colaborador_id") or 0); cod=cod_por_id.get(int(f.get("ocorrencia_id") or 0),"")
         if cod=="FA": faltas[cid]=faltas.get(cid,0)+1
-        if cod=="A": atest[cid]=atest.get(cid,0)+1
+        if cod=="A":
+            obs_at=str(f.get("observacao") or "").upper()
+            if "[ATESTADO: MEIO PERÍODO]" in obs_at:
+                atest[cid]=atest.get(cid,0)+0.5
+            elif "[ATESTADO: DIA INTEIRO]" in obs_at:
+                atest[cid]=atest.get(cid,0)+1
+            else:
+                atest_sem_classificacao[cid]=atest_sem_classificacao.get(cid,0)+1
+    if atest_sem_classificacao:
+        st.warning("Há atestados antigos sem classificação de período. Confira os registros antes de concluir a gratificação.")
     ini=f"{ano_g:04d}-{mes_g:02d}-01"; fim=f"{ano_g:04d}-{mes_g:02d}-{calendar.monthrange(ano_g,mes_g)[1]:02d}"
     try:
         oc_mes=sb("GET","rh_colaborador_ocorrencias",f"select=*&data=gte.{ini}&data=lte.{fim}") or []
@@ -1355,6 +1364,7 @@ def tela_apuracao_gratificacao():
         dd=c.get("data_desligamento")
         if dd and str(dd) < ini: continue
         sal=float(c.get("salario_base") or 0); fa=faltas.get(cid,0); at=atest.get(cid,0); dna=dna_por.get(cid,0); des=desvios.get(cid,0)
+        pendencia_atestado = atest_sem_classificacao.get(cid, 0)
         manual=ap_por.get(cid,{})
         equipe=str(c.get("equipe_revisao") or "").upper().strip() if frente=="REVISÃO" else ""
         # Valor individual salvo prevalece sobre o valor digitado nos campos de lote.
@@ -1378,15 +1388,18 @@ def tela_apuracao_gratificacao():
             abs_parcela=integral*float(rev.get("peso_absenteismo") or 20)/100
             tempo_parcela=integral*float(rev.get("peso_tempo_entrega") or 80)/100
             if at>=int(rev.get("atestados_zera_categoria") or 2): abs_parcela=0; motivos.append(f"{at} dias de atestado: absenteísmo zerado")
-            elif at==1: abs_parcela=max(0,abs_parcela-float(rev.get("desconto_1_atestado_valor") or 100)); motivos.append("1 dia de atestado")
+            elif at>=1: abs_parcela=max(0,abs_parcela-float(rev.get("desconto_1_atestado_valor") or 100)); motivos.append("1 dia de atestado")
             pct_tempo=_percentual_tempo_revisao(media,rev)
             if pct_tempo is None:
                 valor=None; motivos.append("informar média da Revisão")
             else: valor=abs_parcela + tempo_parcela*(pct_tempo/100)
         elif valor>0:
             if at>=int(demais.get("atestados_zera_tudo") or 2): valor=0; motivos.append(f"{at} dias de atestado")
-            elif at==1:
+            elif at>=1:
                 desc=float(demais.get("desconto_1_atestado_percentual") or 20); valor=integral*(1-desc/100); motivos.append(f"1 dia de atestado (-{desc:.0f}%)")
+        if pendencia_atestado:
+            valor=None
+            motivos.append(f"{pendencia_atestado} atestado(s) sem classificação de período")
         status="⏳ PENDENTE" if valor is None else ("❌ ZERADA" if valor<=0 else ("✅ INTEGRAL" if abs(float(valor)-float(integral)) < 0.01 else "🟠 PARCIAL"))
         ids[nome]=cid
         linhas.append({"COLABORADOR":nome,"EMPRESA":_empresa_colaborador(c, visual=False),"FUNÇÃO":str(c.get("funcao") or "").strip(),"FRENTE":frente,"SALÁRIO":sal,"EQUIPE REVISÃO":equipe,"MÉDIA TEMPO (h)":media,"FALTAS":fa,"ATESTADOS (dias)":at,"DNA":dna,"DESVIOS":des,"INTEGRAL":integral,"GRATIFICAÇÃO":valor,"STATUS":status,"MOTIVO / CÁLCULO":" • ".join(motivos) if motivos else "Requisitos atendidos"})
