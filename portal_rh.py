@@ -3801,6 +3801,22 @@ _taxa_faltas_anterior = (100 * _abs_anterior_faltas / _abs_anterior_dias
 _taxa_atestados_anterior = (100 * _abs_anterior_atestados / _abs_anterior_dias
                            if _abs_anterior_dias else None)
 
+# Ajustes de visualização para telas pequenas, sem alterar os cálculos.
+st.markdown("""
+<style>
+@media (max-width: 768px) {
+  .block-container {padding: .7rem .65rem 2rem !important; max-width: 100% !important;}
+  [data-testid="stMetric"] {min-width: 0 !important;}
+  [data-testid="stMetricLabel"] p {font-size: .76rem !important; line-height: 1.15 !important;}
+  [data-testid="stMetricValue"] {font-size: 1.55rem !important;}
+  [data-testid="stVerticalBlockBorderWrapper"] {min-width: 0 !important;}
+  [data-testid="stDataEditor"] {max-width: 100%; overflow-x: auto !important;}
+  [data-testid="stHorizontalBlock"] {gap: .45rem !important;}
+  [data-testid="stButton"] button, [data-testid="stDownloadButton"] button {min-height: 2.6rem;}
+}
+</style>
+""", unsafe_allow_html=True)
+
 with resumo_topo:
     st.markdown("### Painel gerencial | Frequência")
     st.caption("Visão consolidada do período selecionado · Absenteísmo: somente Operacional / Contrato")
@@ -3817,7 +3833,7 @@ with resumo_topo:
     _qtd_spot = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "SPOT")
 
     st.markdown("##### Absenteísmo do contrato")
-    _abs_col1, _abs_col2, _abs_col3 = st.columns(3, gap="medium")
+    _abs_col1, _abs_col2, _abs_col3 = st.columns(3, gap="small")
     with _abs_col1:
         with st.container(border=True):
             st.metric("ABSENTEÍSMO TOTAL", _fmt_abs(_taxa_abs),
@@ -3838,7 +3854,7 @@ with resumo_topo:
         st.warning("Não foi possível consultar a frequência do mês anterior.")
 
     st.markdown("##### Movimentação de frequência")
-    _freq_cols = st.columns(4, gap="medium")
+    _freq_cols = st.columns(4, gap="small")
     for _col, _label, _value in zip(
         _freq_cols,
         ["Presenças", "Faltas", "Atestados", "Média de colaboradores"],
@@ -3848,7 +3864,7 @@ with resumo_topo:
             with st.container(border=True):
                 st.metric(_label, _value)
 
-    _sec_cols = st.columns(4, gap="medium")
+    _sec_cols = st.columns(4, gap="small")
     for _col, _label, _value in zip(
         _sec_cols,
         ["Folgas", "Liberados", "Compensações", "Dias apurados (contrato)"],
