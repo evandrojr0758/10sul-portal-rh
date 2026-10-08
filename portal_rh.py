@@ -1,4 +1,5 @@
 import io
+import html
 import re
 import os
 import json
@@ -3801,10 +3802,37 @@ _taxa_faltas_anterior = (100 * _abs_anterior_faltas / _abs_anterior_dias
 _taxa_atestados_anterior = (100 * _abs_anterior_atestados / _abs_anterior_dias
                            if _abs_anterior_dias else None)
 
-# Ajustes de visualização para telas pequenas, sem alterar os cálculos.
+# Grade própria: as colunas nativas do Streamlit empilham todos os KPIs no celular.
 st.markdown("""
 <style>
+.rh-panel {color: #243b53; margin-bottom: 1rem;}
+.rh-panel h3 {font-size: 1.5rem; margin: 0 0 .25rem;}
+.rh-panel h4 {font-size: 1rem; margin: 1.2rem 0 .65rem;}
+.rh-panel .rh-subtitle, .rh-panel .rh-note {color: #62748a; font-size: .8rem;}
+.rh-panel .rh-grid {display: grid; gap: .7rem; grid-template-columns: repeat(4, minmax(0, 1fr));}
+.rh-panel .rh-rates {grid-template-columns: repeat(3, minmax(0, 1fr));}
+.rh-panel .rh-team {grid-template-columns: repeat(5, minmax(0, 1fr));}
+.rh-panel .rh-card {min-width: 0; padding: .9rem 1rem; border: 1px solid #e4eaf1; border-radius: 12px; background: #fff; box-shadow: 0 2px 6px #243b5308;}
+.rh-panel .rh-rate {border-top: 3px solid #2563eb;}
+.rh-panel .rh-label {display: block; font-size: .8rem; color: #62748a; line-height: 1.35;}
+.rh-panel .rh-value {display: block; font-size: 1.65rem; font-weight: 700; line-height: 1.25; margin: .25rem 0; font-variant-numeric: tabular-nums;}
+.rh-panel .rh-previous {display: block; font-size: .73rem; color: #62748a;}
+.rh-panel .rh-delta {display: inline-block; font-size: .73rem; margin-top: .35rem; border-radius: 5px; padding: .1rem .35rem;}
+.rh-panel .rh-up {background: #fff0f0; color: #b42318;}
+.rh-panel .rh-down {background: #ecfdf3; color: #067647;}
+.rh-panel .rh-flat {background: #f1f5f9; color: #475569;}
+.rh-panel .rh-secondary {margin-top: .7rem;}
+.rh-panel .rh-secondary .rh-card, .rh-panel .rh-team .rh-card {background: #f8fafc; box-shadow: none; padding: .65rem .85rem;}
+.rh-panel .rh-secondary .rh-value, .rh-panel .rh-team .rh-value {font-size: 1.2rem;}
+.rh-panel .rh-note {margin: .6rem 0;}
 @media (max-width: 768px) {
+  .rh-panel .rh-grid {grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem;}
+  .rh-panel .rh-rates .rh-card:first-child {grid-column: 1 / -1;}
+  .rh-panel .rh-card {padding: .75rem .8rem;}
+  .rh-panel h3 {font-size: 1.25rem;}
+  .rh-panel h4 {margin-top: 1rem;}
+  .rh-panel .rh-label {font-size: .75rem;}
+  .rh-panel .rh-value {font-size: 1.5rem;}
   .block-container {padding: .7rem .65rem 2rem !important; max-width: 100% !important;}
   [data-testid="stMetric"] {min-width: 0 !important;}
   [data-testid="stMetricLabel"] p {font-size: .76rem !important; line-height: 1.15 !important;}
@@ -3818,8 +3846,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with resumo_topo:
-    st.markdown("### Painel gerencial | Frequência")
-    st.caption("Visão consolidada do período selecionado · Absenteísmo: somente Operacional / Contrato")
 
     _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
     _delta_abs = lambda atual, anterior: (
@@ -3832,55 +3858,58 @@ with resumo_topo:
     _qtd_contrato = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "CONTRATO")
     _qtd_spot = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "SPOT")
 
-    st.markdown("##### Absenteísmo do contrato")
-    _abs_col1, _abs_col2, _abs_col3 = st.columns(3, gap="small")
-    with _abs_col1:
-        with st.container(border=True):
-            st.metric("ABSENTEÍSMO TOTAL", _fmt_abs(_taxa_abs),
-                      delta=_delta_abs(_taxa_abs, _taxa_abs_anterior), delta_color="inverse")
-            st.caption(f"Mês anterior: {_fmt_abs(_taxa_abs_anterior)}")
-    with _abs_col2:
-        with st.container(border=True):
-            st.metric("FALTAS (%)", _fmt_abs(_taxa_faltas),
-                      delta=_delta_abs(_taxa_faltas, _taxa_faltas_anterior), delta_color="inverse")
-            st.caption(f"Mês anterior: {_fmt_abs(_taxa_faltas_anterior)}")
-    with _abs_col3:
-        with st.container(border=True):
-            st.metric("ATESTADOS (%)", _fmt_abs(_taxa_atestados),
-                      delta=_delta_abs(_taxa_atestados, _taxa_atestados_anterior), delta_color="inverse")
-            st.caption(f"Mês anterior: {_fmt_abs(_taxa_atestados_anterior)}")
-    st.caption(f"Comparação: {_mes_anterior:02d}/{_ano_anterior}, dias 1 a {_dias_anterior:02d} · Variação em pontos percentuais (p.p.).")
+    def _rh_card(label, value, *, previous=None, delta=None, rate=False):
+        esc = lambda v: html.escape(str(v))
+        detail = ""
+        if rate:
+            detail = f'<span class="rh-previous">Mês anterior: {esc(previous)}</span>'
+            if delta is not None:
+                trend = "rh-down" if delta.startswith("-") else ("rh-up" if delta.startswith("+") and not delta.startswith("+0,00") else "rh-flat")
+                detail += f'<span class="rh-delta {trend}">{esc(delta)}</span>'
+        return (f'<div class="rh-card {"rh-rate" if rate else ""}">'
+                f'<span class="rh-label">{esc(label)}</span>'
+                f'<span class="rh-value">{esc(value)}</span>{detail}</div>')
+
+    _rates_html = "".join(
+        _rh_card(label, _fmt_abs(current), previous=_fmt_abs(previous),
+                 delta=_delta_abs(current, previous), rate=True)
+        for label, current, previous in [
+            ("Taxa de absenteísmo", _taxa_abs, _taxa_abs_anterior),
+            ("Taxa de faltas", _taxa_faltas, _taxa_faltas_anterior),
+            ("Taxa de atestados", _taxa_atestados, _taxa_atestados_anterior),
+        ]
+    )
+    _frequency_html = "".join(_rh_card(label, value) for label, value in [
+        ("Presenças", contagens["OK"]), ("Faltas", contagens["FA"]),
+        ("Atestados", contagens["A"]),
+        ("Média de colaboradores", f"{_media_diaria:.2f}".replace(".", ",")),
+    ])
+    _secondary_html = "".join(_rh_card(label, value) for label, value in [
+        ("Folgas", contagens["FO"]), ("Liberados", contagens["LB"]),
+        ("Compensações", contagens["COMP"]), ("Dias apurados (contrato)", _abs_dias_apurados),
+    ])
+    _team_html = "".join(_rh_card(label, value) for label, value in [
+        ("Registrados", _qtd_registrados), ("Operacionais", _qtd_operacionais),
+        ("Outros", _qtd_outros), ("Contrato", _qtd_contrato), ("Spot", _qtd_spot),
+    ])
+    st.markdown(
+        '<section class="rh-panel">'
+        '<h3>Frequência e Absenteísmo</h3>'
+        '<div class="rh-subtitle">Indicadores e análises da equipe · '
+        f'{int(mes):02d}/{int(ano)} · Absenteísmo: somente Operacional / Contrato</div>'
+        '<h4>Absenteísmo do contrato</h4>'
+        f'<div class="rh-grid rh-rates">{_rates_html}</div>'
+        f'<div class="rh-note">Comparação: {_mes_anterior:02d}/{_ano_anterior}, '
+        f'dias 1 a {_dias_anterior:02d} · Variação em pontos percentuais (p.p.).</div>'
+        f'<h4>Resumo da frequência — {int(mes):02d}/{int(ano)}</h4>'
+        f'<div class="rh-grid">{_frequency_html}</div>'
+        f'<div class="rh-grid rh-secondary">{_secondary_html}</div>'
+        '<h4>Quadro de colaboradores</h4>'
+        f'<div class="rh-grid rh-team">{_team_html}</div></section>',
+        unsafe_allow_html=True,
+    )
     if _abs_anterior_erro:
         st.warning("Não foi possível consultar a frequência do mês anterior.")
-
-    st.markdown("##### Movimentação de frequência")
-    _freq_cols = st.columns(4, gap="small")
-    for _col, _label, _value in zip(
-        _freq_cols,
-        ["Presenças", "Faltas", "Atestados", "Média de colaboradores"],
-        [contagens["OK"], contagens["FA"], contagens["A"], f"{_media_diaria:.2f}".replace(".", ",")]
-    ):
-        with _col:
-            with st.container(border=True):
-                st.metric(_label, _value)
-
-    _sec_cols = st.columns(4, gap="small")
-    for _col, _label, _value in zip(
-        _sec_cols,
-        ["Folgas", "Liberados", "Compensações", "Dias apurados (contrato)"],
-        [contagens["FO"], contagens["LB"], contagens["COMP"], _abs_dias_apurados]
-    ):
-        with _col:
-            st.metric(_label, _value)
-
-    st.markdown("##### Quadro de colaboradores")
-    _efetivo_cols = st.columns(5)
-    for _col, _rotulo, _valor in zip(
-        _efetivo_cols,
-        ["Registrados", "Operacionais", "Outros", "Contrato", "Spot"],
-        [_qtd_registrados, _qtd_operacionais, _qtd_outros, _qtd_contrato, _qtd_spot]
-    ):
-        _col.metric(_rotulo, _valor)
 
     with st.expander("ℹ️ Metodologia e critérios de apuração"):
         st.markdown(
@@ -4595,4 +4624,5 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
