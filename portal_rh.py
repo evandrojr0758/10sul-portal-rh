@@ -3802,55 +3802,60 @@ _taxa_atestados_anterior = (100 * _abs_anterior_atestados / _abs_anterior_dias
                            if _abs_anterior_dias else None)
 
 with resumo_topo:
-    st.markdown("#### Resumo do mês")
-    k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
-    k1.metric("Faltas", contagens["FA"])
-    k2.metric("Atestados", contagens["A"])
-    k3.metric("Folgas", contagens["FO"])
-    k4.metric("Presenças", contagens["OK"])
-    k5.metric("Liberados", contagens["LB"])
-    k6.metric("Compensações", contagens["COMP"])
-    k7.metric("Média de Colaboradores", f"{_media_diaria:.2f}".replace(".", ","))
-    st.markdown("##### Indicadores de absenteísmo — Operacional / Contrato")
-    _abs_col1, _abs_col2, _abs_col3 = st.columns(3)
-    _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
-    _delta_abs = lambda atual, anterior: (f"{atual - anterior:+.2f} p.p.".replace(".", ",")
-        if atual is not None and anterior is not None else None)
-    _abs_col1.metric("Taxa de absenteísmo", _fmt_abs(_taxa_abs),
-        delta=_delta_abs(_taxa_abs, _taxa_abs_anterior), delta_color="inverse",
-        help="(Faltas + Atestados) ÷ dias apurados × 100. Variação em pontos percentuais contra o mês anterior.")
-    _abs_col2.metric("Taxa de faltas", _fmt_abs(_taxa_faltas),
-        delta=_delta_abs(_taxa_faltas, _taxa_faltas_anterior), delta_color="inverse")
-    _abs_col3.metric("Taxa de atestados", _fmt_abs(_taxa_atestados),
-        delta=_delta_abs(_taxa_atestados, _taxa_atestados_anterior), delta_color="inverse")
-    st.caption(
-        f"Comparativo: {_mes_anterior:02d}/{_ano_anterior}, dias 1 a {_dias_anterior:02d}. "
-        f"Absenteísmo anterior: {_fmt_abs(_taxa_abs_anterior)} | "
-        f"Faltas: {_fmt_abs(_taxa_faltas_anterior)} | "
-        f"Atestados: {_fmt_abs(_taxa_atestados_anterior)}. "
-        "Seta vermelha = aumento; verde = redução. "
-        "Utiliza somente colaboradores OPERACIONAIS classificados como CONTRATO; exclui SPOT e não classificados."
-    )
-    if _abs_anterior_erro:
-        st.warning("Não foi possível consultar a frequência do mês anterior.")
-    st.caption(f"Base: {_abs_dias_apurados} dias de trabalho apurados, {_abs_faltas} faltas e {_abs_atestados} atestados. Exclui folgas, desligamentos e dias pendentes. Inclui lançamentos ainda não salvos.")
+    st.markdown("### Resumo gerencial do mês")
+    st.caption("Indicadores de frequência e absenteísmo do período selecionado")
 
+    with st.container(border=True):
+        st.markdown("**Frequência e efetivo**")
+        _linha1 = st.columns(4)
+        _linha1[0].metric("Faltas", contagens["FA"])
+        _linha1[1].metric("Atestados", contagens["A"])
+        _linha1[2].metric("Folgas", contagens["FO"])
+        _linha1[3].metric("Presenças", contagens["OK"])
+        _linha2 = st.columns(4)
+        _linha2[0].metric("Liberados", contagens["LB"])
+        _linha2[1].metric("Compensações", contagens["COMP"])
+        _linha2[2].metric("Média de colaboradores", f"{_media_diaria:.2f}".replace(".", ","))
+        _linha2[3].metric("Dias apurados (contrato)", _abs_dias_apurados)
 
-    # Quadro compacto do efetivo cadastrado. Independente do filtro visual da grade.
+    with st.container(border=True):
+        st.markdown("**Absenteísmo | Operacional · Contrato**")
+        _abs_col1, _abs_col2, _abs_col3 = st.columns(3)
+        _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
+        _delta_abs = lambda atual, anterior: (f"{atual - anterior:+.2f} p.p.".replace(".", ",")
+            if atual is not None and anterior is not None else None)
+        _abs_col1.metric("Taxa de absenteísmo", _fmt_abs(_taxa_abs),
+            delta=_delta_abs(_taxa_abs, _taxa_abs_anterior), delta_color="inverse")
+        _abs_col2.metric("Taxa de faltas", _fmt_abs(_taxa_faltas),
+            delta=_delta_abs(_taxa_faltas, _taxa_faltas_anterior), delta_color="inverse")
+        _abs_col3.metric("Taxa de atestados", _fmt_abs(_taxa_atestados),
+            delta=_delta_abs(_taxa_atestados, _taxa_atestados_anterior), delta_color="inverse")
+        st.caption(f"Comparação com {_mes_anterior:02d}/{_ano_anterior} (dias 1 a {_dias_anterior:02d}) · Variação em pontos percentuais; aumento em vermelho e redução em verde.")
+        if _abs_anterior_erro:
+            st.warning("Não foi possível consultar a frequência do mês anterior.")
+        with st.expander("ℹ️ Como são calculados os indicadores?"):
+            st.markdown(
+                "A taxa de absenteísmo é **(faltas + atestados) ÷ dias de trabalho apurados × 100**. "
+                "As taxas de faltas e atestados usam o mesmo denominador. "
+                "São considerados somente colaboradores **OPERACIONAIS / CONTRATO**; "
+                "SPOT e não classificados ficam de fora. Folgas, desligamentos e dias pendentes "
+                "não compõem a base. Alterações ainda não salvas são consideradas no mês atual."
+            )
+            st.write(f"Base atual: {_abs_dias_apurados} dias apurados, {_abs_faltas} faltas e {_abs_atestados} atestados.")
+            st.write(f"Mês anterior: absenteísmo {_fmt_abs(_taxa_abs_anterior)}, faltas {_fmt_abs(_taxa_faltas_anterior)}, atestados {_fmt_abs(_taxa_atestados_anterior)}.")
+
     _qtd_registrados = len(_colaboradores_todos)
     _qtd_operacionais = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OPERACIONAL")
     _qtd_outros = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OUTROS")
     _qtd_contrato = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "CONTRATO")
     _qtd_spot = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "SPOT")
-    st.markdown(
-        f"**👥 Colaboradores** &nbsp;&nbsp; | &nbsp;&nbsp; "
-        f"**Registrados:** {_qtd_registrados} &nbsp;&nbsp; "
-        f"**Operacionais:** {_qtd_operacionais} &nbsp;&nbsp; "
-        f"**Outros:** {_qtd_outros} &nbsp;&nbsp; "
-        f"**Contrato:** {_qtd_contrato} &nbsp;&nbsp; "
-        f"**Spot:** {_qtd_spot}",
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.markdown("**👥 Quadro de colaboradores**")
+        _efetivo_cols = st.columns(5)
+        for _col, _rotulo, _valor in zip(_efetivo_cols,
+                ["Registrados", "Operacionais", "Outros", "Contrato", "Spot"],
+                [_qtd_registrados, _qtd_operacionais, _qtd_outros, _qtd_contrato, _qtd_spot]):
+            _col.metric(_rotulo, _valor)
 
 # Exportação no mesmo padrão das abas BaseFuncionario e BaseFuncionário usadas no fechamento.
 try:
