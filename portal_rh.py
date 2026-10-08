@@ -4091,6 +4091,8 @@ if alteracoes:
         modal_senha_aberto = True
 
     pendentes_obs = [(i, cid, d, a, n) for i, cid, d, a, n in alteracoes if n in ("LB", "COMP")]
+    # Atestados exigem classificação explícita antes do salvamento.
+    pendentes_atestado = [(i,cid,d,a,n) for i,cid,d,a,n in alteracoes if n == "A"]
 
     if "rh_observacoes_pendentes" not in st.session_state:
         st.session_state.rh_observacoes_pendentes = {}
