@@ -1,3 +1,4 @@
+import io
 import re
 import os
 import json
@@ -4221,6 +4222,52 @@ with st.expander("👥 Cadastro de colaboradores"):
 
     if filtro_tipo_cadastro != "Todos":
         todos_cadastro = [c for c in todos_cadastro if (str(c.get("tipo_contratacao") or "").upper() == filtro_tipo_cadastro if filtro_tipo_cadastro != "Não classificado" else not c.get("tipo_contratacao"))]
+
+    # Exportação do cadastro respeitando os filtros aplicados na tela.
+    if todos_cadastro:
+        _export_rows = []
+        for _c in todos_cadastro:
+            _export_rows.append({
+                "ID": _c.get("id"),
+                "CRACHÁ": _c.get("cracha"),
+                "DESTRA": _c.get("destra"),
+                "COLABORADOR": _nome_colaborador(_c),
+                "STATUS DO FECHAMENTO": _classificacao_colaborador(_c),
+                "FUNÇÃO": _c.get("funcao"),
+                "EMPRESA": _empresa_colaborador(_c, visual=True),
+                "TIPO DE CONTRATAÇÃO": _c.get("tipo_contratacao"),
+                "SALÁRIO BASE (R$)": _c.get("salario_base"),
+                "FRENTE": _c.get("frente"),
+                "EQUIPE REVISÃO": _c.get("equipe_revisao"),
+                "STATUS": _c.get("status"),
+                "DATA DE DESLIGAMENTO": _c.get("data_desligamento"),
+            })
+        _export_df = pd.DataFrame(_export_rows)
+        _export_buffer = io.BytesIO()
+        with pd.ExcelWriter(_export_buffer, engine="openpyxl") as _writer:
+            _export_df.to_excel(_writer, sheet_name="Colaboradores", index=False)
+            _ws = _writer.sheets["Colaboradores"]
+            _ws.freeze_panes = "A2"
+            _ws.auto_filter.ref = _ws.dimensions
+            from openpyxl.styles import Font, PatternFill, Alignment
+            for _cell in _ws[1]:
+                _cell.font = Font(bold=True, color="FFFFFF")
+                _cell.fill = PatternFill("solid", fgColor="243B53")
+                _cell.alignment = Alignment(vertical="center")
+            _ws.row_dimensions[1].height = 25
+            for _col in _ws.columns:
+                _letter = _col[0].column_letter
+                _maxlen = max(len(str(_cell.value or "")) for _cell in _col)
+                _ws.column_dimensions[_letter].width = min(max(_maxlen + 3, 14), 48)
+            for _cell in _ws["I"][1:]:
+                _cell.number_format = '"R$" #,##0.00'
+        st.download_button(
+            "📥 Exportar cadastro para Excel",
+            data=_export_buffer.getvalue(),
+            file_name="Cadastro_Colaboradores_10Sul.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="rh_exportar_cadastro_excel",
+        )
     st.caption(f"{len(todos_cadastro)} colaborador(es) encontrado(s).")
 
 
