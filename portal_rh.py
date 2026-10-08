@@ -3770,6 +3770,37 @@ _taxa_abs = 100 * (_abs_faltas + _abs_atestados) / _abs_dias_apurados if _abs_di
 _taxa_faltas = 100 * _abs_faltas / _abs_dias_apurados if _abs_dias_apurados else None
 _taxa_atestados = 100 * _abs_atestados / _abs_dias_apurados if _abs_dias_apurados else None
 
+# Comparativo com o mês anterior: mesmo intervalo de dias, para evitar
+# comparar um mês parcial com um mês completo.
+_ano_anterior = int(ano) - (1 if mes == 1 else 0)
+_mes_anterior = 12 if mes == 1 else mes - 1
+_dias_anterior = min(ultimo_visivel, calendar.monthrange(_ano_anterior, _mes_anterior)[1])
+_abs_anterior_faltas = _abs_anterior_atestados = _abs_anterior_dias = 0
+_abs_anterior_erro = None
+try:
+    _freq_anterior = ler_frequencia(_ano_anterior, _mes_anterior)
+    _ids_operacionais = {int(c["id"]) for c in _colaboradores_todos
+                         if _classificacao_colaborador(c) == "OPERACIONAL"}
+    for _registro in _freq_anterior:
+        _id = int(_registro.get("colaborador_id") or 0)
+        _data = pd.to_datetime(_registro.get("data"), errors="coerce")
+        if _id not in _ids_operacionais or pd.isna(_data) or _data.day > _dias_anterior:
+            continue
+        _cod_ant = _codigo_grade(ocorrencia_codigo_por_id.get(
+            int(_registro["ocorrencia_id"]), "") if _registro.get("ocorrencia_id") is not None else "")
+        if _cod_ant in ("OK", "FA", "A", "LB", "COMP"):
+            _abs_anterior_dias += 1
+            _abs_anterior_faltas += int(_cod_ant == "FA")
+            _abs_anterior_atestados += int(_cod_ant == "A")
+except Exception as _exc_ant:
+    _abs_anterior_erro = str(_exc_ant)
+_taxa_abs_anterior = (100 * (_abs_anterior_faltas + _abs_anterior_atestados) / _abs_anterior_dias
+                     if _abs_anterior_dias else None)
+_taxa_faltas_anterior = (100 * _abs_anterior_faltas / _abs_anterior_dias
+                        if _abs_anterior_dias else None)
+_taxa_atestados_anterior = (100 * _abs_anterior_atestados / _abs_anterior_dias
+                           if _abs_anterior_dias else None)
+
 with resumo_topo:
     st.markdown("#### Resumo do mês")
     k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
@@ -3783,10 +3814,25 @@ with resumo_topo:
     st.markdown("##### Indicadores de absenteísmo — Operacional")
     _abs_col1, _abs_col2, _abs_col3 = st.columns(3)
     _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
+    _delta_abs = lambda atual, anterior: (f"{atual - anterior:+.2f} p.p.".replace(".", ",")
+        if atual is not None and anterior is not None else None)
     _abs_col1.metric("Taxa de absenteísmo", _fmt_abs(_taxa_abs),
-        help="(Faltas + Atestados) ÷ dias apurados × 100. Considera apenas OPERACIONAL.")
-    _abs_col2.metric("Taxa de faltas", _fmt_abs(_taxa_faltas))
-    _abs_col3.metric("Taxa de atestados", _fmt_abs(_taxa_atestados))
+        delta=_delta_abs(_taxa_abs, _taxa_abs_anterior), delta_color="inverse",
+        help="(Faltas + Atestados) ÷ dias apurados × 100. Variação em pontos percentuais contra o mês anterior.")
+    _abs_col2.metric("Taxa de faltas", _fmt_abs(_taxa_faltas),
+        delta=_delta_abs(_taxa_faltas, _taxa_faltas_anterior), delta_color="inverse")
+    _abs_col3.metric("Taxa de atestados", _fmt_abs(_taxa_atestados),
+        delta=_delta_abs(_taxa_atestados, _taxa_atestados_anterior), delta_color="inverse")
+    st.caption(
+        f"Comparativo: {_mes_anterior:02d}/{_ano_anterior}, dias 1 a {_dias_anterior:02d}. "
+        f"Absenteísmo anterior: {_fmt_abs(_taxa_abs_anterior)} | "
+        f"Faltas: {_fmt_abs(_taxa_faltas_anterior)} | "
+        f"Atestados: {_fmt_abs(_taxa_atestados_anterior)}. "
+        "Seta vermelha = aumento; verde = redução. "
+        "Utiliza a classificação operacional atual dos colaboradores."
+    )
+    if _abs_anterior_erro:
+        st.warning("Não foi possível consultar a frequência do mês anterior.")
     st.caption(f"Base: {_abs_dias_apurados} dias de trabalho apurados, {_abs_faltas} faltas e {_abs_atestados} atestados. Exclui folgas, desligamentos e dias pendentes. Inclui lançamentos ainda não salvos.")
 
 
