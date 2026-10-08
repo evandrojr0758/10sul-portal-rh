@@ -4318,6 +4318,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         cadastro_df["salario_base"] = pd.to_numeric(cadastro_df["salario_base"], errors="coerce").astype(float)
         for _campo_texto in ("funcao", "empresa", "classificacao_fechamento", "status", "frente", "equipe_revisao", "destra"):
             cadastro_df[_campo_texto] = cadastro_df[_campo_texto].fillna("").astype(str)
+        original_nome = {str(c["id"]): _nome_colaborador(c).strip().upper() for c in todos_cadastro}
         original_tipo = {str(c["id"]): str(c.get("tipo_contratacao") or "").upper() for c in todos_cadastro}
         original_classificacao = {str(c["id"]): _classificacao_colaborador(c) for c in todos_cadastro}
         original_empresa = {str(c["id"]): _empresa_colaborador(c, visual=True) for c in todos_cadastro}
@@ -4342,7 +4343,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
+            disabled=[c for c in cols_editor if c not in ("colaborador", "classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
@@ -4406,12 +4407,15 @@ with st.expander("👥 Cadastro de colaboradores"):
             nova_funcao = "" if pd.isna(funcao_val) else str(funcao_val or "").strip().upper()
             empresa_val = linha.get("empresa")
             nova_empresa = "" if pd.isna(empresa_val) else str(empresa_val or "").strip().upper()
+            novo_nome = str(linha.get("colaborador") or "").strip().upper()
             novo_tipo = str(linha.get("tipo_contratacao") or "").strip().upper()
             if novo_tipo not in ("CONTRATO", "SPOT"):
                 novo_tipo = ""
-            mudou = (novo_tipo != original_tipo.get(cid, "")) or (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
+            mudou = (novo_nome != original_nome.get(cid, "")) or (novo_tipo != original_tipo.get(cid, "")) or (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
             if mudou:
-                if novo_status == "INATIVO" and nova_dd is None:
+                if not novo_nome or (novo_nome != original_nome.get(cid, "") and any(_nome_colaborador(c).strip().upper() == novo_nome and str(c["id"]) != cid for c in (sb("GET", "rh_colaboradores", "select=id,colaborador") or []))):
+                    erros.append(str(linha.get("colaborador") or cid) + " (nome vazio ou duplicado)")
+                elif novo_status == "INATIVO" and nova_dd is None:
                     erros.append(str(linha.get("colaborador") or cid))
                 else:
                     alteracoes.append((linha, novo_status, nova_dd, novo_salario, nova_frente, nova_destra, nova_equipe))
@@ -4431,7 +4435,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                     for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": (lambda v: v if v in ("CONTRATO", "SPOT") else None)(str(linha.get("tipo_contratacao") or "").strip().upper())}, "return=minimal")
+                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"colaborador": str(linha.get("colaborador") or "").strip().upper(), "empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": (lambda v: v if v in ("CONTRATO", "SPOT") else None)(str(linha.get("tipo_contratacao") or "").strip().upper())}, "return=minimal")
                     _salvar_classificacoes_aracruz({
                         str(linha["id"]): str(linha["classificacao_fechamento"])
                         for linha, *_ in alteracoes
@@ -4443,6 +4447,32 @@ with st.expander("👥 Cadastro de colaboradores"):
                     st.error(f"Não foi possível atualizar o cadastro: {e}")
     else:
         st.info("Nenhum colaborador encontrado para o filtro selecionado.")
+
+    # Exclusão definitiva somente para cadastro sem registros relacionados.
+    with st.expander("🗑️ Excluir colaborador sem movimentação"):
+        st.warning("A exclusão é permanente. Colaboradores com frequência, ocorrências, DNA ou apuração de gratificação não podem ser excluídos.")
+        _opcoes_exclusao = {f"{_nome_colaborador(c)} (ID {c['id']})": c for c in todos_cadastro}
+        if _opcoes_exclusao:
+            _escolha_exclusao = st.selectbox("Colaborador para exclusão", [""] + list(_opcoes_exclusao), key="rh_excluir_escolha")
+            _confirmar_exclusao = st.checkbox("Confirmo a exclusão definitiva deste cadastro, caso não exista movimentação.", key="rh_excluir_confirmacao")
+            if st.button("🗑️ Excluir cadastro", disabled=not (_escolha_exclusao and _confirmar_exclusao), key="rh_excluir_executar"):
+                _registro_exclusao = _opcoes_exclusao[_escolha_exclusao]
+                _id_exclusao = int(_registro_exclusao["id"])
+                try:
+                    _tabelas_movimento = ["rh_frequencia", "rh_colaborador_ocorrencias", "rh_dna_mensal", "rh_gratificacao_apuracao"]
+                    _movimentos = []
+                    for _tabela in _tabelas_movimento:
+                        _encontrados = sb("GET", _tabela, f"select=*&colaborador_id=eq.{_id_exclusao}&limit=1") or []
+                        if _encontrados:
+                            _movimentos.append(_tabela)
+                    if _movimentos:
+                        st.error("Exclusão bloqueada: existem registros em " + ", ".join(_movimentos) + ". Desative o colaborador para preservar o histórico.")
+                    else:
+                        sb("DELETE", "rh_colaboradores", f"id=eq.{_id_exclusao}", prefer="return=minimal")
+                        st.success("Colaborador excluído do cadastro.")
+                        st.rerun()
+                except Exception as _erro_exclusao:
+                    st.error(f"Exclusão não realizada. Verifique outros vínculos no banco: {_erro_exclusao}")
 
 with st.expander("⚙️ Cadastro de ocorrências"):
     st.caption("Esses códigos alimentam as opções disponíveis na grade.")
