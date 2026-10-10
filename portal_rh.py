@@ -3973,6 +3973,53 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+@st.dialog("Resumo do Portal RH", width="large")
+def abrir_resumo_rh_compartilhamento():
+    import importlib
+    from zoneinfo import ZoneInfo
+    rh_share = importlib.reload(importlib.import_module("rh_share"))
+    inicio = f"{int(ano):04d}-{int(mes):02d}-01"
+    fim = f"{int(ano):04d}-{int(mes):02d}-{ultimo_visivel:02d}"
+    try:
+        ocorrencias_resumo = []
+        offset_resumo = 0
+        while True:
+            pagina_resumo = sb(
+                "GET", "rh_colaborador_ocorrencias",
+                f"select=id,colaborador_id,data,tipo&data=gte.{inicio}&data=lte.{fim}"
+                f"&order=id.asc&limit=1000&offset={offset_resumo}",
+            ) or []
+            ocorrencias_resumo.extend(pagina_resumo)
+            if len(pagina_resumo) < 1000:
+                break
+            offset_resumo += len(pagina_resumo)
+    except Exception:
+        ocorrencias_resumo = None
+        st.warning("Não foi possível consultar os desvios. Os demais indicadores estão disponíveis.")
+    resumo = rh_share.resumir(
+        colaboradores, editado.to_dict("records"), colunas_dia,
+        ocorrencias_resumo, inicio, fim,
+    )
+    rascunho = any(
+        _codigo_grade(editado.iloc[i].get(d)) != _codigo_grade(df.iloc[i].get(d))
+        for i in range(len(editado)) for d in colunas_dia
+    )
+    filtros = f"Empresa: {_filtro_empresa} • Classificação: {_filtro_status}"
+    if str(_busca_colaborador or "").strip():
+        filtros += f" • Busca: {_busca_colaborador}"
+    periodo = f"Período: 01 a {ultimo_visivel:02d}/{int(mes):02d}/{int(ano)}"
+    atualizado = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("Atualizado em %d/%m/%Y %H:%M • Brasília")
+    imagem = rh_share.gerar_imagem(resumo, periodo, filtros, atualizado, rascunho)
+    st.image(imagem, use_container_width=True)
+    rh_share.botao_compartilhar_imagem(imagem)
+    st.download_button(
+        "Baixar imagem PNG", data=imagem, mime="image/png",
+        file_name=f"Resumo_RH_{int(ano)}_{int(mes):02d}.png",
+        key="rh_resumo_download",
+    )
+    st.caption("O resumo inclui nomes do ranking. Escolha o contato ou grupo que deve receber.")
+
+
 with resumo_topo:
 
     _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
@@ -4036,6 +4083,8 @@ with resumo_topo:
         f'<div class="rh-grid rh-team">{_team_html}</div></section>',
         unsafe_allow_html=True,
     )
+    if st.button("📲 Compartilhar resumo no WhatsApp", key="rh_compartilhar_resumo"):
+        abrir_resumo_rh_compartilhamento()
     if _abs_anterior_erro:
         st.warning("Não foi possível consultar a frequência do mês anterior.")
 
@@ -4791,6 +4840,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
