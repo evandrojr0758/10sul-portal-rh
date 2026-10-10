@@ -2,3 +2,4 @@ streamlit-keyup
 openpyxl
 pandas
 reportlab
+Pillow>=10.0
