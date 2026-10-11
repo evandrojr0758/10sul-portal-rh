@@ -817,7 +817,10 @@ def tela_login():
     st.markdown("<div style='height:8vh'></div>", unsafe_allow_html=True)
     c1,c2,c3=st.columns([1,1.15,1])
     with c2:
-        st.markdown("## 👥 Portal RH — Aracruz")
+        if str(st.query_params.get("fechamento") or "").lower() == "cmc-bahia":
+            st.markdown("## Resumo Financeiro — CMC Bahia")
+        else:
+            st.markdown("## 👥 Portal RH — Aracruz")
         st.caption("10 Sul • Acesso restrito")
         with st.form("form_login_portal"):
             u=st.text_input("Usuário")
@@ -3485,6 +3488,15 @@ if _perfil_atual == "SEGURANCA":
     st.stop()
 if _perfil_atual not in ("RH", "ADMIN"):
     st.error("Seu perfil não possui acesso a este portal.")
+    st.stop()
+
+# Consulta da Central abre uma página dedicada antes de qualquer tela do RH.
+if str(st.query_params.get("fechamento") or "").lower() == "cmc-bahia":
+    if _perfil_atual != "ADMIN":
+        st.error("Seu perfil não possui acesso a este fechamento.")
+        st.stop()
+    st.link_button("← Voltar à Central 10 Sul", "https://central-10sul.peachycrown16.chatgpt.site/fechamentos.html")
+    tela_resumo_financeiro_cmc_bahia()
     st.stop()
 
 st.title("👥 Portal RH — Aracruz")
