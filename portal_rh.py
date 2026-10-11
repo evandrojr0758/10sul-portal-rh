@@ -2205,7 +2205,8 @@ def _salvar_fechamento_cmc(ano, mes):
             if not any(b.get("id") == _CMC_BUCKET for b in buckets):
                 _storage_cmc("POST", "bucket", {"id": _CMC_BUCKET, "name": _CMC_BUCKET, "public": False})
             st.session_state["cmc_storage_pronto"] = True
-        estado = {}
+        anterior = _storage_cmc("GET", f"object/{_CMC_BUCKET}/{ano}-{mes:02d}.json") or {}
+        estado = dict(anterior.get("estado") or {})
         for key in _chaves_cmc(ano, mes):
             if key in st.session_state:
                 value = st.session_state[key]
@@ -2214,8 +2215,11 @@ def _salvar_fechamento_cmc(ano, mes):
             if key in st.session_state:
                 estado[key] = st.session_state[key]
         base = st.session_state.get(f"cmc_base_{ano}_{mes}")
+        base_json = base.to_json(orient="split", date_format="iso") if base is not None and not base.empty else anterior.get("base")
+        if not base_json:
+            raise RuntimeError("A base do ponto ainda não está disponível para salvar esta competência.")
         payload = {"versao": 1, "ano": int(ano), "mes": int(mes), "estado": estado,
-                   "base": base.to_json(orient="split", date_format="iso") if base is not None else None,
+                   "base": base_json,
                    "atualizado": datetime.now().isoformat()}
         assinatura = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).replace(payload["atualizado"], "").encode()).hexdigest()
         if st.session_state.get(f"cmc_salvo_hash_{ano}_{mes}") != assinatura:
@@ -2231,7 +2235,7 @@ def _salvar_fechamento_cmc(ano, mes):
 def _carregar_fechamento_cmc(ano, mes):
     from io import StringIO
     marker = f"cmc_carregado_{ano}_{mes}"
-    if st.session_state.get(marker):
+    if st.session_state.get(marker) and f"cmc_base_{ano}_{mes}" in st.session_state:
         for key, value in st.session_state.get(f"cmc_estado_salvo_{ano}_{mes}", {}).items():
             if key not in st.session_state:
                 st.session_state[key] = pd.read_json(StringIO(value["dataframe"]), orient="split") if isinstance(value, dict) and "dataframe" in value else value
@@ -3182,11 +3186,19 @@ def tela_resumo_financeiro_cmc_bahia():
     ano = int(c2.selectbox('Ano do fechamento', range(2020, 2101), index=date.today().year-2020, key='cmc_fin_ano_consulta'))
     try:
         payload = _storage_cmc('GET', f'object/{_CMC_BUCKET}/{ano}-{mes:02d}.json')
-        if not payload or not payload.get('base'):
-            st.info(f'Não há fechamento salvo para {meses[mes-1]}/{ano}.')
-            return
-        estado = payload.get('estado', {})
-        base = pd.read_json(StringIO(payload['base']), orient='split', convert_dates=False)
+        if payload and payload.get('base'):
+            estado = payload.get('estado', {})
+            base = pd.read_json(StringIO(payload['base']), orient='split', convert_dates=False)
+        else:
+            base = st.session_state.get(f'cmc_base_{ano}_{mes}')
+            if base is None or base.empty:
+                st.info(f'A base do fechamento de {meses[mes-1]}/{ano} não está disponível. Retome esse fechamento no módulo de preparação do CMC Bahia.')
+                return
+            estado = dict((payload or {}).get('estado') or st.session_state.get(f'cmc_estado_salvo_{ano}_{mes}', {}))
+            for chave in _chaves_cmc(ano, mes) + ['cadastro_funcoes_cmc_bahia', 'cadastro_valores_cmc_bahia']:
+                if chave in st.session_state:
+                    estado[chave] = st.session_state[chave]
+            st.warning('Exibindo a base disponível nesta sessão. A base do ponto precisa ser salva no módulo de preparação para consulta em outros acessos.')
         resumo, dias = _resumo_cmc_salvo(base, ano, mes, estado=estado)
         if resumo.empty:
             st.info('Não há registros válidos para esta competência.')
