@@ -833,6 +833,8 @@ def tela_login():
                 dados=autenticar_usuario(u,pw)
                 if dados:
                     st.session_state["usuario_logado"]=dados
+                    if st.query_params.get("acesso_fechamentos"):
+                        st.session_state["acesso_fechamentos_autorizado"] = st.query_params["acesso_fechamentos"]
                     st.rerun()
                 else:
                     st.error("Usuário ou senha inválidos.")
@@ -3471,6 +3473,11 @@ except Exception:
     _qp_token = None
 if _qp_token:
     tela_publica_aprovacao_gratificacao(_qp_token)
+    st.stop()
+
+_acesso_fechamentos = st.query_params.get("acesso_fechamentos")
+if _acesso_fechamentos and st.session_state.get("acesso_fechamentos_autorizado") != _acesso_fechamentos:
+    tela_login()
     st.stop()
 
 if not st.session_state.get("usuario_logado"):
