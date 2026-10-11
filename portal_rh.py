@@ -2380,7 +2380,6 @@ def _gerar_png_resumo_cmc(linhas, mes_nome, ano, mes, dias_contabilizados, he50,
             for i,val in enumerate(vals):
                 d.rectangle((xs[i],y,xs[i+1],y+row_h),outline=grid,width=1); d.text((xs[i]+10,y+10),str(val),fill=dark,font=fn)
             y+=row_h
-        _salvar_fechamento_cmc(ano, mes)
         total_geral=total+t50+t50a+t100; total_faltas=faltas*valor_falta; total_liquido=total_geral-total_faltas
         y+=18
         d.text((30,y),"TOTAL COLABORADOR",fill=dark,font=fh); d.text((600,y),_fmt_qtd(sum(x[1] for x in linhas)),fill=dark,font=fh); d.text((1100,y),_fmt_brl(total_geral),fill=dark,font=fh); y+=45
