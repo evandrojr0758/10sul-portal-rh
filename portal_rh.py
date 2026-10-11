@@ -2417,8 +2417,7 @@ def _modal_email_cmc(png_bytes, mes_nome, ano, total_liquido):
     _abrir_email()
 
 
-def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
-    @st.dialog("Resumo Financeiro — CMC Bahia", width="large")
+def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados, inline=False):
     def _abrir():
         linhas=_resumo_financeiro_cmc(resumo)
         mes_nome=["","JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"][mes]
@@ -2477,7 +2476,10 @@ def _modal_resumo_financeiro_cmc(resumo, ano, mes, dias_contabilizados):
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         faltantes=[n for n in resumo["COLABORADOR"] if _nome_cmc(n) not in _funcoes_cmc_ativas()]
         if faltantes: st.warning("Função não cadastrada para: " + ", ".join(faltantes))
-    _abrir()
+    if inline:
+        _abrir()
+    else:
+        st.dialog("Resumo Financeiro — CMC Bahia", width="large")(_abrir)()
 
 def _normalizar_status_cmc(valor):
     if pd.isna(valor):
@@ -3092,6 +3094,61 @@ def _excel_cmc(matriz, ano, mes):
     _aba_financeiro_cmc(wb, resumo, ano, mes, dias_contabilizados)
     bio=BytesIO(); wb.save(bio); bio.seek(0); return bio.getvalue()
 
+def _resumo_cmc_salvo(base, ano, mes):
+    df = base.copy()
+    df['Dt. Ponto'] = pd.to_datetime(df['Dt. Ponto'], errors='coerce')
+    df = df[(df['Dt. Ponto'].dt.year == ano) & (df['Dt. Ponto'].dt.month == mes)].copy()
+    aprovadas = st.session_state.get(f'cmc_fa_aprovadas_{ano}_{mes}')
+    if aprovadas is not None:
+        ids = set(aprovadas)
+        for idx, row in df.iterrows():
+            if str(row.get('CODIGO') or '').strip().upper() == 'FA':
+                data = row['Dt. Ponto']
+                ident = f"{_nome_cmc(row.get('Nome'))}|{data.strftime('%Y-%m-%d') if pd.notna(data) else ''}"
+                if ident not in ids:
+                    df.at[idx, 'CODIGO'] = ''
+    matriz, _, _ = _montar_matriz_cmc(df)
+    if matriz.empty:
+        return matriz, 0
+    dias = [c for c in matriz.columns if str(c).isdigit()]
+    ajustes = st.session_state.get(f'cmc_matriz_ajustes_{ano}_{mes}', {})
+    for idx, row in matriz.iterrows():
+        for coluna, valor in ajustes.get(_nome_cmc(row['COLABORADOR']), {}).items():
+            if coluna in dias:
+                matriz.at[idx, coluna] = valor
+    return _resumo_matriz_cmc(matriz), len(dias)
+
+
+def tela_resumo_financeiro_cmc_bahia():
+    st.markdown('### Resumo Financeiro — CMC Bahia')
+    pendente = st.session_state.pop('cmc_email_pendente', None)
+    if pendente is not None:
+        _modal_email_cmc(*pendente)
+    meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+    ultimo = st.session_state.get('cmc_ultima_competencia', (date.today().year, date.today().month))
+    c1, c2 = st.columns(2)
+    mes = int(c1.selectbox('Mês do fechamento', range(1, 13), index=int(ultimo[1])-1, format_func=lambda m: meses[m-1], key='cmc_fin_mes'))
+    ano = int(c2.number_input('Ano do fechamento', min_value=2020, max_value=2100, value=int(ultimo[0]), step=1, key='cmc_fin_ano'))
+    if st.button('Importar / editar fechamento', key='cmc_fin_editar', use_container_width=True):
+        st.session_state['pagina_portal_rh'] = 'CMC_BAHIA'
+        st.session_state['cmc_retomada'] = (ano, mes)
+        st.query_params['fechamento'] = 'cmc-bahia-edicao'
+        st.rerun()
+    try:
+        _carregar_fechamento_cmc(ano, mes)
+        base = st.session_state.get(f'cmc_base_{ano}_{mes}')
+        if base is None or base.empty:
+            st.info(f'Não há fechamento salvo para {meses[mes-1]}/{ano}.')
+            return
+        resumo, dias = _resumo_cmc_salvo(base, ano, mes)
+        if resumo.empty:
+            st.info('Não há registros válidos para esta competência.')
+            return
+        _modal_resumo_financeiro_cmc(resumo, ano, mes, dias, inline=True)
+    except Exception as exc:
+        st.error(f'Não foi possível abrir o resumo financeiro. {exc}')
+
+
 def tela_fechamento_cmc_bahia():
     st.markdown("### 🏭 Fechamento CMC Bahia")
     # Abre o e-mail em uma execução completa, fora do diálogo financeiro.
@@ -3421,8 +3478,8 @@ cabecalho_sessao(mostrar_ajuda=True)
 _modulo_link = str(st.query_params.get("fechamento") or "").lower()
 if _modulo_link != st.session_state.get("fechamento_link_atual"):
     st.session_state["fechamento_link_atual"] = _modulo_link
-    st.session_state["pagina_portal_rh"] = {"cmc-bahia": "CMC_BAHIA", "tres-lagoas": "TRES_LAGOAS", "aracruz": "PRINCIPAL"}.get(_modulo_link, "PRINCIPAL")
-if _modulo_link in ("cmc-bahia", "tres-lagoas") and _perfil_atual != "ADMIN":
+    st.session_state["pagina_portal_rh"] = {"cmc-bahia": "CMC_FINANCEIRO", "cmc-bahia-edicao": "CMC_BAHIA", "tres-lagoas": "TRES_LAGOAS", "aracruz": "PRINCIPAL"}.get(_modulo_link, "PRINCIPAL")
+if _modulo_link in ("cmc-bahia", "cmc-bahia-edicao", "tres-lagoas") and _perfil_atual != "ADMIN":
     st.error("Este fechamento está disponível somente para ADMIN.")
     st.stop()
 if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "TRES_LAGOAS":
@@ -3434,19 +3491,22 @@ if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "TRE
     st.stop()
 
 # Módulo CMC Bahia: página exclusiva e disponível somente para ADMIN.
-if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "CMC_BAHIA":
+if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") in ("CMC_BAHIA", "CMC_FINANCEIRO"):
     if st.button("← Voltar ao Portal RH", key="voltar_portal_cmc_bahia"):
         st.session_state["pagina_portal_rh"] = "PRINCIPAL"
         st.query_params.pop("fechamento", None)
         st.rerun()
     st.markdown("---")
-    tela_fechamento_cmc_bahia()
+    if st.session_state.get("pagina_portal_rh") == "CMC_FINANCEIRO":
+        tela_resumo_financeiro_cmc_bahia()
+    else:
+        tela_fechamento_cmc_bahia()
     st.stop()
 
 if _perfil_atual == "ADMIN":
     if st.button("🏭 Fechamento CMC Bahia", key="abrir_cmc_bahia", type="primary"):
         st.session_state["pagina_portal_rh"] = "CMC_BAHIA"
-        st.query_params["fechamento"] = "cmc-bahia"
+        st.query_params["fechamento"] = "cmc-bahia-edicao"
         st.rerun()
     if st.button("Fechamento Três Lagoas", key="abrir_tres_lagoas"):
         st.session_state["pagina_portal_rh"] = "TRES_LAGOAS"
