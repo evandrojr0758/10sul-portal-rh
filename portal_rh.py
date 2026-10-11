@@ -3295,6 +3295,87 @@ def tela_fechamento_cmc_bahia():
     except Exception as e:
         st.error(f"Não foi possível processar o ponto eletrônico: {e}")
 
+def _totais_tres_lagoas(quantidade, valor, acrescimos, descontos):
+    from decimal import Decimal, ROUND_HALF_UP
+    def moeda(v):
+        return Decimal(str(v or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    base = int(quantidade) * moeda(valor)
+    acres = sum((moeda(l.get('valor')) for l in acrescimos), Decimal('0.00'))
+    desc = sum((moeda(l.get('valor')) for l in descontos), Decimal('0.00'))
+    return base, acres, desc, base + acres - desc
+
+
+def tela_fechamento_tres_lagoas():
+    st.markdown('### Fechamento Três Lagoas')
+    hoje_tl = date.today()
+    c1, c2 = st.columns(2)
+    mes_tl = int(c1.selectbox('Mês', range(1, 13), index=hoje_tl.month-1, key='tl_mes'))
+    ano_tl = int(c2.number_input('Ano', min_value=2020, max_value=2100, value=hoje_tl.year, step=1, key='tl_ano'))
+    prefixo = f'tl_{ano_tl}_{mes_tl:02d}'
+    bucket = 'rh-fechamentos-tres-lagoas'
+    caminho = f'object/{bucket}/{ano_tl}-{mes_tl:02d}.json'
+    if prefixo + '_carregado' not in st.session_state:
+        try:
+            salvo = _storage_cmc('GET', caminho) or {}
+        except Exception as exc:
+            st.error(f'Não foi possível carregar este fechamento. {exc}')
+            return
+        st.session_state[prefixo + '_quantidade'] = int(salvo.get('quantidade', 0))
+        st.session_state[prefixo + '_unitario'] = float(salvo.get('valor_equipamento', 0))
+        for tipo in ('acrescimos', 'descontos'):
+            linhas = salvo.get(tipo) or []
+            st.session_state[prefixo + '_' + tipo] = list(range(len(linhas)))
+            st.session_state[prefixo + '_' + tipo + '_proximo'] = len(linhas)
+            for i, linha in enumerate(linhas):
+                st.session_state[f'{prefixo}_{tipo}_{i}_valor'] = float(linha.get('valor', 0))
+                st.session_state[f'{prefixo}_{tipo}_{i}_obs'] = str(linha.get('observacao', ''))
+        st.session_state[prefixo + '_carregado'] = True
+    quantidade = st.number_input('Quantidade de equipamentos / compartimentos', min_value=0, step=1, key=prefixo + '_quantidade')
+    unitario = st.number_input('Valor por equipamento (R$)', min_value=0.0, step=0.01, format='%.2f', key=prefixo + '_unitario')
+    ajustes = {}
+    for tipo, titulo in (('acrescimos', 'Acréscimos'), ('descontos', 'Descontos')):
+        st.markdown(f'#### {titulo}')
+        chave = prefixo + '_' + tipo
+        ajustes[tipo] = []
+        for numero, i in enumerate(st.session_state[chave], 1):
+            st.markdown(f'**{titulo} — linha {numero}**')
+            observacao = st.text_input('Observação — o que é este valor?', key=f'{chave}_{i}_obs')
+            valor = st.number_input('Valor (R$)', min_value=0.0, step=0.01, format='%.2f', key=f'{chave}_{i}_valor')
+            ajustes[tipo].append({'observacao': observacao.strip(), 'valor': valor})
+            if st.button('Remover linha', key=f'{chave}_{i}_remover'):
+                st.session_state[chave] = [ident for ident in st.session_state[chave] if ident != i]
+                st.rerun()
+        if st.button(f'+ Adicionar {"acréscimo" if tipo == "acrescimos" else "desconto"}', key=chave + '_adicionar', use_container_width=True):
+            i = st.session_state[chave + '_proximo']
+            st.session_state[chave] = st.session_state[chave] + [i]
+            st.session_state[chave + '_proximo'] = i + 1
+            st.rerun()
+    base, acres, desc, total = _totais_tres_lagoas(quantidade, unitario, ajustes['acrescimos'], ajustes['descontos'])
+    st.markdown('#### Resumo do faturamento')
+    st.metric('Valor base', _fmt_brl(float(base)))
+    c1, c2 = st.columns(2)
+    c1.metric('Acréscimos', _fmt_brl(float(acres)))
+    c2.metric('Descontos', _fmt_brl(float(desc)))
+    st.metric('Total do fechamento', _fmt_brl(float(total)))
+    payload = {'versao': 1, 'ano': ano_tl, 'mes': mes_tl, 'quantidade': int(quantidade),
+               'valor_equipamento': unitario, 'acrescimos': ajustes['acrescimos'], 'descontos': ajustes['descontos']}
+    assinatura = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    try:
+        if st.session_state.get(prefixo + '_hash') != assinatura:
+            if not st.session_state.get('tl_storage_pronto'):
+                buckets = _storage_cmc('GET', 'bucket') or []
+                if not any(b.get('id') == bucket for b in buckets):
+                    _storage_cmc('POST', 'bucket', {'id': bucket, 'name': bucket, 'public': False})
+                st.session_state['tl_storage_pronto'] = True
+            _storage_cmc('POST', caminho, dict(payload, atualizado=datetime.now().isoformat()))
+            st.session_state[prefixo + '_hash'] = assinatura
+        st.caption('Fechamento salvo automaticamente por competência.')
+    except Exception as exc:
+        st.error(f'Este fechamento ainda não foi salvo. {exc}')
+    if any(l['valor'] > 0 and not l['observacao'] for linhas in ajustes.values() for l in linhas):
+        st.warning('Preencha a observação de cada acréscimo e desconto com valor informado.')
+
+
 # ==========================================================
 # LOGIN / ROTEAMENTO POR PERFIL
 # ==========================================================
@@ -3336,10 +3417,27 @@ st.markdown('<div class="rh-sub">10 Sul • Controle mensal de presença e ocorr
 # Assim não são capturados/empurrados pela área superior do Streamlit.
 cabecalho_sessao(mostrar_ajuda=True)
 
+# Links diretos dos fechamentos preservam a autenticação e o perfil ADMIN.
+_modulo_link = str(st.query_params.get("fechamento") or "").lower()
+if _modulo_link != st.session_state.get("fechamento_link_atual"):
+    st.session_state["fechamento_link_atual"] = _modulo_link
+    st.session_state["pagina_portal_rh"] = {"cmc-bahia": "CMC_BAHIA", "tres-lagoas": "TRES_LAGOAS", "aracruz": "PRINCIPAL"}.get(_modulo_link, "PRINCIPAL")
+if _modulo_link in ("cmc-bahia", "tres-lagoas") and _perfil_atual != "ADMIN":
+    st.error("Este fechamento está disponível somente para ADMIN.")
+    st.stop()
+if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "TRES_LAGOAS":
+    if st.button("← Voltar ao Portal RH", key="voltar_portal_tres_lagoas"):
+        st.session_state["pagina_portal_rh"] = "PRINCIPAL"
+        st.query_params.pop("fechamento", None)
+        st.rerun()
+    tela_fechamento_tres_lagoas()
+    st.stop()
+
 # Módulo CMC Bahia: página exclusiva e disponível somente para ADMIN.
 if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "CMC_BAHIA":
     if st.button("← Voltar ao Portal RH", key="voltar_portal_cmc_bahia"):
         st.session_state["pagina_portal_rh"] = "PRINCIPAL"
+        st.query_params.pop("fechamento", None)
         st.rerun()
     st.markdown("---")
     tela_fechamento_cmc_bahia()
@@ -3348,6 +3446,11 @@ if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "CMC
 if _perfil_atual == "ADMIN":
     if st.button("🏭 Fechamento CMC Bahia", key="abrir_cmc_bahia", type="primary"):
         st.session_state["pagina_portal_rh"] = "CMC_BAHIA"
+        st.query_params["fechamento"] = "cmc-bahia"
+        st.rerun()
+    if st.button("Fechamento Três Lagoas", key="abrir_tres_lagoas"):
+        st.session_state["pagina_portal_rh"] = "TRES_LAGOAS"
+        st.query_params["fechamento"] = "tres-lagoas"
         st.rerun()
 
 with st.expander("💰 Regras de Gratificação", expanded=False):
