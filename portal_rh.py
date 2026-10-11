@@ -3127,6 +3127,51 @@ def _resumo_cmc_salvo(base, ano, mes, estado=None):
     return _resumo_matriz_cmc(matriz), len(dias)
 
 
+def _html_consulta_cmc(linhas, mes_nome, ano, dias, he50, he50apos, he100, faltas, valor_falta):
+    extras = [('Hora extra 50%', he50, 96.54), ('Hora extra 50% após 01:28', he50apos, 96.54), ('Hora extra 100%', he100, 135.80)]
+    base = sum(l[3] for l in linhas)
+    total_he = sum(_horas_decimal(horas)*valor for _, horas, valor in extras)
+    desconto = faltas*valor_falta
+    total = base + total_he - desconto
+    def detalhe(rotulo, valor):
+        return f'<div class="cmc-linha"><span>{html.escape(str(rotulo))}</span><strong>{html.escape(str(valor))}</strong></div>'
+    cards = []
+    for funcao, quantidade, unitario, subtotal in linhas:
+        cards.append('<article class="cmc-card"><h3>' + html.escape(funcao) + '</h3>' +
+                     detalhe('Quantidade de colaboradores', _fmt_qtd(quantidade)) +
+                     detalhe('Valor mensal por colaborador', _fmt_brl(unitario)) +
+                     '<div class="cmc-subtotal">' + detalhe('Total por função', _fmt_brl(subtotal)) + '</div></article>')
+    horas_cards = []
+    for rotulo, horas, valor in extras:
+        horas_cards.append('<article class="cmc-card"><h3>' + html.escape(rotulo) + '</h3>' +
+                           detalhe('Quantidade de horas', horas) + detalhe('Valor por hora', _fmt_brl(valor)) +
+                           '<div class="cmc-subtotal">' + detalhe('Total', _fmt_brl(_horas_decimal(horas)*valor)) + '</div></article>')
+    return '''<style>
+    .block-container{padding-top:5rem!important;padding-bottom:3rem!important}
+    .cmc-consulta{font-family:system-ui,sans-serif;color:#15364b;font-size:16px;line-height:1.5;width:100%;box-sizing:border-box}
+    .cmc-consulta *{box-sizing:border-box}.cmc-total{background:#15364b;color:white;padding:22px;border-radius:16px;margin:12px 0 24px}
+    .cmc-total span{display:block;font-size:16px}.cmc-total strong{display:block;font-size:32px;line-height:1.25;margin:8px 0;overflow-wrap:anywhere}
+    .cmc-total small{font-size:15px;color:#d5e6ef}.cmc-consulta h2{font-size:21px;line-height:1.3;margin:26px 0 14px;color:#15364b}
+    .cmc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:14px}
+    .cmc-card{background:#fff;border:1px solid #d5e0e8;border-radius:14px;padding:18px;min-width:0}
+    .cmc-card h3{font-size:19px;color:#15364b;margin:0 0 14px;line-height:1.35}
+    .cmc-linha{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:10px 0}
+    .cmc-linha span{color:#526572;flex:1;min-width:0}.cmc-linha strong{color:#15364b;font-size:17px;text-align:right;overflow-wrap:anywhere;max-width:60%}
+    .cmc-subtotal{border-top:1px solid #d5e0e8;margin-top:14px;padding-top:4px}.cmc-subtotal strong{font-size:20px}
+    .cmc-desconto .cmc-linha strong{color:#b32424}.cmc-fechamento{background:#eef4f8}.cmc-fechamento .cmc-subtotal strong{font-size:25px}
+    @media(max-width:380px){.cmc-card{padding:15px}.cmc-linha{flex-wrap:wrap}.cmc-linha strong{max-width:100%}.cmc-total strong{font-size:28px}}
+    </style><section class="cmc-consulta">''' + \
+        '<div class="cmc-total"><span>Total do fechamento</span><strong>' + html.escape(_fmt_brl(total)) + \
+        '</strong><small>' + html.escape(f'{mes_nome} / {ano} • {dias} dias contabilizados') + '</small></div>' + \
+        '<h2>Valores por função</h2><div class="cmc-grid">' + ''.join(cards) + '</div>' + \
+        '<h2>Horas extras</h2><div class="cmc-grid">' + ''.join(horas_cards) + '</div>' + \
+        '<h2>Descontos</h2><article class="cmc-card cmc-desconto">' + detalhe('Quantidade de faltas', faltas) + \
+        detalhe('Valor por falta', _fmt_brl(valor_falta)) + detalhe('Desconto por faltas', _fmt_brl(desconto)) + '</article>' + \
+        '<h2>Resumo do faturamento</h2><article class="cmc-card cmc-fechamento">' + \
+        detalhe('Total por funções', _fmt_brl(base)) + detalhe('Horas extras', _fmt_brl(total_he)) + \
+        detalhe('Descontos', _fmt_brl(desconto)) + '<div class="cmc-subtotal">' + detalhe('Total', _fmt_brl(total)) + '</div></article></section>'
+
+
 def tela_resumo_financeiro_cmc_bahia():
     from io import StringIO
     st.markdown('### Resumo Financeiro — CMC Bahia')
@@ -3161,16 +3206,10 @@ def tela_resumo_financeiro_cmc_bahia():
         he100 = horas('cmc_he100', True)
         faltas = int(resumo['FALTAS'].sum())
         valor_falta = float(estado.get(f'cmc_vfalta_{ano}_{mes}', 307.21))
-        png, total = _gerar_png_resumo_cmc(linhas, meses[mes-1].upper(), ano, mes, dias, he50, he50apos, he100, 96.54, 135.80, faltas, valor_falta)
+        st.markdown(_html_consulta_cmc(linhas, meses[mes-1], ano, dias, he50, he50apos, he100, faltas, valor_falta), unsafe_allow_html=True)
+        png, _ = _gerar_png_resumo_cmc(linhas, meses[mes-1].upper(), ano, mes, dias, he50, he50apos, he100, 96.54, 135.80, faltas, valor_falta)
         if png:
-            st.image(png, use_container_width=True)
             st.download_button('Baixar resumo como imagem', data=png, file_name=f'FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.png', mime='image/png', use_container_width=True)
-        else:
-            st.dataframe(pd.DataFrame(linhas, columns=['Função', 'Quantidade', 'Valor mensal (R$)', 'Total (R$)']), hide_index=True, use_container_width=True)
-            st.write(f'Horas extras: 50% {he50} • 50% após 01:28 {he50apos} • 100% {he100}')
-            st.write(f'Faltas: {faltas} • desconto: {_fmt_brl(faltas*valor_falta)}')
-            total = sum(l[3] for l in linhas) + (_horas_decimal(he50)+_horas_decimal(he50apos))*96.54 + _horas_decimal(he100)*135.80 - faltas*valor_falta
-            st.metric('Total do fechamento', _fmt_brl(total))
     except Exception as exc:
         st.error(f'Não foi possível consultar o resumo financeiro. {exc}')
 
