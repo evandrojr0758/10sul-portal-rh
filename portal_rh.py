@@ -2218,7 +2218,7 @@ def _salvar_fechamento_cmc(ano, mes):
         base_json = base.to_json(orient="split", date_format="iso") if base is not None and not base.empty else anterior.get("base")
         if not base_json:
             raise RuntimeError("A base do ponto ainda não está disponível para salvar esta competência.")
-        payload = {"versao": 1, "ano": int(ano), "mes": int(mes), "estado": estado,
+        payload = {**anterior, "versao": anterior.get("versao", 1), "ano": int(ano), "mes": int(mes), "estado": estado,
                    "base": base_json,
                    "atualizado": datetime.now().isoformat()}
         assinatura = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).replace(payload["atualizado"], "").encode()).hexdigest()
@@ -3175,6 +3175,167 @@ def _html_consulta_cmc(linhas, mes_nome, ano, dias, he50, he50apos, he100, falta
         detalhe('Descontos', _fmt_brl(desconto)) + '<div class="cmc-subtotal">' + detalhe('Total', _fmt_brl(total)) + '</div></article></section>'
 
 
+def _ler_excel_oficial_cmc(conteudo):
+    """Restaura somente dados explícitos do Excel oficial, sem reapurar o financeiro."""
+    from openpyxl import load_workbook
+    from decimal import Decimal
+    import math
+    wb = load_workbook(BytesIO(conteudo), data_only=True)
+    if not {'RESUMO FINANCEIRO', 'EFETIVO'}.issubset(wb.sheetnames):
+        raise ValueError('Use o Excel oficial com as abas RESUMO FINANCEIRO e EFETIVO.')
+    ws = wb['RESUMO FINANCEIRO']
+    meses = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO']
+    titulo = str(ws['A2'].value or '').upper()
+    periodo = re.search(r'([A-ZÇ]+)\s*/\s*(20\d{2})', titulo)
+    if not periodo or periodo.group(1) not in meses:
+        raise ValueError('Não foi possível identificar a competência no resumo financeiro.')
+    ano, mes = int(periodo.group(2)), meses.index(periodo.group(1)) + 1
+
+    def numero(v, campo):
+        if v is None or isinstance(v, bool):
+            raise ValueError(f'Valor ausente em {campo}.')
+        n = float(v)
+        if not math.isfinite(n):
+            raise ValueError(f'Valor inválido em {campo}.')
+        return n
+
+    financeiro = {'ano': ano, 'mes': mes, 'periodo': str(ws['A2'].value), 'funcoes': [], 'horas': []}
+    for row in ws.iter_rows(min_row=4, values_only=True):
+        label = str(row[0] or '').strip().upper()
+        if label in ['MECANICO I', 'MECANICO II', 'SOLDADOR', 'BORRACHEIRO', 'ELETRICISTA']:
+            financeiro['funcoes'].append({'funcao': label, 'quantidade': numero(row[1], label),
+                'valor_unitario': numero(row[2], label), 'total': numero(row[3], label)})
+        elif label.startswith('HORA EXTRA '):
+            horas = str(row[1] or '00:00').strip()
+            if not re.fullmatch(r'\d+:[0-5]\d', horas):
+                raise ValueError(f'Quantidade de horas inválida em {label}.')
+            financeiro['horas'].append({'descricao': label, 'quantidade': horas,
+                'valor_unitario': numero(row[2], label), 'total': numero(row[3], label)})
+        elif label == 'FALTAS':
+            financeiro['faltas'] = int(numero(row[1], label))
+            financeiro['valor_falta'] = numero(row[2], label)
+            financeiro['desconto_faltas'] = numero(row[3], label)
+        elif label == 'TOTAL COLABORADOR':
+            financeiro['quantidade'] = numero(row[1], label)
+            financeiro['total_colaborador'] = numero(row[3], label)
+        elif label == 'TOTAL DO FECHAMENTO':
+            financeiro['total'] = numero(row[3], label)
+    if len(financeiro['funcoes']) != 5 or len(financeiro['horas']) != 3 or not all(k in financeiro for k in ['faltas', 'total', 'total_colaborador', 'desconto_faltas', 'quantidade']):
+        raise ValueError('O resumo financeiro está incompleto.')
+    esperado = sum(Decimal(str(r['total'])) for r in financeiro['funcoes'] + financeiro['horas']) + Decimal(str(financeiro['desconto_faltas']))
+    if abs(esperado - Decimal(str(financeiro['total']))) > Decimal('0.01'):
+        raise ValueError('Os totais do arquivo não conciliam. Nenhuma informação foi restaurada.')
+
+    efetivo = wb['EFETIVO']
+    cab = [str(c.value or '').strip() for c in efetivo[1]]
+    if cab[:2] != ['COLABORADOR', 'FUNÇÃO']:
+        raise ValueError('A grade EFETIVO não possui colaborador e função.')
+    dias = [(idx, int(c)) for idx, c in enumerate(cab) if c.isdigit()]
+    if not dias or len({d for _, d in dias}) != len(dias):
+        raise ValueError('Os dias da grade EFETIVO são inválidos.')
+    codigos = {'', 'OK', 'FO', 'FA', 'A', 'FE', 'LB', 'COMP'}
+    registros, funcoes, vistos = [], {}, set()
+    for row in efetivo.iter_rows(min_row=2, values_only=True):
+        if not row[0]:
+            continue
+        nome = _nome_cmc(row[0])
+        if nome in vistos:
+            raise ValueError(f'Colaborador duplicado no arquivo: {nome}.')
+        vistos.add(nome)
+        funcoes[nome] = str(row[1] or '').strip().upper()
+        for idx, dia in dias:
+            codigo = str(row[idx] or '').strip().upper()
+            if codigo not in codigos:
+                raise ValueError(f'Código de ponto inválido: {codigo}.')
+            registros.append({'Nome': nome, 'Dt. Ponto': datetime(ano, mes, dia), 'CODIGO': codigo})
+    if not registros:
+        raise ValueError('A grade EFETIVO está vazia.')
+    financeiro['dias'] = len(dias)
+    base = pd.DataFrame(registros)
+    if int((base['CODIGO'] == 'FA').sum()) != financeiro['faltas']:
+        raise ValueError('As faltas do resumo financeiro não conferem com a grade EFETIVO.')
+    if [r['descricao'] for r in financeiro['horas']] != ['HORA EXTRA 50%', 'HORA EXTRA 50% APÓS 01:28', 'HORA EXTRA 100%']:
+        raise ValueError('Os tipos de horas extras do resumo não foram reconhecidos.')
+    # O arquivo oficial já contém as escolhas da conferência. Não importar as HE
+    # novamente do ponto e não somar adicionais sobre os totais finais do Excel.
+    horas = financeiro['horas']
+    estado = {
+        'cadastro_funcoes_cmc_bahia': funcoes,
+        'cadastro_valores_cmc_bahia': {r['funcao']: r['valor_unitario'] for r in financeiro['funcoes']},
+        f'cmc_he50_{ano}_{mes}': horas[0]['quantidade'],
+        f'cmc_he50apos_{ano}_{mes}': horas[1]['quantidade'],
+        f'cmc_he100_{ano}_{mes}': horas[2]['quantidade'],
+        f'cmc_he50_manual_{ano}_{mes}': '00:00',
+        f'cmc_he100_manual_{ano}_{mes}': '00:00',
+        f'cmc_vfalta_{ano}_{mes}': financeiro['valor_falta'],
+    }
+    return {'versao': 2, 'ano': ano, 'mes': mes, 'estado': estado,
+        'base': base.to_json(orient='split', date_format='iso'),
+        'financeiro_oficial': financeiro, 'origem': 'Excel oficial restaurado',
+        'excel_oficial': base64.b64encode(conteudo).decode('ascii'),
+        'atualizado': datetime.now().isoformat()}
+
+
+def _mostrar_financeiro_oficial_cmc(financeiro, excel=None):
+    st.caption(financeiro['periodo'])
+    st.metric('Total do fechamento', _fmt_brl(financeiro['total']))
+    st.caption('Valores preservados do Excel oficial. Somente consulta.')
+    st.markdown('#### Valores por função')
+    for r in financeiro['funcoes']:
+        with st.container(border=True):
+            st.markdown(f"**{r['funcao']}**")
+            st.write(f"Quantidade: **{_fmt_qtd(r['quantidade'])}**")
+            st.write(f"Valor por colaborador: **{_fmt_brl(r['valor_unitario'])}**")
+            st.metric('Total da função', _fmt_brl(r['total']))
+    st.markdown('#### Horas extras')
+    for r in financeiro['horas']:
+        with st.container(border=True):
+            st.markdown(f"**{r['descricao']}**")
+            st.write(f"Quantidade: **{r['quantidade']}**")
+            st.write(f"Valor por hora: **{_fmt_brl(r['valor_unitario'])}**")
+            st.metric('Total de horas extras', _fmt_brl(r['total']))
+    with st.container(border=True):
+        st.markdown('**Faltas**')
+        st.write(f"Quantidade: **{financeiro['faltas']}**")
+        st.write(f"Valor por falta: **{_fmt_brl(financeiro['valor_falta'])}**")
+        st.metric('Desconto por faltas', _fmt_brl(financeiro['desconto_faltas']))
+    if excel:
+        st.download_button('Baixar Excel oficial', data=base64.b64decode(excel),
+            file_name=f"FECHAMENTO_CMC_OFICIAL_{financeiro['mes']:02d}_{financeiro['ano']}.xlsx",
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True)
+
+
+def _tela_restaurar_excel_cmc():
+    with st.expander('📂 Restaurar fechamento pelo Excel oficial'):
+        st.caption('Importa a grade conferida e preserva os valores do resumo financeiro.')
+        arquivo = st.file_uploader('Excel oficial do fechamento CMC Bahia', type=['xlsx'], key='cmc_excel_oficial_restore')
+        if arquivo is None:
+            return
+        try:
+            payload = _ler_excel_oficial_cmc(arquivo.getvalue())
+            ano, mes = payload['ano'], payload['mes']
+            st.write(f"Competência: **{mes:02d}/{ano}** • Total: **{_fmt_brl(payload['financeiro_oficial']['total'])}**")
+            if st.button('Restaurar este fechamento', type='primary', key='cmc_restaurar_oficial'):
+                buckets = _storage_cmc('GET', 'bucket') or []
+                if not any(b.get('id') == _CMC_BUCKET for b in buckets):
+                    _storage_cmc('POST', 'bucket', {'id': _CMC_BUCKET, 'name': _CMC_BUCKET, 'public': False})
+                caminho = f'object/{_CMC_BUCKET}/{ano}-{mes:02d}.json'
+                anterior = _storage_cmc('GET', caminho)
+                if anterior:
+                    backup = f'object/{_CMC_BUCKET}/backup/{ano}-{mes:02d}-{secrets.token_hex(8)}.json'
+                    _storage_cmc('POST', backup, anterior)
+                _storage_cmc('POST', caminho, payload)
+                gravado = _storage_cmc('GET', caminho)
+                if not gravado or gravado.get('base') != payload['base'] or gravado.get('financeiro_oficial') != payload['financeiro_oficial']:
+                    raise RuntimeError('Não foi possível confirmar a gravação do fechamento. Tente novamente.')
+                for key in _chaves_cmc(ano, mes) + ['cadastro_funcoes_cmc_bahia', 'cadastro_valores_cmc_bahia', f'cmc_base_{ano}_{mes}', f'cmc_estado_salvo_{ano}_{mes}', f'cmc_carregado_{ano}_{mes}', f'cmc_salvo_hash_{ano}_{mes}']:
+                    st.session_state.pop(key, None)
+                st.session_state['cmc_restauracao_ok'] = f'Fechamento {mes:02d}/{ano} restaurado e gravação confirmada.'
+                st.rerun()
+        except Exception as exc:
+            st.error(f'Não foi possível restaurar o Excel oficial: {exc}')
+
 def _consultar_historico_cmc(ano, mes):
     try:
         registros = sb('GET', 'rh_cmc_fechamentos', f'select=*&ano=eq.{int(ano)}&mes=eq.{int(mes)}&limit=1') or []
@@ -3217,6 +3378,9 @@ def tela_resumo_financeiro_cmc_bahia():
     ano = int(c2.selectbox('Ano do fechamento', range(2020, 2101), index=date.today().year-2020, key='cmc_fin_ano_consulta'))
     try:
         payload = _storage_cmc('GET', f'object/{_CMC_BUCKET}/{ano}-{mes:02d}.json')
+        if payload and payload.get('financeiro_oficial'):
+            _mostrar_financeiro_oficial_cmc(payload['financeiro_oficial'], payload.get('excel_oficial'))
+            return
         if not payload or not payload.get('base'):
             historico = _consultar_historico_cmc(ano, mes)
             if historico:
@@ -3278,6 +3442,11 @@ def tela_fechamento_cmc_bahia():
     if _cad2.button("💰 Valores por Função", use_container_width=True, key="abrir_valores_funcoes_cmc"):
         _modal_valores_funcoes_cmc()
     st.divider()
+
+    aviso_restauracao = st.session_state.pop("cmc_restauracao_ok", None)
+    if aviso_restauracao:
+        st.success(aviso_restauracao)
+    _tela_restaurar_excel_cmc()
 
     arquivos = st.file_uploader(
         "Planilha do ponto eletrônico — CMC Bahia",
