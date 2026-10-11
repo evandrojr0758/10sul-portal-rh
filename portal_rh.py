@@ -3177,7 +3177,14 @@ def _html_consulta_cmc(linhas, mes_nome, ano, dias, he50, he50apos, he100, falta
 
 
 def _consultar_historico_cmc(ano, mes):
-    registros = sb('GET', 'rh_cmc_fechamentos', f'select=*&ano=eq.{int(ano)}&mes=eq.{int(mes)}&limit=1') or []
+    try:
+        registros = sb('GET', 'rh_cmc_fechamentos', f'select=*&ano=eq.{int(ano)}&mes=eq.{int(mes)}&limit=1') or []
+    except Exception as exc:
+        # O histórico antigo é opcional: nem todas as instalações têm essa tabela.
+        # Outros erros devem continuar visíveis, sem serem tratados como ausência de dados.
+        if 'PGRST205' in str(exc) and 'rh_cmc_fechamentos' in str(exc):
+            return None
+        raise
     return registros[0] if registros else None
 
 
@@ -3222,7 +3229,7 @@ def tela_resumo_financeiro_cmc_bahia():
         else:
             base = st.session_state.get(f'cmc_base_{ano}_{mes}')
             if base is None or base.empty:
-                st.info(f'A base do fechamento de {meses[mes-1]}/{ano} não está disponível. Retome esse fechamento no módulo de preparação do CMC Bahia.')
+                st.info(f'Não há resumo financeiro salvo disponível para {meses[mes-1]}/{ano}. O relatório precisa ter sido salvo para aparecer nesta consulta.')
                 return
             estado = dict((payload or {}).get('estado') or st.session_state.get(f'cmc_estado_salvo_{ano}_{mes}', {}))
             for chave in _chaves_cmc(ano, mes) + ['cadastro_funcoes_cmc_bahia', 'cadastro_valores_cmc_bahia']:
