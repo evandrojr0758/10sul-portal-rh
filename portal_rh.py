@@ -3176,8 +3176,33 @@ def _html_consulta_cmc(linhas, mes_nome, ano, dias, he50, he50apos, he100, falta
         detalhe('Descontos', _fmt_brl(desconto)) + '<div class="cmc-subtotal">' + detalhe('Total', _fmt_brl(total)) + '</div></article></section>'
 
 
+def _consultar_historico_cmc(ano, mes):
+    registros = sb('GET', 'rh_cmc_fechamentos', f'select=*&ano=eq.{int(ano)}&mes=eq.{int(mes)}&limit=1') or []
+    return registros[0] if registros else None
+
+
+def _mostrar_historico_cmc(registro, mes_nome):
+    st.metric('Total do fechamento', _fmt_brl(float(registro.get('total_final') or 0)))
+    st.caption(f"{mes_nome} / {registro['ano']} • {int(registro.get('dias_contabilizados') or 0)} dias contabilizados")
+    st.markdown('#### Resumo financeiro salvo')
+    for titulo, chave in [('Valor dos colaboradores', 'valor_colaboradores'), ('Valor das horas extras', 'valor_horas_extras'), ('Desconto por faltas', 'desconto_faltas')]:
+        with st.container(border=True):
+            st.metric(titulo, _fmt_brl(float(registro.get(chave) or 0)))
+    with st.container(border=True):
+        st.markdown('**Horas extras e faltas**')
+        st.write(f"Hora extra 50%: **{_hhmm_cmc(int(registro.get('he50_minutos') or 0))}**")
+        st.write(f"Hora extra 100%: **{_hhmm_cmc(int(registro.get('he100_minutos') or 0))}**")
+        st.write(f"Quantidade de faltas: **{int(registro.get('faltas') or 0)}**")
+    with st.container(border=True):
+        st.markdown('**Colaboradores**')
+        st.write(f"Quantidade: **{int(registro.get('quantidade_colaboradores') or 0)}**")
+        st.write(f"Média contabilizada: **{_fmt_qtd(float(registro.get('media_colaboradores') or 0))}**")
+    st.caption('Valores do histórico registrado, sem recalcular ou alterar o fechamento.')
+
+
 def tela_resumo_financeiro_cmc_bahia():
     from io import StringIO
+    st.markdown('<style>.block-container{padding-top:5rem!important} [data-testid="stMetricValue"]{font-size:30px!important} [data-testid="stMetricLabel"]{font-size:17px!important}</style>', unsafe_allow_html=True)
     st.markdown('### Resumo Financeiro — CMC Bahia')
     st.caption('Somente consulta • dados do fechamento salvo')
     meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
@@ -3186,6 +3211,11 @@ def tela_resumo_financeiro_cmc_bahia():
     ano = int(c2.selectbox('Ano do fechamento', range(2020, 2101), index=date.today().year-2020, key='cmc_fin_ano_consulta'))
     try:
         payload = _storage_cmc('GET', f'object/{_CMC_BUCKET}/{ano}-{mes:02d}.json')
+        if not payload or not payload.get('base'):
+            historico = _consultar_historico_cmc(ano, mes)
+            if historico:
+                _mostrar_historico_cmc(historico, meses[mes-1])
+                return
         if payload and payload.get('base'):
             estado = payload.get('estado', {})
             base = pd.read_json(StringIO(payload['base']), orient='split', convert_dates=False)
