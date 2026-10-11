@@ -817,7 +817,9 @@ def tela_login():
     st.markdown("<div style='height:8vh'></div>", unsafe_allow_html=True)
     c1,c2,c3=st.columns([1,1.15,1])
     with c2:
-        if str(st.query_params.get("fechamento") or "").lower() == "cmc-bahia":
+        if str(st.query_params.get("fechamento") or "").lower() == "central":
+            st.markdown("## Fechamentos / Faturamento")
+        elif str(st.query_params.get("fechamento") or "").lower() == "cmc-bahia":
             st.markdown("## Resumo Financeiro — CMC Bahia")
         else:
             st.markdown("## 👥 Portal RH — Aracruz")
@@ -3490,12 +3492,31 @@ if _perfil_atual not in ("RH", "ADMIN"):
     st.error("Seu perfil não possui acesso a este portal.")
     st.stop()
 
+# O menu de fechamentos só aparece depois da autenticação.
+if str(st.query_params.get("fechamento") or "").lower() == "central":
+    if _perfil_atual != "ADMIN":
+        st.error("Seu perfil não possui acesso aos fechamentos.")
+        st.stop()
+    st.title("Fechamentos / Faturamento")
+    st.caption("10 Sul • Acesso autorizado")
+    st.link_button("← Voltar à Central 10 Sul", "https://central-10sul.peachycrown16.chatgpt.site/")
+    for rotulo, destino in (("FECHAMENTO CMC BAHIA", "cmc-bahia"), ("FECHAMENTO ARACRUZ", "aracruz"), ("FECHAMENTO TRÊS LAGOAS", "tres-lagoas")):
+        if st.button(rotulo, key="menu_fechamento_" + destino, use_container_width=True, type="primary"):
+            st.query_params["fechamento"] = destino
+            st.rerun()
+    if st.button("Sair dos fechamentos", key="sair_fechamentos", use_container_width=True):
+        st.session_state.pop("usuario_logado", None)
+        st.rerun()
+    st.stop()
+
 # Consulta da Central abre uma página dedicada antes de qualquer tela do RH.
 if str(st.query_params.get("fechamento") or "").lower() == "cmc-bahia":
     if _perfil_atual != "ADMIN":
         st.error("Seu perfil não possui acesso a este fechamento.")
         st.stop()
-    st.link_button("← Voltar à Central 10 Sul", "https://central-10sul.peachycrown16.chatgpt.site/fechamentos.html")
+    if st.button("← Voltar aos Fechamentos", key="consulta_cmc_voltar_fechamentos"):
+        st.query_params["fechamento"] = "central"
+        st.rerun()
     tela_resumo_financeiro_cmc_bahia()
     st.stop()
 
