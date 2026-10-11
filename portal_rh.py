@@ -3094,11 +3094,12 @@ def _excel_cmc(matriz, ano, mes):
     _aba_financeiro_cmc(wb, resumo, ano, mes, dias_contabilizados)
     bio=BytesIO(); wb.save(bio); bio.seek(0); return bio.getvalue()
 
-def _resumo_cmc_salvo(base, ano, mes):
+def _resumo_cmc_salvo(base, ano, mes, estado=None):
+    estado = st.session_state if estado is None else estado
     df = base.copy()
     df['Dt. Ponto'] = pd.to_datetime(df['Dt. Ponto'], errors='coerce')
     df = df[(df['Dt. Ponto'].dt.year == ano) & (df['Dt. Ponto'].dt.month == mes)].copy()
-    aprovadas = st.session_state.get(f'cmc_fa_aprovadas_{ano}_{mes}')
+    aprovadas = estado.get(f'cmc_fa_aprovadas_{ano}_{mes}')
     if aprovadas is not None:
         ids = set(aprovadas)
         for idx, row in df.iterrows():
@@ -3111,7 +3112,7 @@ def _resumo_cmc_salvo(base, ano, mes):
     if matriz.empty:
         return matriz, 0
     dias = [c for c in matriz.columns if str(c).isdigit()]
-    ajustes = st.session_state.get(f'cmc_matriz_ajustes_{ano}_{mes}', {})
+    ajustes = estado.get(f'cmc_matriz_ajustes_{ano}_{mes}', {})
     for idx, row in matriz.iterrows():
         for coluna, valor in ajustes.get(_nome_cmc(row['COLABORADOR']), {}).items():
             if coluna in dias:
@@ -3120,33 +3121,52 @@ def _resumo_cmc_salvo(base, ano, mes):
 
 
 def tela_resumo_financeiro_cmc_bahia():
+    from io import StringIO
     st.markdown('### Resumo Financeiro — CMC Bahia')
-    pendente = st.session_state.pop('cmc_email_pendente', None)
-    if pendente is not None:
-        _modal_email_cmc(*pendente)
+    st.caption('Somente consulta • dados do fechamento salvo')
     meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
-    ultimo = st.session_state.get('cmc_ultima_competencia', (date.today().year, date.today().month))
     c1, c2 = st.columns(2)
-    mes = int(c1.selectbox('Mês do fechamento', range(1, 13), index=int(ultimo[1])-1, format_func=lambda m: meses[m-1], key='cmc_fin_mes'))
-    ano = int(c2.number_input('Ano do fechamento', min_value=2020, max_value=2100, value=int(ultimo[0]), step=1, key='cmc_fin_ano'))
-    if st.button('Importar / editar fechamento', key='cmc_fin_editar', use_container_width=True):
-        st.session_state['pagina_portal_rh'] = 'CMC_BAHIA'
-        st.session_state['cmc_retomada'] = (ano, mes)
-        st.query_params['fechamento'] = 'cmc-bahia-edicao'
-        st.rerun()
+    mes = int(c1.selectbox('Mês do fechamento', range(1, 13), index=date.today().month-1, format_func=lambda m: meses[m-1], key='cmc_fin_mes'))
+    ano = int(c2.selectbox('Ano do fechamento', range(2020, 2101), index=date.today().year-2020, key='cmc_fin_ano_consulta'))
     try:
-        _carregar_fechamento_cmc(ano, mes)
-        base = st.session_state.get(f'cmc_base_{ano}_{mes}')
-        if base is None or base.empty:
+        payload = _storage_cmc('GET', f'object/{_CMC_BUCKET}/{ano}-{mes:02d}.json')
+        if not payload or not payload.get('base'):
             st.info(f'Não há fechamento salvo para {meses[mes-1]}/{ano}.')
             return
-        resumo, dias = _resumo_cmc_salvo(base, ano, mes)
+        estado = payload.get('estado', {})
+        base = pd.read_json(StringIO(payload['base']), orient='split', convert_dates=False)
+        resumo, dias = _resumo_cmc_salvo(base, ano, mes, estado=estado)
         if resumo.empty:
             st.info('Não há registros válidos para esta competência.')
             return
-        _modal_resumo_financeiro_cmc(resumo, ano, mes, dias, inline=True)
+        funcoes = estado.get('cadastro_funcoes_cmc_bahia', _FUNCOES_CMC)
+        valores = estado.get('cadastro_valores_cmc_bahia', _VALORES_CMC)
+        grupos = resumo.assign(FUNCAO=resumo['COLABORADOR'].map(lambda n: funcoes.get(_nome_cmc(n), 'NÃO CADASTRADA'))).groupby('FUNCAO')['MÉDIA CONTABILIZADA'].sum().to_dict()
+        linhas = [(f, float(grupos.get(f, 0)), float(valores.get(f, 0)), float(grupos.get(f, 0))*float(valores.get(f, 0))) for f in ['MECANICO I', 'MECANICO II', 'SOLDADOR', 'BORRACHEIRO', 'ELETRICISTA']]
+        def horas(prefixo, adicional=False):
+            valor = str(estado.get(f'{prefixo}_{ano}_{mes}', '00:00'))
+            if adicional:
+                manual = str(estado.get(f'{prefixo}_manual_{ano}_{mes}', '00:00'))
+                valor = _hhmm_cmc(round((_horas_decimal(valor)+_horas_decimal(manual))*60))
+            return valor
+        he50 = horas('cmc_he50', True)
+        he50apos = horas('cmc_he50apos')
+        he100 = horas('cmc_he100', True)
+        faltas = int(resumo['FALTAS'].sum())
+        valor_falta = float(estado.get(f'cmc_vfalta_{ano}_{mes}', 307.21))
+        png, total = _gerar_png_resumo_cmc(linhas, meses[mes-1].upper(), ano, mes, dias, he50, he50apos, he100, 96.54, 135.80, faltas, valor_falta)
+        if png:
+            st.image(png, use_container_width=True)
+            st.download_button('Baixar resumo como imagem', data=png, file_name=f'FECHAMENTO_CMC_BAHIA_{mes:02d}_{ano}.png', mime='image/png', use_container_width=True)
+        else:
+            st.dataframe(pd.DataFrame(linhas, columns=['Função', 'Quantidade', 'Valor mensal (R$)', 'Total (R$)']), hide_index=True, use_container_width=True)
+            st.write(f'Horas extras: 50% {he50} • 50% após 01:28 {he50apos} • 100% {he100}')
+            st.write(f'Faltas: {faltas} • desconto: {_fmt_brl(faltas*valor_falta)}')
+            total = sum(l[3] for l in linhas) + (_horas_decimal(he50)+_horas_decimal(he50apos))*96.54 + _horas_decimal(he100)*135.80 - faltas*valor_falta
+            st.metric('Total do fechamento', _fmt_brl(total))
     except Exception as exc:
-        st.error(f'Não foi possível abrir o resumo financeiro. {exc}')
+        st.error(f'Não foi possível consultar o resumo financeiro. {exc}')
+
 
 
 def tela_fechamento_cmc_bahia():
