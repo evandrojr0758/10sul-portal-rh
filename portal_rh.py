@@ -4856,7 +4856,7 @@ if alteracoes:
     # A alteração do editor já provoca rerun. Não é necessário clicar em Salvar.
     # Após erro, aguarda tentativa explícita para não repetir chamadas indefinidamente.
     if _pronto_auto and (not _erro_auto or _tentar_novamente):
-        _salvar_grade_slot.info("⏳ Salvando automaticamente...")
+        _salvar_grade_slot.caption("⏳ Salvando...")
         _gravados = []
         try:
             for i, cid, dia, antes, depois in alteracoes:
@@ -4900,9 +4900,14 @@ if alteracoes:
                 f"✅ Salvo automaticamente às {datetime.now().strftime('%H:%M:%S')} "
                 f"— {len(_gravados)} lançamento(s)."
             )
-            st.session_state.pop(_draft_key, None)
+            # Atualiza a base local sem uma segunda recarga da página.
+            # O nonce aplica a nova base na próxima interação do usuário.
+            st.session_state[_draft_key] = editado.copy()
+            st.session_state[_fp_key] = hashlib.sha256(
+                df.fillna("").astype(str).to_csv(index=False).encode("utf-8")
+            ).hexdigest()
             st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
-            st.rerun()
+            _salvar_grade_slot.caption(st.session_state[_auto_sucesso_key])
         except Exception:
             st.session_state[_auto_erro_key] = True
             st.session_state.pop(_auto_sucesso_key, None)
