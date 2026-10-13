@@ -1321,7 +1321,7 @@ def tela_apuracao_gratificacao():
         st.info(
             "ℹ️ A apuração considera os lançamentos **salvos no RH**. "
             "Se você acabou de trocar FALTA por ATESTADO na frequência, confirme a alteração com a senha/motivo "
-            "e clique em **💾 Salvar alterações** antes de conferir a gratificação."
+            "e aguarde a indicação **Salvo automaticamente** antes de conferir a gratificação."
         )
 
     faltas={}; atest={}; atest_sem_classificacao={}
@@ -1930,7 +1930,7 @@ Cada coluna numerada representa um **dia do mês**. Selecione a ocorrência corr
 
 - 🟧 **PENDENTE**: dia já disponível e ainda sem lançamento.
 - **DEM**: colaborador demitido; aplicado automaticamente a partir do dia seguinte à data de desligamento e não entra nos indicadores.
-- 🟧 **Alterado / não salvo**: lançamento feito na tela, mas ainda aguardando o botão **Salvar alterações**.
+- 🟧 **Alterado / não salvo**: lançamento aguardando confirmação obrigatória ou nova tentativa após falha de gravação.
 - 🟦 **Salvo**: lançamento já gravado no sistema.
 - Dias futuros permanecem sem cobrança de preenchimento.
 
@@ -1938,7 +1938,7 @@ Cada coluna numerada representa um **dia do mês**. Selecione a ocorrência corr
 Ao selecionar **LB** ou **COMP**, o sistema abre imediatamente uma janela de **observação obrigatória**. O lançamento somente é confirmado depois de preencher a informação exigida e clicar em **Confirmar observação**. Se a janela for fechada sem confirmar, o lançamento não deve permanecer.
 
 ### 5. Salvamento e alterações posteriores
-Use **Salvar alterações** para gravar o que foi preenchido. É permitido salvar mesmo que ainda existam células pendentes, para que o RH possa continuar o trabalho depois. Depois que um lançamento estiver salvo, qualquer alteração exige **senha de autorização** e **motivo da alteração**, preservando o controle do histórico.
+O **salvamento automático** grava cada status após as confirmações obrigatórias. Aguarde **Salvo automaticamente** antes de sair. Células ainda não preenchidas podem ser concluídas depois; se houver erro, use **Tentar salvar novamente**. Depois que um lançamento estiver salvo, qualquer alteração exige **senha de autorização** e **motivo da alteração**, preservando o controle do histórico.
 
 ### 6. Análises de Frequência
 Abra **📊 Análises de Frequência** para consultar o resumo por função e o gráfico comparativo de **Faltas x Atestados por colaborador**.
@@ -4202,7 +4202,7 @@ if _cancelar:
 # a fonte de verdade. Assim, registro já persistido nunca perde a trava de edição.
 _base_serializada = df.fillna("").astype(str).to_csv(index=False)
 _base_fingerprint = hashlib.sha256(_base_serializada.encode("utf-8")).hexdigest()
-_fp_key = f"rh_grade_base_fp_{_periodo_key}"
+_fp_key = f"rh_grade_base_fp_{_periodo_key}_{_escopo_hash}"
 _base_editor = st.session_state.get(_draft_key)
 if (
     not isinstance(_base_editor, pd.DataFrame)
@@ -4226,9 +4226,16 @@ editado = st.data_editor(
 # Mantém o que está visualmente na grade como rascunho oficial.
 st.session_state[_draft_key] = editado.copy()
 
-# O botão de salvamento fica sempre visível logo abaixo da grade.
-# Ele é preenchido mais abaixo, depois que o sistema calcula as alterações e validações.
+# Feedback junto à grade; só informa sucesso após a resposta do banco.
 _salvar_grade_slot = st.empty()
+_auto_erro_key = f"rh_autosave_erro_{_periodo_key}_{_escopo_hash}"
+_auto_sucesso_key = f"rh_autosave_sucesso_{_periodo_key}_{_escopo_hash}"
+if st.session_state.get(_auto_erro_key):
+    _salvar_grade_slot.error("❌ Há lançamentos não salvos. Tente novamente antes de sair desta tela.")
+elif st.session_state.get(_auto_sucesso_key):
+    _salvar_grade_slot.success(st.session_state[_auto_sucesso_key])
+else:
+    _salvar_grade_slot.caption("💾 Salvamento automático ativo. Cada status é gravado após as confirmações obrigatórias.")
 
 # Conta diretamente o que está aparecendo na grade, inclusive alterações ainda não salvas.
 contagens = {"FA": 0, "A": 0, "FO": 0, "OK": 0, "LB": 0, "COMP": 0}
@@ -4639,11 +4646,7 @@ for i, cid in enumerate(ids):
             alteracoes.append((i, cid, dia, antes, depois))
 
 if alteracoes:
-    st.markdown("#### Alterações pendentes")
-    st.warning(
-        f"⚠️ Existem **{len(alteracoes)} alteração(ões) ainda não gravada(s)**. "
-        "Enquanto não clicar em **💾 Salvar alterações**, relatórios e a tela de Gratificação continuarão usando o valor anterior salvo no banco."
-    )
+    st.caption(f"{len(alteracoes)} lançamento(s) aguardando gravação ou confirmação obrigatória.")
 
     # Registros que já existem no Supabase são consolidados. Qualquer edição deles
     # exige a senha administrativa, inclusive após F5 ou em outro computador.
@@ -4838,40 +4841,23 @@ if alteracoes:
     if pendentes_obs and not pode_salvar and not modal_aberto:
         st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
-    if _salvar_grade_slot.button("💾 Salvar alterações", type="primary", use_container_width=True, disabled=(not pode_salvar) or bool(edicoes_salvas), key=f"rh_salvar_grade_{int(ano)}_{mes}"):
-        import time
-
-        # Feedback central durante o processamento do salvamento.
-        _feedback_salvar = st.empty()
-        _feedback_salvar.markdown(
-            """
-            <div style="position:fixed;inset:0;background:rgba(0,0,0,.20);z-index:999998;"></div>
-            <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-                        z-index:999999;background:white;border-radius:14px;padding:26px 42px;
-                        box-shadow:0 12px 40px rgba(0,0,0,.25);font-size:24px;font-weight:700;
-                        text-align:center;min-width:300px;">
-                ⏳ Salvando...
-            </div>
-            """,
-            unsafe_allow_html=True,
+    _pronto_auto = pode_salvar and not edicoes_salvas
+    _erro_auto = st.session_state.get(_auto_erro_key)
+    _tentar_novamente = False
+    if _erro_auto:
+        st.error("Não foi possível concluir a gravação. Os lançamentos pendentes continuam nesta tela.")
+        _tentar_novamente = st.button(
+            "💾 Tentar salvar novamente", type="primary", use_container_width=True,
+            disabled=not _pronto_auto, key=f"rh_retry_{_periodo_key}_{_escopo_hash}",
         )
+    if not _pronto_auto:
+        _salvar_grade_slot.warning("⏳ Aguardando a confirmação obrigatória para salvar.")
 
-        # Células vazias geram ALERTA, mas não bloqueiam o salvamento parcial.
-        # Dias futuros não entram porque a grade contém somente até ultimo_visivel.
-        celulas_vazias = []
-        for i, cid in enumerate(ids):
-            nome_colab = str(editado.iloc[i]["COLABORADOR"] or "").strip()
-            empresa_colab = str(editado.iloc[i].get("EMPRESA", "") or "").strip()
-            for dia_check in range(1, ultimo_visivel + 1):
-                col_check = f"{dia_check:02d}"
-                valor_check = _codigo_grade(editado.iloc[i][col_check])
-                if not valor_check:
-                    celulas_vazias.append({
-                        "COLABORADOR": nome_colab,
-                        "EMPRESA": empresa_colab,
-                        "DIA": col_check,
-                    })
-
+    # A alteração do editor já provoca rerun. Não é necessário clicar em Salvar.
+    # Após erro, aguarda tentativa explícita para não repetir chamadas indefinidamente.
+    if _pronto_auto and (not _erro_auto or _tentar_novamente):
+        _salvar_grade_slot.info("⏳ Salvando automaticamente...")
+        _gravados = []
         try:
             for i, cid, dia, antes, depois in alteracoes:
                 data_dia = date(int(ano), mes, dia)
@@ -4900,68 +4886,38 @@ if alteracoes:
                     trilha = f"ALTERAÇÃO {antes or 'PENDENTE'} -> {depois or 'PENDENTE'} | MOTIVO: {motivo_ed}"
                     obs = f"{obs} | {trilha}".strip(" |") if obs else trilha
                 salvar_frequencia(cid, data_dia, depois, ocorrencia_id_por_codigo, obs, responsavel)
+                _gravados.append((i, cid, dia, antes, depois))
+                # Confirmed cells become the new base even if a later request fails.
+                df.at[i, f"{dia:02d}"] = depois or PENDENTE_VISUAL
+                st.session_state.rh_edicoes_autorizadas.discard(chave_ed)
+                st.session_state.rh_motivos_edicao.pop(chave_ed, None)
+                st.session_state.rh_observacoes_pendentes.pop(chave_ed, None)
+                st.session_state.rh_responsaveis_pendentes.pop(chave_ed, None)
+                st.session_state.rh_atestados_periodo.pop(chave_ed, None)
 
-            for _, cid, dia, _, _ in pendentes_obs:
-                chave = f"{cid}_{int(ano)}_{mes}_{dia}"
-                st.session_state.rh_observacoes_pendentes.pop(chave, None)
-                st.session_state.rh_responsaveis_pendentes.pop(chave, None)
-
-            # A autorização vale somente para esta edição. Depois de salvar,
-            # uma nova alteração do mesmo registro exigirá a senha novamente.
-            for _, cid, dia, _, _ in alteracoes:
-                st.session_state.rh_edicoes_autorizadas.discard(f"{cid}_{int(ano)}_{mes}_{dia}")
-                st.session_state.rh_motivos_edicao.pop(f"{cid}_{int(ano)}_{mes}_{dia}", None)
-
-            # Guarda o resultado para aparecer depois do rerun. O salvamento é permitido
-            # mesmo com pendências; as células vazias permanecem para preenchimento posterior.
-            st.session_state[_aviso_pendencias_key] = {
-                "salvos": len(alteracoes),
-                "qtd_pendencias": len(celulas_vazias),
-            }
+            st.session_state.pop(_auto_erro_key, None)
+            st.session_state[_auto_sucesso_key] = (
+                f"✅ Salvo automaticamente às {datetime.now().strftime('%H:%M:%S')} "
+                f"— {len(_gravados)} lançamento(s)."
+            )
             st.session_state.pop(_draft_key, None)
             st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
-
-            _feedback_salvar.markdown(
-                """
-                <div style="position:fixed;inset:0;background:rgba(0,0,0,.20);z-index:999998;"></div>
-                <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-                            z-index:999999;background:white;border-radius:14px;padding:26px 42px;
-                            box-shadow:0 12px 40px rgba(0,0,0,.25);font-size:24px;font-weight:700;
-                            text-align:center;min-width:390px;color:#188038;">
-                    ✅ Registro efetuado com sucesso!
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(1.8)
             st.rerun()
-        except Exception as e:
-            _feedback_salvar.markdown(
-                f"""
-                <div style="position:fixed;inset:0;background:rgba(0,0,0,.20);z-index:999998;"></div>
-                <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-                            z-index:999999;background:white;border-radius:14px;padding:26px 42px;
-                            box-shadow:0 12px 40px rgba(0,0,0,.25);font-size:21px;font-weight:700;
-                            text-align:center;min-width:390px;color:#c62828;">
-                    ❌ Erro ao salvar. Tente novamente.<br>
-                    <span style="font-size:13px;font-weight:400;color:#555;">{str(e)}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(2.5)
-            _feedback_salvar.empty()
+        except Exception:
+            st.session_state[_auto_erro_key] = True
+            st.session_state.pop(_auto_sucesso_key, None)
+            # Preserve the draft and acknowledge partial success. Next rerun compares
+            # only the remaining cells, without asking again to authorize saved cells.
+            st.session_state[_draft_key] = editado.copy()
+            st.session_state[_fp_key] = hashlib.sha256(
+                df.fillna("").astype(str).to_csv(index=False).encode("utf-8")
+            ).hexdigest()
+            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
+            st.rerun()
 
-# Mantém o botão visível mesmo quando ainda não há alteração pendente.
-# Assim o RH sempre sabe onde salvar; ele habilita automaticamente ao editar a grade.
 if not alteracoes:
-    _salvar_grade_slot.button(
-        "💾 Salvar alterações",
-        type="primary",
-        use_container_width=True,
-        disabled=True,
-        key=f"rh_salvar_grade_sem_alt_{int(ano)}_{mes}",
-    )
+    st.session_state.pop(_auto_erro_key, None)
+
 
 with st.expander("📋 Cadastro de funções", expanded=False):
     try:
@@ -5319,6 +5275,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
