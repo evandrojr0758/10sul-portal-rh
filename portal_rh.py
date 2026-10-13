@@ -702,21 +702,113 @@ TIPOS_OCORRENCIA_COLABORADOR = [
 
 def ler_ocorrencias_colaborador(colaborador_id):
     params = (
-        "select=id,colaborador_id,data,tipo,descricao,registrado_por,criado_em"
+        "select=id,colaborador_id,data,tipo,descricao,registrado_por,criado_em,anexos"
         f"&colaborador_id=eq.{int(colaborador_id)}"
         "&order=data.desc,criado_em.desc"
     )
     return sb("GET", "rh_colaborador_ocorrencias", params) or []
 
 
-def salvar_ocorrencia_colaborador(colaborador_id, data_ocorrencia, tipo, descricao, registrado_por):
+_RH_OC_BUCKET = "rh-ocorrencias-anexos"
+_RH_OC_LIMITE = 10 * 1024 * 1024
+
+
+def _validar_anexo_ocorrencia(arquivo):
+    nome = os.path.basename(str(arquivo.name).replace("\\", "/"))
+    dados = arquivo.getvalue()
+    ext = os.path.splitext(nome)[1].lower()
+    tipos = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+             ".png": "image/png", ".webp": "image/webp"}
+    if ext not in tipos:
+        raise ValueError("Anexe apenas PDF ou foto JPG, PNG ou WEBP.")
+    if not dados or len(dados) > _RH_OC_LIMITE:
+        raise ValueError(f"{nome}: o arquivo deve ter conteúdo e no máximo 10 MB.")
+    valido = (
+        (ext == ".pdf" and b"%PDF-" in dados[:1024])
+        or (ext in (".jpg", ".jpeg") and dados.startswith(b"\xff\xd8\xff"))
+        or (ext == ".png" and dados.startswith(b"\x89PNG\r\n\x1a\n"))
+        or (ext == ".webp" and dados[:4] == b"RIFF" and dados[8:12] == b"WEBP")
+    )
+    if not valido:
+        raise ValueError(f"{nome}: o conteúdo não corresponde ao formato informado.")
+    return nome, dados, tipos[ext]
+
+
+def _arquivo_ocorrencia(method, caminho, dados=None, mime=None):
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        raise RuntimeError("Configure o acesso do Portal RH ao Supabase.")
+    caminho = str(caminho)
+    if not re.fullmatch(r"[0-9]+/[a-f0-9]{32}/[A-Za-z0-9_.-]+", caminho):
+        raise ValueError("Caminho do anexo inválido.")
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/storage/v1/object/{_RH_OC_BUCKET}/{urllib.parse.quote(caminho, safe='/')}",
+        data=dados, method=method,
+    )
+    req.add_header("apikey", SUPABASE_SERVICE_KEY)
+    req.add_header("Authorization", f"Bearer {SUPABASE_SERVICE_KEY}")
+    if mime:
+        req.add_header("Content-Type", mime)
+    if method == "POST":
+        req.add_header("x-upsert", "true")
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Não foi possível acessar o anexo (HTTP {exc.code}).") from exc
+
+
+def _preparar_anexos_ocorrencia(cid, arquivos):
+    if len(arquivos or []) > 5:
+        raise ValueError("Selecione no máximo 5 anexos por ocorrência.")
+    # Valida tudo antes do primeiro upload. Cache da sessão permite repetir após falha.
+    validados = [_validar_anexo_ocorrencia(a) for a in (arquivos or [])]
+    cache = st.session_state.setdefault(f"oc_anexos_upload_{int(cid)}", {})
+    anexos = []
+    for nome, dados, mime in validados:
+        digest = hashlib.sha256(nome.encode("utf-8") + b"\0" + dados).hexdigest()
+        if digest not in cache:
+            seguro = re.sub(r"[^A-Za-z0-9_.-]", "_", nome)[-120:]
+            caminho = f"{int(cid)}/{secrets.token_hex(16)}/{seguro}"
+            _arquivo_ocorrencia("POST", caminho, dados, mime)
+            cache[digest] = {"nome": nome, "caminho": caminho, "mime": mime, "tamanho": len(dados)}
+        anexos.append(dict(cache[digest]))
+    return anexos
+
+
+def _mostrar_anexos_ocorrencia(cid, ocorrencia):
+    anexos = ocorrencia.get("anexos") or []
+    for indice, anexo in enumerate(anexos):
+        caminho = str(anexo.get("caminho") or "")
+        if not caminho.startswith(f"{int(cid)}/"):
+            continue
+        nome = str(anexo.get("nome") or "Anexo")
+        chave = f"oc_arquivo_{cid}_{ocorrencia['id']}_{indice}"
+        if st.button(f"📎 Consultar anexo: {nome}", key=f"{chave}_abrir"):
+            try:
+                st.session_state[chave] = _arquivo_ocorrencia("GET", caminho)
+            except Exception as exc:
+                st.error(str(exc))
+        if chave in st.session_state:
+            dados = st.session_state[chave]
+            mime = str(anexo.get("mime") or "application/octet-stream")
+            if mime in ("image/jpeg", "image/png", "image/webp"):
+                st.image(dados, caption=nome, width=350)
+            st.download_button(
+                f"⬇️ Baixar {nome}", data=dados, file_name=nome, mime=mime,
+                key=f"{chave}_baixar",
+            )
+
+
+def salvar_ocorrencia_colaborador(colaborador_id, data_ocorrencia, tipo, descricao, registrado_por, arquivos=None):
     descricao = str(descricao or "").strip()
     registrado_por = str(registrado_por or "").strip()
     if not descricao:
         raise ValueError("Informe a descrição/motivo da ocorrência.")
     if not registrado_por:
         raise ValueError("Informe quem está registrando a ocorrência.")
+    anexos = _preparar_anexos_ocorrencia(colaborador_id, arquivos)
     payload = {
+        "anexos": anexos,
         "colaborador_id": int(colaborador_id),
         "data": data_ocorrencia.isoformat(),
         "tipo": str(tipo or "OUTROS").strip().upper(),
@@ -1990,9 +2082,17 @@ def abrir_ficha_colaborador(colaborador):
         placeholder="Nome do responsável pelo registro",
         key=f"oc_resp_{cid}",
     )
+    _anexo_nonce = int(st.session_state.get(f"oc_anexo_nonce_{cid}", 0))
+    _arquivos_oc = st.file_uploader(
+        "Anexar foto ou PDF (opcional)", type=["pdf", "jpg", "jpeg", "png", "webp"],
+        accept_multiple_files=True, key=f"oc_anexos_{cid}_{_anexo_nonce}",
+        help="Até 5 arquivos, com no máximo 10 MB cada. Os documentos ficam disponíveis no histórico.",
+    )
     if st.button("💾 Registrar ocorrência", type="primary", use_container_width=True, key=f"oc_salvar_{cid}"):
         try:
-            salvar_ocorrencia_colaborador(cid, _data_oc, _tipo_oc, _descricao_oc, _registrado_por)
+            salvar_ocorrencia_colaborador(cid, _data_oc, _tipo_oc, _descricao_oc, _registrado_por, _arquivos_oc)
+            st.session_state[f"oc_anexo_nonce_{cid}"] = _anexo_nonce + 1
+            st.session_state.pop(f"oc_anexos_upload_{cid}", None)
             # Não alterar session_state do text_area depois que o widget foi instanciado.
             # O rerun atualiza a ficha e evita o erro StreamlitAPIException.
             st.success("Ocorrência registrada com sucesso.")
@@ -2024,12 +2124,21 @@ def abrir_ficha_colaborador(colaborador):
             if _h5.button("🗑️", key=f"excluir_oc_{cid}_{_oc_id}", help="Excluir ocorrência"):
                 st.session_state[f"confirmar_exclusao_oc_{cid}"] = _oc_id
 
+            _mostrar_anexos_ocorrencia(cid, _oc)
             if st.session_state.get(f"confirmar_exclusao_oc_{cid}") == _oc_id:
                 st.warning(f"Excluir a ocorrência {_tipo_txt} de {_data_txt}? Esta ação também atualizará a apuração da gratificação.")
                 _cf1, _cf2, _cf3 = st.columns([1, 1, 4])
                 if _cf1.button("Sim, excluir", type="primary", key=f"conf_excluir_oc_{cid}_{_oc_id}"):
                     try:
                         sb("DELETE", "rh_colaborador_ocorrencias", f"id=eq.{_oc_id}", None, "return=minimal")
+                        for _anexo_ex in (_oc.get("anexos") or []):
+                            _caminho_ex = str(_anexo_ex.get("caminho") or "")
+                            if _caminho_ex.startswith(f"{cid}/"):
+                                try:
+                                    _arquivo_ocorrencia("DELETE", _caminho_ex)
+                                except Exception:
+                                    # A ocorrência já foi removida; o arquivo permanece privado.
+                                    pass
                         st.session_state.pop(f"confirmar_exclusao_oc_{cid}", None)
                         st.success("Ocorrência excluída com sucesso.")
                         st.rerun()
@@ -5303,6 +5412,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
