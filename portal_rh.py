@@ -4204,23 +4204,47 @@ _base_serializada = df.fillna("").astype(str).to_csv(index=False)
 _base_fingerprint = hashlib.sha256(_base_serializada.encode("utf-8")).hexdigest()
 _fp_key = f"rh_grade_base_fp_{_periodo_key}_{_escopo_hash}"
 _base_editor = st.session_state.get(_draft_key)
+_evento_grade_key = f"rh_grade_evento_{_periodo_key}_{_escopo_hash}"
+_evento_grade = st.session_state.pop(_evento_grade_key, False)
 if (
     not isinstance(_base_editor, pd.DataFrame)
     or list(_base_editor.columns) != list(df.columns)
     or len(_base_editor) != len(df)
-    or st.session_state.get(_fp_key) != _base_fingerprint
+    or (st.session_state.get(_fp_key) != _base_fingerprint and not _evento_grade)
 ):
+    if st.session_state.get(_fp_key) is not None and st.session_state.get(_fp_key) != _base_fingerprint:
+        # Atualização externa sem edição em trânsito: recarrega a grade uma vez.
+        st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
     _base_editor = df.copy()
     st.session_state[_draft_key] = _base_editor.copy()
     st.session_state[_fp_key] = _base_fingerprint
 
+# O conteúdo de entrada e a identidade do widget permanecem estáveis.
+# Trocar a chave após salvar descartava a edição seguinte, enviada pela chave antiga.
+_editor_grade_key = f"rh_grade_{ano}_{mes}_{_escopo_hash}_{st.session_state[_nonce_key]}"
+_entrada_grade_key = f"{_editor_grade_key}_entrada"
+if _entrada_grade_key not in st.session_state:
+    st.session_state[_entrada_grade_key] = _base_editor.copy()
+
+def _capturar_edicao_grade():
+    # Callback executado antes do rerun: preserva a seleção mesmo se a base mudar.
+    _entrada = st.session_state[_entrada_grade_key].copy()
+    _mudancas = st.session_state.get(_editor_grade_key, {}).get("edited_rows", {})
+    for _linha, _celulas in _mudancas.items():
+        for _coluna, _valor in _celulas.items():
+            if _coluna in colunas_dia:
+                _entrada.at[int(_linha), _coluna] = _valor
+    st.session_state[_draft_key] = _entrada
+    st.session_state[_evento_grade_key] = True
+
 editado = st.data_editor(
-    _base_editor,
+    st.session_state[_entrada_grade_key],
     use_container_width=True,
     hide_index=True,
     disabled=["COLABORADOR","STATUS","FUNÇÃO","EMPRESA"],
     column_config=config,
-    key=f"rh_grade_{ano}_{mes}_{_escopo_hash}_{st.session_state[_nonce_key]}",
+    key=_editor_grade_key,
+    on_change=_capturar_edicao_grade,
     height=min(820, 72 + max(1, len(df))*35),
 )
 # Mantém o que está visualmente na grade como rascunho oficial.
@@ -4901,12 +4925,11 @@ if alteracoes:
                 f"— {len(_gravados)} lançamento(s)."
             )
             # Atualiza a base local sem uma segunda recarga da página.
-            # O nonce aplica a nova base na próxima interação do usuário.
+            # Mantém a mesma chave para receber a próxima seleção sem descartá-la.
             st.session_state[_draft_key] = editado.copy()
             st.session_state[_fp_key] = hashlib.sha256(
                 df.fillna("").astype(str).to_csv(index=False).encode("utf-8")
             ).hexdigest()
-            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
             _salvar_grade_slot.caption(st.session_state[_auto_sucesso_key])
         except Exception:
             st.session_state[_auto_erro_key] = True
@@ -5280,6 +5303,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
