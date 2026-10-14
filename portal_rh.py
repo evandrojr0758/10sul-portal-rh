@@ -19,6 +19,7 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 import altair as alt
+from rh_desligamentos import exige_motivo as deslig_exige_motivo, abrir_modal as abrir_modal_desligamento, validar_motivos as validar_motivos_desligamento, payload_desligamento
 from rh_vencimentos import CAMPOS as CAMPOS_VENC, data_iso as venc_data_iso, tela_alertas as tela_alertas_venc, tela_importacao as tela_importacao_venc
 
 try:
@@ -2058,6 +2059,12 @@ def abrir_ficha_colaborador(colaborador):
     _f1.caption(f"**Status:** {_classificacao_colaborador(colaborador)}")
     _f2.caption(f"**Função:** {str(colaborador.get('funcao') or colaborador.get('funcao_padrao') or '-')}")
     _f3.caption(f"**Empresa:** {_empresa_colaborador(colaborador, visual=True) or '-'}")
+
+    if colaborador.get("motivo_desligamento"):
+        st.markdown("#### Desligamento registrado")
+        st.write("Motivo:", colaborador["motivo_desligamento"])
+        if colaborador.get("observacao_desligamento"):
+            st.write("Observações:", colaborador["observacao_desligamento"])
 
     if not _tabela_ocorrencias_disponivel():
         st.error(
@@ -5103,7 +5110,7 @@ with st.expander("👥 Cadastro de colaboradores"):
     st.markdown("#### Gerenciar colaboradores")
     if st.session_state.get("rh_salarios_ref_erro"):
         st.warning("Salário-base ainda não disponível no banco. Execute o SQL de atualização do Supabase uma única vez e recarregue a página.")
-    st.caption("Altere o status e/ou a data de desligamento diretamente na tabela. Se houver data de desligamento, ela prevalece: do dia seguinte em diante a frequência será DEM, mesmo que o status ainda esteja ATIVO.")
+    st.caption("Ao marcar INATIVO ou informar a data de desligamento e salvar, será obrigatório confirmar o motivo no modal. Altere o status e/ou a data de desligamento diretamente na tabela. Se houver data de desligamento, ela prevalece: do dia seguinte em diante a frequência será DEM, mesmo que o status ainda esteja ATIVO.")
 
     busca_cadastro = st.text_input(
         "🔎 Buscar colaborador no cadastro",
@@ -5162,6 +5169,8 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "EQUIPE REVISÃO": _c.get("equipe_revisao"),
                 "STATUS": _c.get("status"),
                 "DATA DE DESLIGAMENTO": _c.get("data_desligamento"),
+                "MOTIVO DO DESLIGAMENTO": _c.get("motivo_desligamento"),
+                "OBSERVAÇÕES DO DESLIGAMENTO": _c.get("observacao_desligamento"),
             })
         _export_df = pd.DataFrame(_export_rows)
         _export_buffer = io.BytesIO()
@@ -5215,10 +5224,11 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df["tipo_contratacao"] = None
         for _vcampo in CAMPOS_VENC:
             cadastro_df[_vcampo] = pd.to_datetime(cadastro_df.get(_vcampo, pd.Series(None, index=cadastro_df.index, dtype=object)), errors="coerce").dt.date
+        original_cadastro = {str(c["id"]): dict(c) for c in todos_cadastro}
         original_venc = {str(c["id"]): {campo: venc_data_iso(c.get(campo)) for campo in CAMPOS_VENC} for c in todos_cadastro}
         cols_editor = [c for c in [
             "id", "cracha", "destra", "colaborador", "classificacao_fechamento", "funcao", "empresa", "tipo_contratacao", "salario_base", "frente", "equipe_revisao",
-            "status", "data_desligamento", *CAMPOS_VENC
+            "status", "data_desligamento", "motivo_desligamento", "observacao_desligamento", *CAMPOS_VENC
         ] if c in cadastro_df.columns]
 
         opcoes_funcoes_cadastro = ler_funcoes()
@@ -5266,6 +5276,8 @@ with st.expander("👥 Cadastro de colaboradores"):
             disabled=[c for c in cols_editor if c not in ("colaborador", "classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra", *CAMPOS_VENC)],
             column_config={
                 **{campo: st.column_config.DateColumn(label, format="DD/MM/YYYY") for campo, label in CAMPOS_VENC.items()},
+                "motivo_desligamento": st.column_config.TextColumn("Motivo do desligamento", width="large"),
+                "observacao_desligamento": st.column_config.TextColumn("Observações do desligamento", width="large"),
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
                 "destra": st.column_config.TextColumn("DESTRA"),
@@ -5337,7 +5349,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             if mudou:
                 if not novo_nome or (novo_nome != original_nome.get(cid, "") and any(_nome_colaborador(c).strip().upper() == novo_nome and str(c["id"]) != cid for c in (sb("GET", "rh_colaboradores", "select=id,colaborador") or []))):
                     erros.append(str(linha.get("colaborador") or cid) + " (nome vazio ou duplicado)")
-                elif novo_status == "INATIVO" and nova_dd is None:
+                elif novo_status == "INATIVO" and nova_dd is None and not deslig_exige_motivo(novo_status, nova_dd, original_cadastro[cid]):
                     erros.append(str(linha.get("colaborador") or cid))
                 else:
                     alteracoes.append((linha, novo_status, nova_dd, novo_salario, nova_frente, nova_destra, nova_equipe))
@@ -5351,22 +5363,42 @@ with st.expander("👥 Cadastro de colaboradores"):
         if revisao_sem_equipe:
             st.warning("Selecione EQUIPE 1 ou EQUIPE 2 para os colaboradores da frente REVISÃO: " + ", ".join(revisao_sem_equipe))
 
+        def _salvar_alteracoes_colaborador(motivos=None):
+            motivos = motivos or {}
+            validar_motivos_desligamento(alteracoes, original_cadastro, motivos)
+            # Conferência antes de escrever: evita sobrescrever outro desligamento.
+            atuais = {str(c["id"]): c for c in (sb("GET", "rh_colaboradores", "select=*") or [])}
+            for linha, *_ in alteracoes:
+                cid = str(linha["id"])
+                anterior = original_cadastro[cid]
+                atual = atuais.get(cid)
+                if atual is None or any(atual.get(k) != anterior.get(k) for k in ("ativo", "status", "data_desligamento", "motivo_desligamento", "observacao_desligamento")):
+                    raise ValueError("O cadastro mudou em outra sessão. Recarregue e confira antes de salvar.")
+            for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
+                payload = {**{campo: venc_data_iso(linha.get(campo)) for campo in CAMPOS_VENC}, "colaborador": str(linha.get("colaborador") or "").strip().upper(), "empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": (lambda v: v if v in ("CONTRATO", "SPOT") else None)(str(linha.get("tipo_contratacao") or "").strip().upper())}
+                payload.update({"ativo": novo_status == "ATIVO", "status": novo_status, "data_desligamento": data_desl.isoformat() if data_desl else None})
+                info = motivos.get(str(linha["id"]))
+                if info:
+                    payload.update(payload_desligamento(info, st.session_state["usuario_logado"]["id"]))
+                # Status, data, motivo e observação são gravados juntos.
+                sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), payload, "return=minimal")
+            _salvar_classificacoes_aracruz({
+                str(linha["id"]): str(linha["classificacao_fechamento"])
+                for linha, *_ in alteracoes
+                if str(linha["classificacao_fechamento"]) != original_classificacao.get(str(linha["id"]))
+            })
+            st.success("Cadastro atualizado com sucesso.")
+            st.rerun()
+
         if alteracoes:
             if st.button("💾 Salvar alterações do colaborador", type="primary", disabled=bool(revisao_sem_equipe)):
-                try:
-                    for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
-                        ativo_novo = novo_status == "ATIVO"
-                        alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {**{campo: venc_data_iso(linha.get(campo)) for campo in CAMPOS_VENC}, "colaborador": str(linha.get("colaborador") or "").strip().upper(), "empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": (lambda v: v if v in ("CONTRATO", "SPOT") else None)(str(linha.get("tipo_contratacao") or "").strip().upper())}, "return=minimal")
-                    _salvar_classificacoes_aracruz({
-                        str(linha["id"]): str(linha["classificacao_fechamento"])
-                        for linha, *_ in alteracoes
-                        if str(linha["classificacao_fechamento"]) != original_classificacao.get(str(linha["id"]))
-                    })
-                    st.success("Cadastro atualizado com sucesso.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Não foi possível atualizar o cadastro: {e}")
+                if any(deslig_exige_motivo(a[1], a[2], original_cadastro[str(a[0]["id"])]) for a in alteracoes):
+                    abrir_modal_desligamento(alteracoes, original_cadastro, _salvar_alteracoes_colaborador)
+                else:
+                    try:
+                        _salvar_alteracoes_colaborador()
+                    except Exception as e:
+                        st.error(f"Não foi possível atualizar o cadastro: {e}")
     else:
         st.info("Nenhum colaborador encontrado para o filtro selecionado.")
 
@@ -5425,6 +5457,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
