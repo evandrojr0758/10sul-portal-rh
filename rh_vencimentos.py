@@ -99,6 +99,69 @@ def tela_importacao(sb):
             except Exception as exc:
                 st.error(f'{feitos} vencimentos salvos antes da interrupção. É seguro tentar novamente. Erro: {exc}')
 
+def tabela_vencimentos(colaboradores):
+    linhas = []
+    for c in colaboradores:
+        linhas.append({'ID': c['id'], 'Colaborador': c['colaborador'],
+                       **{campo: data_iso(c.get(campo)) for campo in CAMPOS}})
+    tabela = pd.DataFrame(linhas, columns=['ID', 'Colaborador', *CAMPOS])
+    for campo in CAMPOS:
+        datas = pd.to_datetime(tabela[campo]).dt.date.astype(object)
+        tabela[campo] = datas.where(pd.notna(datas), None)
+    return tabela.sort_values('Colaborador').reset_index(drop=True)
+
+def salvar_datas(sb, original, editado):
+    base = original.set_index('ID')
+    feitos = 0
+    for _, linha in editado.iterrows():
+        cid = linha['ID']
+        payload, filtros = {}, []
+        for campo in CAMPOS:
+            anterior, nova = data_iso(base.loc[cid, campo]), data_iso(linha[campo])
+            if anterior != nova:
+                payload[campo] = nova
+                filtros.append(f'{campo}=eq.{anterior}' if anterior else f'{campo}=is.null')
+        if not payload:
+            continue
+        # Atualiza apenas as datas editadas e evita sobrescrever alterações de outra sessão.
+        resultado = sb('PATCH', 'rh_colaboradores',
+                       '&'.join([f'id=eq.{int(cid)}', *filtros]), payload, 'return=representation')
+        if not resultado:
+            raise ValueError(f"{feitos} colaborador(es) salvo(s). As datas de {linha['Colaborador']} mudaram em outra sessão ou o cadastro foi removido. Atualize a página e confira novamente.")
+        feitos += 1
+    return feitos
+
+def tela_todos_vencimentos(sb, colaboradores):
+    st.markdown('#### Todos os colaboradores — atualizar vencimentos')
+    st.caption('ASO, integração fábrica e integração UNF, incluindo datas fora do alerta e campos ainda não preenchidos. Edite as datas na tabela e clique em Salvar datas de vencimento.')
+    busca = st.text_input('Buscar colaborador', key='rh_venc_busca')
+    lista = [c for c in colaboradores if nome_chave(busca) in nome_chave(c['colaborador'])]
+    if not lista:
+        st.info('Nenhum colaborador encontrado.'); return
+    original = tabela_vencimentos(lista)
+    chave = hashlib.sha256(original.to_json(date_format='iso').encode()).hexdigest()
+    if st.session_state.get('rh_venc_resultado'):
+        st.success(st.session_state.pop('rh_venc_resultado'))
+    st.caption(f'{len(original)} colaborador(es) listado(s).')
+    with st.form('rh_venc_form_' + chave):
+        editado = st.data_editor(original, hide_index=True, use_container_width=True,
+            disabled=['ID', 'Colaborador'], num_rows='fixed',
+            column_config={'ID': None, 'Colaborador': st.column_config.TextColumn(width='large'),
+                           **{campo: st.column_config.DateColumn(label, format='DD/MM/YYYY') for campo, label in CAMPOS.items()}},
+            key='rh_venc_editor_' + chave)
+        salvar = st.form_submit_button('Salvar datas de vencimento')
+    if salvar:
+        try:
+            feitos = salvar_datas(sb, original, editado)
+        except Exception as exc:
+            st.error(f'Não foi possível concluir o salvamento: {exc}')
+            return
+        if feitos:
+            st.session_state['rh_venc_resultado'] = f'Datas atualizadas para {feitos} colaborador(es).'
+            st.rerun()
+        else:
+            st.info('Nenhuma data foi alterada.')
+
 def tela_alertas(sb, colaboradores):
     hoje = datetime.now(ZoneInfo('America/Sao_Paulo')).date()
     alertas = []
@@ -113,11 +176,15 @@ def tela_alertas(sb, colaboradores):
                 alertas.append({'Colaborador': c['colaborador'], 'Documento': label, 'Vencimento': date.fromisoformat(venc), 'Dias': dias, 'Situação': 'VENCIDO' if dias < 0 else 'VENCE HOJE' if dias == 0 else 'VENCE EM ATÉ 30 DIAS'})
     with st.expander(f'🔔 ASO e integrações — {len(alertas)} vencimento(s) em atenção', expanded=bool(alertas) or st.query_params.get('vencimentos') == '1'):
         st.caption('Posição atual, independente do mês da frequência. Alertas a partir de 30 dias antes do vencimento, incluindo vencidos e vencimentos de hoje. Somente colaboradores ativos.')
+        visualizacao = st.radio('Exibir vencimentos', ['Vencidos e próximos de vencer', 'Mostrar todos'], index=0, horizontal=True, key='rh_venc_visualizacao')
         if alertas:
             tabela = pd.DataFrame(alertas).sort_values(['Dias', 'Colaborador'])
             st.warning(f"{sum(a['Dias'] < 0 for a in alertas)} vencido(s) · {sum(a['Dias'] == 0 for a in alertas)} vence(m) hoje · {sum(a['Dias'] > 0 for a in alertas)} próximo(s) de vencer")
-            st.dataframe(tabela, hide_index=True, use_container_width=True, column_config={'Vencimento': st.column_config.DateColumn(format='DD/MM/YYYY')})
+            if visualizacao == 'Vencidos e próximos de vencer':
+                st.dataframe(tabela, hide_index=True, use_container_width=True, column_config={'Vencimento': st.column_config.DateColumn(format='DD/MM/YYYY')})
         else: st.success('Nenhum vencimento informado está em atenção.')
+        if visualizacao == 'Mostrar todos':
+            tela_todos_vencimentos(sb, colaboradores)
         st.caption('Para receber com o portal fechado, ative os alertas neste celular e permita notificações no navegador. O aviso de 30 dias é enviado uma vez por documento/data, com novo aviso no vencimento.')
         if st.button('Preparar ativação de notificações no celular', key='rh_venc_push'):
             token = secrets.token_hex(32)
