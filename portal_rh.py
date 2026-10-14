@@ -19,6 +19,7 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 import altair as alt
+from rh_vencimentos import CAMPOS as CAMPOS_VENC, data_iso as venc_data_iso, tela_alertas as tela_alertas_venc, tela_importacao as tela_importacao_venc
 
 try:
     from st_keyup import st_keyup
@@ -3963,6 +3964,11 @@ except Exception as e:
     st.error(f"Falha ao acessar o banco: {e}")
     st.stop()
 
+try:
+    tela_alertas_venc(sb, _colaboradores_todos)
+except Exception as _venc_erro:
+    st.warning(f"Não foi possível carregar os alertas de vencimento: {_venc_erro}")
+
 hoje = date.today()
 meses = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
 
@@ -5062,6 +5068,8 @@ with st.expander("📋 Cadastro de funções", expanded=False):
     except Exception as exc:
         st.error(f"Não foi possível carregar o cadastro de funções: {exc}")
 
+tela_importacao_venc(sb)
+
 with st.expander("👥 Cadastro de colaboradores"):
     st.caption("Cadastre, desative ou reative colaboradores sem apagar o histórico de frequência.")
 
@@ -5205,9 +5213,12 @@ with st.expander("👥 Cadastro de colaboradores"):
 
         if "tipo_contratacao" not in cadastro_df.columns:
             cadastro_df["tipo_contratacao"] = None
+        for _vcampo in CAMPOS_VENC:
+            cadastro_df[_vcampo] = pd.to_datetime(cadastro_df.get(_vcampo, pd.Series(None, index=cadastro_df.index, dtype=object)), errors="coerce").dt.date
+        original_venc = {str(c["id"]): {campo: venc_data_iso(c.get(campo)) for campo in CAMPOS_VENC} for c in todos_cadastro}
         cols_editor = [c for c in [
             "id", "cracha", "destra", "colaborador", "classificacao_fechamento", "funcao", "empresa", "tipo_contratacao", "salario_base", "frente", "equipe_revisao",
-            "status", "data_desligamento"
+            "status", "data_desligamento", *CAMPOS_VENC
         ] if c in cadastro_df.columns]
 
         opcoes_funcoes_cadastro = ler_funcoes()
@@ -5252,8 +5263,9 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("colaborador", "classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra")],
+            disabled=[c for c in cols_editor if c not in ("colaborador", "classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra", *CAMPOS_VENC)],
             column_config={
+                **{campo: st.column_config.DateColumn(label, format="DD/MM/YYYY") for campo, label in CAMPOS_VENC.items()},
                 "id": st.column_config.NumberColumn("ID"),
                 "cracha": st.column_config.TextColumn("Crachá"),
                 "destra": st.column_config.TextColumn("DESTRA"),
@@ -5320,7 +5332,8 @@ with st.expander("👥 Cadastro de colaboradores"):
             novo_tipo = str(linha.get("tipo_contratacao") or "").strip().upper()
             if novo_tipo not in ("CONTRATO", "SPOT"):
                 novo_tipo = ""
-            mudou = (novo_nome != original_nome.get(cid, "")) or (novo_tipo != original_tipo.get(cid, "")) or (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
+            mudou_venc = any(venc_data_iso(linha.get(campo)) != original_venc[cid][campo] for campo in CAMPOS_VENC)
+            mudou = mudou_venc or (novo_nome != original_nome.get(cid, "")) or (novo_tipo != original_tipo.get(cid, "")) or (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
             if mudou:
                 if not novo_nome or (novo_nome != original_nome.get(cid, "") and any(_nome_colaborador(c).strip().upper() == novo_nome and str(c["id"]) != cid for c in (sb("GET", "rh_colaboradores", "select=id,colaborador") or []))):
                     erros.append(str(linha.get("colaborador") or cid) + " (nome vazio ou duplicado)")
@@ -5344,7 +5357,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                     for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
                         ativo_novo = novo_status == "ATIVO"
                         alterar_status_colaborador(linha["id"], ativo_novo, data_desl)
-                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {"colaborador": str(linha.get("colaborador") or "").strip().upper(), "empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": (lambda v: v if v in ("CONTRATO", "SPOT") else None)(str(linha.get("tipo_contratacao") or "").strip().upper())}, "return=minimal")
+                        sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(linha["id"])), {**{campo: venc_data_iso(linha.get(campo)) for campo in CAMPOS_VENC}, "colaborador": str(linha.get("colaborador") or "").strip().upper(), "empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": (lambda v: v if v in ("CONTRATO", "SPOT") else None)(str(linha.get("tipo_contratacao") or "").strip().upper())}, "return=minimal")
                     _salvar_classificacoes_aracruz({
                         str(linha["id"]): str(linha["classificacao_fechamento"])
                         for linha, *_ in alteracoes
@@ -5412,6 +5425,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
