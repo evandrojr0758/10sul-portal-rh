@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><script>
+const key='10sul-rh-session-v1';
+let last='';
+const send=(type,data={})=>parent.postMessage({isStreamlitMessage:true,type,...data},'*');
+window.addEventListener('message',e=>{
+ if(e.source!==parent||e.data.type!=='streamlit:render')return;
+ const command=e.data.args.command;
+ let value={id:command.id,token:''};
+ try{
+  if(command.action==='write')localStorage.setItem(key,command.token);
+  if(command.action==='clear')localStorage.removeItem(key);
+  value.token=localStorage.getItem(key)||'';
+ }catch{value.error=true;}
+ const serialized=JSON.stringify(value);
+ if(serialized!==last){last=serialized;send('streamlit:setComponentValue',{value,dataType:'json'});}
+ send('streamlit:setFrameHeight',{height:0});
+});
+send('streamlit:componentReady',{apiVersion:1});
+</script></body></html>

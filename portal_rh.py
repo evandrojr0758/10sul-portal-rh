@@ -19,6 +19,7 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 import altair as alt
+import rh_sessao
 from rh_desligamentos import exige_motivo as deslig_exige_motivo, abrir_modal as abrir_modal_desligamento, validar_motivos as validar_motivos_desligamento, payload_desligamento
 from rh_vencimentos import CAMPOS as CAMPOS_VENC, data_iso as venc_data_iso, tela_alertas as tela_alertas_venc, tela_importacao as tela_importacao_venc
 
@@ -859,6 +860,7 @@ def alterar_senha_usuario(usuario_id, senha_atual, nova_senha):
         raise ValueError("A nova senha deve ter pelo menos 8 caracteres.")
     payload = {"senha_hash": _hash_senha(nova_senha), "trocar_senha": False}
     sb("PATCH", "rh_usuarios", "id=eq." + str(int(usuario_id)), payload, "return=minimal")
+    rh_sessao.criar(sb, usr)
 
 def modal_alterar_senha(obrigatoria=False):
     titulo = "🔐 Crie sua nova senha" if obrigatoria else "🔐 Alterar senha"
@@ -926,6 +928,7 @@ def tela_login():
             try:
                 dados=autenticar_usuario(u,pw)
                 if dados:
+                    rh_sessao.criar(sb, dados)
                     st.session_state["usuario_logado"]=dados
                     if st.query_params.get("acesso_fechamentos"):
                         st.session_state["acesso_fechamentos_autorizado"] = st.query_params["acesso_fechamentos"]
@@ -955,8 +958,7 @@ def cabecalho_sessao(mostrar_ajuda=False):
             st.session_state["abrir_troca_senha"] = True
     with c:
         if st.button("🚪 Sair", key="logout_portal", use_container_width=True):
-            st.session_state.pop("usuario_logado", None)
-            st.session_state.pop("abrir_troca_senha", None)
+            rh_sessao.sair(sb)
             st.rerun()
     with d:
         if mostrar_ajuda:
@@ -3848,6 +3850,10 @@ if _qp_token:
     tela_publica_aprovacao_gratificacao(_qp_token)
     st.stop()
 
+rh_sessao.sincronizar(sb)
+if st.session_state.get("rh_storage_error"):
+    st.warning("Permita o armazenamento deste site no navegador para manter o acesso ao reabrir o link.")
+
 _acesso_fechamentos = st.query_params.get("acesso_fechamentos")
 if _acesso_fechamentos and st.session_state.get("acesso_fechamentos_autorizado") != _acesso_fechamentos:
     tela_login()
@@ -3885,7 +3891,7 @@ if str(st.query_params.get("fechamento") or "").lower() == "central":
             st.query_params["fechamento"] = destino
             st.rerun()
     if st.button("Sair dos fechamentos", key="sair_fechamentos", use_container_width=True):
-        st.session_state.pop("usuario_logado", None)
+        rh_sessao.sair(sb)
         st.rerun()
     st.stop()
 
