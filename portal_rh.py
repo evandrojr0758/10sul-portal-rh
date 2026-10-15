@@ -4325,47 +4325,69 @@ if _cancelar:
     if _resp:
         st.session_state.pop(_resp, None)
 
-# Fonte exibida pelo editor: rascunho atual ou a base salva.
-# O fingerprint da base garante que, após F5/salvamento, o Supabase volte a ser
-# a fonte de verdade. Assim, registro já persistido nunca perde a trava de edição.
+# O rascunho é a fonte das edições. O retorno do widget pode perder seus
+# deltas ao reconstruir a tabela (por exemplo, depois de um modal).
 _base_serializada = df.fillna("").astype(str).to_csv(index=False)
 _base_fingerprint = hashlib.sha256(_base_serializada.encode("utf-8")).hexdigest()
 _fp_key = f"rh_grade_base_fp_{_periodo_key}_{_escopo_hash}"
+_banco_grade_key = f"rh_grade_banco_{_periodo_key}_{_escopo_hash}"
 _base_editor = st.session_state.get(_draft_key)
 _evento_grade_key = f"rh_grade_evento_{_periodo_key}_{_escopo_hash}"
-_evento_grade = st.session_state.pop(_evento_grade_key, False)
+st.session_state.pop(_evento_grade_key, None)
 if (
     not isinstance(_base_editor, pd.DataFrame)
     or list(_base_editor.columns) != list(df.columns)
     or len(_base_editor) != len(df)
-    or (st.session_state.get(_fp_key) != _base_fingerprint and not _evento_grade)
 ):
-    if st.session_state.get(_fp_key) is not None and st.session_state.get(_fp_key) != _base_fingerprint:
-        # Atualização externa sem edição em trânsito: recarrega a grade uma vez.
-        st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
     _base_editor = df.copy()
-    st.session_state[_draft_key] = _base_editor.copy()
-    st.session_state[_fp_key] = _base_fingerprint
+    st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
+elif st.session_state.get(_fp_key) != _base_fingerprint:
+    # Incorpora mudanças do banco sem apagar células locais não confirmadas.
+    _anterior = st.session_state.get(_banco_grade_key)
+    if isinstance(_anterior, pd.DataFrame) and _anterior.shape == df.shape:
+        _pendentes_locais = _base_editor.fillna("").astype(str).ne(_anterior.fillna("").astype(str))
+        _base_editor = df.where(~_pendentes_locais, _base_editor)
+    # Na migração, conserva o rascunho existente até receber uma edição nova.
+    st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
+st.session_state[_draft_key] = _base_editor.copy()
+st.session_state[_banco_grade_key] = df.copy()
+st.session_state[_fp_key] = _base_fingerprint
 
-# O conteúdo de entrada e a identidade do widget permanecem estáveis.
-# Trocar a chave após salvar descartava a edição seguinte, enviada pela chave antiga.
-_editor_grade_key = f"rh_grade_{ano}_{mes}_{_escopo_hash}_{st.session_state[_nonce_key]}"
+_editor_grade_key = f"rh_grade_v2_{ano}_{mes}_{_escopo_hash}_{st.session_state[_nonce_key]}"
 _entrada_grade_key = f"{_editor_grade_key}_entrada"
 if _entrada_grade_key not in st.session_state:
     st.session_state[_entrada_grade_key] = _base_editor.copy()
 
-def _capturar_edicao_grade():
-    # Callback executado antes do rerun: preserva a seleção mesmo se a base mudar.
-    _entrada = st.session_state[_entrada_grade_key].copy()
-    _mudancas = st.session_state.get(_editor_grade_key, {}).get("edited_rows", {})
-    for _linha, _celulas in _mudancas.items():
-        for _coluna, _valor in _celulas.items():
-            if _coluna in colunas_dia:
-                _entrada.at[int(_linha), _coluna] = _valor
-    st.session_state[_draft_key] = _entrada
-    st.session_state[_evento_grade_key] = True
 
-editado = st.data_editor(
+def _capturar_edicao_grade(
+    editor_key=_editor_grade_key, entrada_key=_entrada_grade_key,
+    draft_key=_draft_key, dias=tuple(colunas_dia), cids=tuple(ids),
+):
+    # Liga posições aos IDs do exato editor que enviou o evento. Aplica somente
+    # deltas novos: edited_rows é cumulativo e contém lançamentos já salvos.
+    _atual = st.session_state[draft_key].copy()
+    _entrada = st.session_state[entrada_key]
+    _mudancas = st.session_state.get(editor_key, {}).get("edited_rows", {})
+    _snapshot_key = f"{editor_key}_deltas"
+    _anteriores = st.session_state.get(_snapshot_key, {})
+    for _linha in set(_mudancas) | set(_anteriores):
+        _pos = int(_linha)
+        if not 0 <= _pos < len(cids):
+            continue
+        _novas = _mudancas.get(_linha, {})
+        _velhas = _anteriores.get(_linha, {})
+        for _coluna in set(_novas) | set(_velhas):
+            if _coluna not in dias:
+                continue
+            _valor = _novas.get(_coluna, _entrada.iloc[_pos][_coluna])
+            _antes = _velhas.get(_coluna, _entrada.iloc[_pos][_coluna])
+            if _valor != _antes:
+                _atual.at[_pos, _coluna] = _valor
+    st.session_state[draft_key] = _atual
+    st.session_state[_snapshot_key] = {k: dict(v) for k, v in _mudancas.items()}
+
+
+st.data_editor(
     st.session_state[_entrada_grade_key],
     use_container_width=True,
     hide_index=True,
@@ -4375,8 +4397,8 @@ editado = st.data_editor(
     on_change=_capturar_edicao_grade,
     height=min(820, 72 + max(1, len(df))*35),
 )
-# Mantém o que está visualmente na grade como rascunho oficial.
-st.session_state[_draft_key] = editado.copy()
+# Nunca substitui o rascunho pelo retorno potencialmente antigo do widget.
+editado = st.session_state[_draft_key].copy()
 
 # Feedback junto à grade; só informa sucesso após a resposta do banco.
 _salvar_grade_slot = st.empty()
@@ -4917,6 +4939,7 @@ if alteracoes:
                 st.session_state.rh_observacoes_pendentes[chave] = observacao.strip()
                 # SOMENTE este botão confirma. Retira o alvo para o callback do X não cancelar.
                 st.session_state.pop("rh_modal_alvo", None)
+                st.session_state[_nonce_key] += 1
                 st.rerun()
 
     if "rh_atestados_periodo" not in st.session_state:
@@ -4937,6 +4960,7 @@ if alteracoes:
                 st.error("Selecione meio período ou dia inteiro.")
             else:
                 st.session_state.rh_atestados_periodo[chave] = (periodo, nota.strip())
+                st.session_state[_nonce_key] += 1
                 st.rerun()
 
     # Só abre a classificação depois das autorizações de edição e LB/COMP.
@@ -4944,7 +4968,11 @@ if alteracoes:
         (cid, dia) for _, cid, dia, _, _ in pendentes_atestado
         if f"{cid}_{int(ano)}_{mes}_{dia}" not in st.session_state.rh_atestados_periodo
     ), None)
-    if _pendente_atestado and not modal_senha_aberto:
+    if _pendente_atestado and not modal_senha_aberto and not any(
+        not (st.session_state.rh_observacoes_pendentes.get(f"{cid}_{int(ano)}_{mes}_{dia}")
+             and st.session_state.rh_responsaveis_pendentes.get(f"{cid}_{int(ano)}_{mes}_{dia}"))
+        for _, cid, dia, _, _ in pendentes_obs
+    ):
         _cid_at, _dia_at = _pendente_atestado
         modal_periodo_atestado(_cid_at, _dia_at, _nome_grade_por_cid(_cid_at))
 
@@ -5041,6 +5069,7 @@ if alteracoes:
                 _gravados.append((i, cid, dia, antes, depois))
                 # Confirmed cells become the new base even if a later request fails.
                 df.at[i, f"{dia:02d}"] = depois or PENDENTE_VISUAL
+                st.session_state[_banco_grade_key] = df.copy()
                 st.session_state.rh_edicoes_autorizadas.discard(chave_ed)
                 st.session_state.rh_motivos_edicao.pop(chave_ed, None)
                 st.session_state.rh_observacoes_pendentes.pop(chave_ed, None)
@@ -5463,6 +5492,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
