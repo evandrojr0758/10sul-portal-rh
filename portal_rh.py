@@ -5081,13 +5081,18 @@ if alteracoes:
                 f"✅ Salvo automaticamente às {datetime.now().strftime('%H:%M:%S')} "
                 f"— {len(_gravados)} lançamento(s)."
             )
-            # Atualiza a base local sem uma segunda recarga da página.
-            # Mantém a mesma chave para receber a próxima seleção sem descartá-la.
-            st.session_state[_draft_key] = editado.copy()
+            # Após a gravação, a fonte de verdade é a base confirmada.
+            # O data_editor guarda edited_rows cumulativos: se reutilizarmos a
+            # chave anterior, um rerun/modal pode reaplicar seleções antigas e
+            # sobrescrever lançamentos já salvos de outros colaboradores.
+            st.session_state[_draft_key] = df.copy()
+            st.session_state[_banco_grade_key] = df.copy()
             st.session_state[_fp_key] = hashlib.sha256(
                 df.fillna("").astype(str).to_csv(index=False).encode("utf-8")
             ).hexdigest()
+            st.session_state[_nonce_key] = int(st.session_state.get(_nonce_key, 0)) + 1
             _salvar_grade_slot.caption(st.session_state[_auto_sucesso_key])
+            st.rerun()
         except Exception:
             st.session_state[_auto_erro_key] = True
             st.session_state.pop(_auto_sucesso_key, None)
@@ -5492,7 +5497,6 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
-
 
 
 
