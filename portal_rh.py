@@ -4384,6 +4384,9 @@ def _capturar_edicao_grade(
             if _valor != _antes:
                 _atual.at[_pos, _coluna] = _valor
     st.session_state[draft_key] = _atual
+    if not _atual.equals(st.session_state[entrada_key]):
+        import time
+        st.session_state[f"rh_ultima_edicao_{_periodo_key}_{_escopo_hash}"] = time.time()
     st.session_state[_snapshot_key] = {k: dict(v) for k, v in _mudancas.items()}
 
 
@@ -5022,7 +5025,20 @@ if alteracoes:
     if pendentes_obs and not pode_salvar and not modal_aberto:
         st.warning("LB e COMP só são permitidos após informar responsável e observação e clicar em Confirmar observação.")
 
-    _pronto_auto = pode_salvar and not edicoes_salvas
+    # Debounce real: só grava após 5 segundos sem edição na grade.
+    # O fragmento verifica o prazo sem bloquear a interface com sleep().
+    import time
+    _ultima_edicao_key = f"rh_ultima_edicao_{_periodo_key}_{_escopo_hash}"
+    _ultima_edicao = float(st.session_state.get(_ultima_edicao_key, 0))
+    _aguardando_debounce = bool(_ultima_edicao and time.time() - _ultima_edicao < 5)
+    if _aguardando_debounce:
+        @st.fragment(run_every="1s")
+        def _aguardar_salvamento_rh():
+            if time.time() - float(st.session_state.get(_ultima_edicao_key, 0)) >= 5:
+                st.rerun(scope="app")
+        _aguardar_salvamento_rh()
+        _salvar_grade_slot.caption("⏳ Aguardando 5 segundos sem alterações para salvar...")
+    _pronto_auto = pode_salvar and not edicoes_salvas and not _aguardando_debounce
     _erro_auto = st.session_state.get(_auto_erro_key)
     _tentar_novamente = False
     if _erro_auto:
@@ -5087,6 +5103,7 @@ if alteracoes:
             # chave anterior, um rerun/modal pode reaplicar seleções antigas e
             # sobrescrever lançamentos já salvos de outros colaboradores.
             st.session_state[_draft_key] = df.copy()
+            st.session_state.pop(_ultima_edicao_key, None)
             st.session_state[_banco_grade_key] = df.copy()
             st.session_state[_fp_key] = hashlib.sha256(
                 df.fillna("").astype(str).to_csv(index=False).encode("utf-8")
@@ -5498,7 +5515,6 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
-
 
 
 
