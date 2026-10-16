@@ -3778,7 +3778,7 @@ def _totais_tres_lagoas(quantidade, valor, acrescimos, descontos):
 def tela_fechamento_aracruz():
     """Despesas feitas pela 10 Sul a pedido do cliente, para reembolso."""
     st.header("Fechamento Aracruz — Reembolsos do cliente")
-    st.caption("Compras solicitadas pelo cliente e pagas pela 10 Sul. Valores sem taxa adicional.")
+    st.caption("Compras solicitadas pelo cliente e pagas pela 10 Sul. Repasse Suzano = valor pago ÷ 0,74 ÷ 0,90.")
     hoje = date.today()
     a, b = st.columns(2)
     mes = a.selectbox("Mês de competência", list(range(1, 13)), index=hoje.month - 1, key="ara_reembolso_mes")
@@ -3810,10 +3810,13 @@ def tela_fechamento_aracruz():
         except Exception as exc:
             st.error(f"Não foi possível salvar. Os dados anteriores foram mantidos: {exc}")
             return False
-    pendente = sum(float(r.get("valor", 0)) for r in registros if r.get("status") != "Reembolsado")
-    recebido = sum(float(r.get("valor", 0)) for r in registros if r.get("status") == "Reembolsado")
+    def repasse(r):
+        return round(float(r.get("valor", 0)) / 0.74 / 0.90, 2)
+    pendente = sum(repasse(r) for r in registros if r.get("status") != "Reembolsado")
+    recebido = sum(repasse(r) for r in registros if r.get("status") == "Reembolsado")
+    st.metric("Total pago pela 10 Sul", _fmt_brl(sum(float(r.get("valor", 0)) for r in registros)))
     x, y, z = st.columns(3)
-    x.metric("Total lançado", _fmt_brl(pendente + recebido))
+    x.metric("Total a repassar", _fmt_brl(pendente + recebido))
     y.metric("A receber", _fmt_brl(pendente))
     z.metric("Reembolsado", _fmt_brl(recebido))
     with st.expander("➕ Lançar despesa reembolsável", expanded=not bool(registros)):
@@ -3824,6 +3827,7 @@ def tela_fechamento_aracruz():
             numero_nf = st.text_input("Número da nota fiscal")
             solicitante = st.text_input("Solicitante do cliente")
             valor = st.number_input("Valor pago (R$) *", min_value=0.0, step=0.01, format="%.2f")
+            st.caption(f"Repasse calculado: {_fmt_brl(valor / 0.74 / 0.90)}")
             observacao = st.text_area("Observações")
             anexo = st.file_uploader("Nota fiscal ou comprovante (PDF/imagem)", type=["pdf", "png", "jpg", "jpeg"], key="ara_anexo_novo")
             enviar = st.form_submit_button("Salvar despesa", type="primary")
@@ -3864,7 +3868,8 @@ def tela_fechamento_aracruz():
     else:
         tabela = pd.DataFrame([{"Data": r.get("data"), "Descrição": r.get("descricao"),
             "Fornecedor": r.get("fornecedor"), "NF": r.get("nota_fiscal"),
-            "Solicitante": r.get("solicitante"), "Valor (R$)": float(r.get("valor", 0)),
+            "Solicitante": r.get("solicitante"), "Valor pago (R$)": float(r.get("valor", 0)),
+            "Repasse Suzano (R$)": repasse(r),
             "Status": r.get("status")} for r in registros])
         st.dataframe(tabela, use_container_width=True, hide_index=True)
         excel = BytesIO()
@@ -3873,6 +3878,7 @@ def tela_fechamento_aracruz():
         st.download_button("📥 Exportar fechamento Excel", excel.getvalue(),
             file_name=f"FECHAMENTO_REEMBOLSOS_ARACRUZ_{ano}_{mes:02d}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.caption("Cálculo por item: valor pago ÷ 0,74 ÷ 0,90, arredondado a centavos.")
         st.markdown("#### Atualizar lançamentos")
         for r in registros:
             with st.expander(f"{r.get('data')} — {r.get('descricao')} — {_fmt_brl(r.get('valor', 0))}"):
@@ -3882,6 +3888,7 @@ def tela_fechamento_aracruz():
                     nf = st.text_input("NF", value=r.get("nota_fiscal", ""))
                     solicitante = st.text_input("Solicitante", value=r.get("solicitante", ""))
                     valor = st.number_input("Valor", min_value=0.0, value=float(r.get("valor", 0)), step=0.01, format="%.2f")
+                    st.caption(f"Novo repasse calculado: {_fmt_brl(valor / 0.74 / 0.90)}")
                     obs = st.text_area("Observações", value=r.get("observacao", ""))
                     status = st.selectbox("Situação do reembolso",
                         ["Pendente", "Enviado ao cliente", "Reembolsado"],
