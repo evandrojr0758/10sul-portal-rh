@@ -3862,6 +3862,9 @@ def tela_fechamento_aracruz():
                 if persistir(registros + [registro]):
                     st.success("Despesa salva no banco.")
                     st.rerun()
+    st.subheader("Resumo do fechamento — Suzano")
+    st.metric("VALOR FINAL A REPASSAR À SUZANO", _fmt_brl(pendente + recebido))
+    st.caption("Valor final calculado por despesa: valor pago ÷ 0,74 ÷ 0,90.")
     st.subheader("Despesas da competência")
     if not registros:
         st.info("Nenhuma despesa registrada neste mês.")
@@ -3871,10 +3874,15 @@ def tela_fechamento_aracruz():
             "Solicitante": r.get("solicitante"), "Valor pago (R$)": float(r.get("valor", 0)),
             "Repasse Suzano (R$)": repasse(r),
             "Status": r.get("status")} for r in registros])
+        resumo_suzano = tabela[["Data", "Descrição", "Fornecedor", "NF", "Repasse Suzano (R$)"]].copy()
+        resumo_suzano.loc[len(resumo_suzano)] = ["", "TOTAL A REPASSAR À SUZANO", "", "", round(pendente + recebido, 2)]
+        st.markdown("#### Resumo para envio ao cliente")
+        st.dataframe(resumo_suzano, use_container_width=True, hide_index=True)
         st.dataframe(tabela, use_container_width=True, hide_index=True)
         excel = BytesIO()
         with pd.ExcelWriter(excel, engine="openpyxl") as writer:
-            tabela.to_excel(writer, index=False, sheet_name="Reembolsos")
+            resumo_suzano.to_excel(writer, index=False, sheet_name="Resumo Suzano")
+            tabela.to_excel(writer, index=False, sheet_name="Controle Interno")
         st.download_button("📥 Exportar fechamento Excel", excel.getvalue(),
             file_name=f"FECHAMENTO_REEMBOLSOS_ARACRUZ_{ano}_{mes:02d}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
