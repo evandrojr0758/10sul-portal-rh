@@ -3774,6 +3774,137 @@ def _totais_tres_lagoas(quantidade, valor, acrescimos, descontos):
     return base, acres, desc, base + acres - desc
 
 
+
+def tela_fechamento_aracruz():
+    """Despesas feitas pela 10 Sul a pedido do cliente, para reembolso."""
+    st.header("Fechamento Aracruz — Reembolsos do cliente")
+    st.caption("Compras solicitadas pelo cliente e pagas pela 10 Sul. Valores sem taxa adicional.")
+    hoje = date.today()
+    a, b = st.columns(2)
+    mes = a.selectbox("Mês de competência", list(range(1, 13)), index=hoje.month - 1, key="ara_reembolso_mes")
+    ano = int(b.number_input("Ano de competência", min_value=2020, max_value=2100, value=hoje.year, key="ara_reembolso_ano"))
+    caminho = f"object/rh-fechamentos-aracruz/reembolsos-{ano}-{mes:02d}.json"
+    chave = f"ara_reembolso_{ano}_{mes:02d}"
+    if st.session_state.get("ara_reembolso_competencia") != chave:
+        try:
+            dados = _storage_cmc("GET", caminho) or {}
+            st.session_state["ara_reembolso_registros"] = dados.get("registros", [])
+            st.session_state["ara_reembolso_competencia"] = chave
+        except Exception as exc:
+            st.error(f"Erro ao carregar registros salvos: {exc}")
+            st.stop()
+    registros = st.session_state["ara_reembolso_registros"]
+    def persistir(novos):
+        try:
+            _storage_cmc("POST", caminho.replace("object/", "object/"), {"registros": novos})
+            st.session_state["ara_reembolso_registros"] = novos
+            return True
+        except Exception as exc:
+            st.error(f"Não foi possível salvar. Os dados anteriores foram mantidos: {exc}")
+            return False
+    pendente = sum(float(r.get("valor", 0)) for r in registros if r.get("status") != "Reembolsado")
+    recebido = sum(float(r.get("valor", 0)) for r in registros if r.get("status") == "Reembolsado")
+    x, y, z = st.columns(3)
+    x.metric("Total lançado", _fmt_brl(pendente + recebido))
+    y.metric("A receber", _fmt_brl(pendente))
+    z.metric("Reembolsado", _fmt_brl(recebido))
+    with st.expander("➕ Lançar despesa reembolsável", expanded=not bool(registros)):
+        with st.form("form_reembolso_aracruz", clear_on_submit=True):
+            data = st.date_input("Data da compra", value=hoje)
+            descricao = st.text_input("Descrição da compra *")
+            fornecedor = st.text_input("Fornecedor")
+            numero_nf = st.text_input("Número da nota fiscal")
+            solicitante = st.text_input("Solicitante do cliente")
+            valor = st.number_input("Valor pago (R$) *", min_value=0.0, step=0.01, format="%.2f")
+            observacao = st.text_area("Observações")
+            anexo = st.file_uploader("Nota fiscal ou comprovante (PDF/imagem)", type=["pdf", "png", "jpg", "jpeg"], key="ara_anexo_novo")
+            enviar = st.form_submit_button("Salvar despesa", type="primary")
+        if enviar:
+            if not descricao.strip() or valor <= 0:
+                st.error("Informe a descrição e um valor maior que zero.")
+            else:
+                import uuid
+                identificador = uuid.uuid4().hex
+                arquivo_path = ""
+                if anexo is not None:
+                    try:
+                        ext = anexo.name.rsplit(".", 1)[-1].lower()
+                        arquivo_path = f"reembolsos-anexos/{identificador}.{ext}"
+                        req = urllib.request.Request(
+                            f"{SUPABASE_URL}/storage/v1/object/rh-fechamentos-aracruz/{arquivo_path}",
+                            data=anexo.getvalue(), method="POST")
+                        req.add_header("apikey", SUPABASE_SERVICE_KEY)
+                        req.add_header("Authorization", f"Bearer {SUPABASE_SERVICE_KEY}")
+                        req.add_header("Content-Type", anexo.type or "application/octet-stream")
+                        req.add_header("x-upsert", "false")
+                        with urllib.request.urlopen(req, timeout=30):
+                            pass
+                    except Exception as exc:
+                        st.error(f"Falha ao anexar comprovante; despesa não registrada: {exc}")
+                        st.stop()
+                registro = {"id": identificador, "data": data.isoformat(), "descricao": descricao.strip(),
+                    "fornecedor": fornecedor.strip(), "nota_fiscal": numero_nf.strip(),
+                    "solicitante": solicitante.strip(), "valor": round(float(valor), 2),
+                    "observacao": observacao.strip(), "status": "Pendente",
+                    "anexo": arquivo_path}
+                if persistir(registros + [registro]):
+                    st.success("Despesa salva no banco.")
+                    st.rerun()
+    st.subheader("Despesas da competência")
+    if not registros:
+        st.info("Nenhuma despesa registrada neste mês.")
+    else:
+        tabela = pd.DataFrame([{"Data": r.get("data"), "Descrição": r.get("descricao"),
+            "Fornecedor": r.get("fornecedor"), "NF": r.get("nota_fiscal"),
+            "Solicitante": r.get("solicitante"), "Valor (R$)": float(r.get("valor", 0)),
+            "Status": r.get("status")} for r in registros])
+        st.dataframe(tabela, use_container_width=True, hide_index=True)
+        excel = BytesIO()
+        with pd.ExcelWriter(excel, engine="openpyxl") as writer:
+            tabela.to_excel(writer, index=False, sheet_name="Reembolsos")
+        st.download_button("📥 Exportar fechamento Excel", excel.getvalue(),
+            file_name=f"FECHAMENTO_REEMBOLSOS_ARACRUZ_{ano}_{mes:02d}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.markdown("#### Atualizar lançamentos")
+        for r in registros:
+            with st.expander(f"{r.get('data')} — {r.get('descricao')} — {_fmt_brl(r.get('valor', 0))}"):
+                with st.form(f"ara_editar_{r['id']}"):
+                    desc = st.text_input("Descrição", value=r.get("descricao", ""))
+                    fornecedor = st.text_input("Fornecedor", value=r.get("fornecedor", ""))
+                    nf = st.text_input("NF", value=r.get("nota_fiscal", ""))
+                    solicitante = st.text_input("Solicitante", value=r.get("solicitante", ""))
+                    valor = st.number_input("Valor", min_value=0.0, value=float(r.get("valor", 0)), step=0.01, format="%.2f")
+                    obs = st.text_area("Observações", value=r.get("observacao", ""))
+                    status = st.selectbox("Situação do reembolso",
+                        ["Pendente", "Enviado ao cliente", "Reembolsado"],
+                        index=["Pendente", "Enviado ao cliente", "Reembolsado"].index(r.get("status", "Pendente")))
+                    salvar = st.form_submit_button("Salvar alterações")
+                if salvar:
+                    if not desc.strip() or valor <= 0:
+                        st.error("Informe descrição e valor válido.")
+                    else:
+                        novos = [dict(item) for item in registros]
+                        for item in novos:
+                            if item["id"] == r["id"]:
+                                item.update(descricao=desc.strip(), fornecedor=fornecedor.strip(),
+                                    nota_fiscal=nf.strip(), solicitante=solicitante.strip(),
+                                    valor=round(float(valor), 2), observacao=obs.strip(), status=status)
+                        if persistir(novos):
+                            st.rerun()
+                if r.get("anexo"):
+                    if st.button("📎 Baixar comprovante", key="ara_baixar_" + r["id"]):
+                        try:
+                            url = f"{SUPABASE_URL}/storage/v1/object/rh-fechamentos-aracruz/{r['anexo']}"
+                            req = urllib.request.Request(url, headers={"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+                            with urllib.request.urlopen(req, timeout=30) as resposta:
+                                st.session_state["ara_download_" + r["id"]] = resposta.read()
+                        except Exception as exc:
+                            st.error(f"Não foi possível recuperar o anexo: {exc}")
+                    if "ara_download_" + r["id"] in st.session_state:
+                        st.download_button("Salvar arquivo", st.session_state["ara_download_" + r["id"]],
+                            file_name=r["anexo"].split("/")[-1], key="ara_download_btn_" + r["id"])
+
 def tela_fechamento_tres_lagoas():
     st.markdown('### Fechamento Três Lagoas')
     hoje_tl = date.today()
@@ -3927,10 +4058,18 @@ cabecalho_sessao(mostrar_ajuda=True)
 _modulo_link = str(st.query_params.get("fechamento") or "").lower()
 if _modulo_link != st.session_state.get("fechamento_link_atual"):
     st.session_state["fechamento_link_atual"] = _modulo_link
-    st.session_state["pagina_portal_rh"] = {"cmc-bahia": "CMC_FINANCEIRO", "cmc-bahia-edicao": "CMC_BAHIA", "tres-lagoas": "TRES_LAGOAS", "aracruz": "PRINCIPAL"}.get(_modulo_link, "PRINCIPAL")
-if _modulo_link in ("cmc-bahia", "cmc-bahia-edicao", "tres-lagoas") and _perfil_atual != "ADMIN":
+    st.session_state["pagina_portal_rh"] = {"cmc-bahia": "CMC_FINANCEIRO", "cmc-bahia-edicao": "CMC_BAHIA", "tres-lagoas": "TRES_LAGOAS", "aracruz": "ARACRUZ_REEMBOLSOS"}.get(_modulo_link, "PRINCIPAL")
+if _modulo_link in ("cmc-bahia", "cmc-bahia-edicao", "tres-lagoas", "aracruz") and _perfil_atual != "ADMIN":
     st.error("Este fechamento está disponível somente para ADMIN.")
     st.stop()
+if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "ARACRUZ_REEMBOLSOS":
+    if st.button("← Voltar ao Portal RH", key="voltar_portal_aracruz"):
+        st.session_state["pagina_portal_rh"] = "PRINCIPAL"
+        st.query_params.pop("fechamento", None)
+        st.rerun()
+    tela_fechamento_aracruz()
+    st.stop()
+
 if _perfil_atual == "ADMIN" and st.session_state.get("pagina_portal_rh") == "TRES_LAGOAS":
     if st.button("← Voltar ao Portal RH", key="voltar_portal_tres_lagoas"):
         st.session_state["pagina_portal_rh"] = "PRINCIPAL"
@@ -3956,6 +4095,10 @@ if _perfil_atual == "ADMIN":
     if st.button("🏭 Fechamento CMC Bahia", key="abrir_cmc_bahia", type="primary"):
         st.session_state["pagina_portal_rh"] = "CMC_BAHIA"
         st.query_params["fechamento"] = "cmc-bahia-edicao"
+        st.rerun()
+    if st.button("Fechamento Aracruz", key="abrir_fechamento_aracruz"):
+        st.session_state["pagina_portal_rh"] = "ARACRUZ_REEMBOLSOS"
+        st.query_params["fechamento"] = "aracruz"
         st.rerun()
     if st.button("Fechamento Três Lagoas", key="abrir_tres_lagoas"):
         st.session_state["pagina_portal_rh"] = "TRES_LAGOAS"
