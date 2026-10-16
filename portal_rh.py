@@ -5047,7 +5047,10 @@ if alteracoes:
         disabled=not _confirmacoes_ok,
         use_container_width=True,
     )
-    _pronto_auto = _confirmacoes_ok and (not _aguardando_debounce or _salvar_agora)
+    # Desativa temporariamente o salvamento automático: em algumas sessões
+    # o widget pode reaplicar deltas antigos e modificar dias já confirmados.
+    # Só persiste quando o operador confirma explicitamente.
+    _pronto_auto = _confirmacoes_ok and _salvar_agora
     _erro_auto = st.session_state.get(_auto_erro_key)
     _tentar_novamente = False
     if _erro_auto:
@@ -5524,7 +5527,6 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
-
 
 
 
