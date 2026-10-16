@@ -3906,6 +3906,99 @@ def tela_fechamento_aracruz():
             file_name=f"FECHAMENTO_REEMBOLSOS_ARACRUZ_{ano}_{mes:02d}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.caption("Cálculo por item: valor pago ÷ 0,74 ÷ 0,90, arredondado a centavos.")
+
+        # PDF de apresentação ao cliente: apenas valores finais de repasse.
+        from reportlab.lib import colors as _pdf_colors
+        from reportlab.lib.pagesizes import A4 as _pdf_A4
+        from reportlab.lib.styles import getSampleStyleSheet as _pdf_styles, ParagraphStyle as _pdf_style
+        from reportlab.lib.enums import TA_RIGHT as _pdf_right
+        from reportlab.platypus import SimpleDocTemplate as _pdf_doc, Paragraph as _pdf_p
+        from reportlab.platypus import Table as _pdf_table, TableStyle as _pdf_ts, Spacer as _pdf_sp
+        from reportlab.lib.units import mm as _pdf_mm
+        from xml.sax.saxutils import escape as _pdf_escape
+
+        def _gerar_pdf_aracruz():
+            memoria = BytesIO()
+            documento = _pdf_doc(memoria, pagesize=_pdf_A4,
+                rightMargin=16*_pdf_mm, leftMargin=16*_pdf_mm,
+                topMargin=18*_pdf_mm, bottomMargin=17*_pdf_mm)
+            estilos = _pdf_styles()
+            titulo = _pdf_style("AraTitulo", parent=estilos["Heading1"],
+                fontName="Helvetica-Bold", fontSize=17, leading=22,
+                textColor=_pdf_colors.HexColor("#183C34"), spaceAfter=8)
+            corpo = _pdf_style("AraCorpo", parent=estilos["Normal"],
+                fontName="Helvetica", fontSize=8.5, leading=12)
+            pequeno = _pdf_style("AraPequeno", parent=corpo, fontSize=7.5, leading=10)
+            direita = _pdf_style("AraDireita", parent=corpo, alignment=_pdf_right)
+            historia = [
+                _pdf_p("10 SUL  |  FECHAMENTO ARACRUZ", titulo),
+                _pdf_p("DEMONSTRATIVO DE DESPESAS PARA RESSARCIMENTO", corpo),
+                _pdf_sp(1, 7*_pdf_mm),
+                _pdf_p(f"<b>Cliente:</b> Suzano &nbsp;&nbsp;&nbsp; <b>Competência:</b> {mes:02d}/{ano}", corpo),
+                _pdf_p(f"<b>Emissão:</b> {date.today().strftime('%d/%m/%Y')}", corpo),
+                _pdf_sp(1, 7*_pdf_mm),
+            ]
+            linhas = [[_pdf_p("<b>DATA</b>", pequeno),
+                       _pdf_p("<b>DESCRIÇÃO</b>", pequeno),
+                       _pdf_p("<b>FORNECEDOR</b>", pequeno),
+                       _pdf_p("<b>NF</b>", pequeno),
+                       _pdf_p("<b>REPASSE (R$)</b>", pequeno)]]
+            for item in registros:
+                try:
+                    data_br = datetime.strptime(str(item.get("data", "")), "%Y-%m-%d").strftime("%d/%m/%Y")
+                except ValueError:
+                    data_br = str(item.get("data", ""))
+                linhas.append([
+                    _pdf_p(_pdf_escape(data_br), pequeno),
+                    _pdf_p(_pdf_escape(str(item.get("descricao", ""))), pequeno),
+                    _pdf_p(_pdf_escape(str(item.get("fornecedor", ""))), pequeno),
+                    _pdf_p(_pdf_escape(str(item.get("nota_fiscal", ""))), pequeno),
+                    _pdf_p(_fmt_qtd(repasse(item)), direita)])
+            tabela_pdf = _pdf_table(linhas,
+                colWidths=[22*_pdf_mm, 67*_pdf_mm, 39*_pdf_mm, 19*_pdf_mm, 31*_pdf_mm],
+                repeatRows=1, hAlign="LEFT")
+            tabela_pdf.setStyle(_pdf_ts([
+                ("BACKGROUND", (0,0), (-1,0), _pdf_colors.HexColor("#E8F0ED")),
+                ("TEXTCOLOR", (0,0), (-1,0), _pdf_colors.HexColor("#183C34")),
+                ("ROWBACKGROUNDS", (0,1), (-1,-1), [_pdf_colors.white, _pdf_colors.HexColor("#F7F9F8")]),
+                ("VALIGN", (0,0), (-1,-1), "TOP"),
+                ("LEFTPADDING", (0,0), (-1,-1), 7),
+                ("RIGHTPADDING", (0,0), (-1,-1), 7),
+                ("TOPPADDING", (0,0), (-1,-1), 8),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+                ("LINEBELOW", (0,0), (-1,0), 0.8, _pdf_colors.HexColor("#B6CAC2")),
+                ("LINEBELOW", (0,1), (-1,-1), 0.25, _pdf_colors.HexColor("#E0E7E3")),
+            ]))
+            historia.extend([tabela_pdf, _pdf_sp(1, 7*_pdf_mm)])
+            total_pdf = _pdf_table([[
+                _pdf_p("<b>TOTAL A REPASSAR À SUZANO</b>", corpo),
+                _pdf_p(f"<b>{_fmt_brl(pendente + recebido)}</b>", direita)
+            ]], colWidths=[128*_pdf_mm, 50*_pdf_mm])
+            total_pdf.setStyle(_pdf_ts([
+                ("BACKGROUND", (0,0), (-1,-1), _pdf_colors.HexColor("#E8F0ED")),
+                ("TOPPADDING", (0,0), (-1,-1), 13),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 13),
+                ("LEFTPADDING", (0,0), (-1,-1), 10),
+                ("RIGHTPADDING", (0,0), (-1,-1), 10),
+            ]))
+            historia.append(total_pdf)
+            historia.extend([_pdf_sp(1, 6*_pdf_mm),
+                _pdf_p("Valores finais de repasse conforme condições comerciais aplicáveis.", pequeno)])
+            def rodape(canvas, doc):
+                canvas.saveState()
+                canvas.setFont("Helvetica", 8)
+                canvas.setFillColor(_pdf_colors.HexColor("#64746D"))
+                canvas.drawString(16*_pdf_mm, 11*_pdf_mm, "10 Sul | Fechamento Aracruz")
+                canvas.drawRightString(194*_pdf_mm, 11*_pdf_mm, f"Página {doc.page}")
+                canvas.restoreState()
+            documento.build(historia, onFirstPage=rodape, onLaterPages=rodape)
+            return memoria.getvalue()
+
+        st.download_button("📄 Baixar fechamento em PDF — Suzano",
+            data=_gerar_pdf_aracruz(),
+            file_name=f"FECHAMENTO_ARACRUZ_SUZANO_{ano}_{mes:02d}.pdf",
+            mime="application/pdf", type="primary",
+            key=f"ara_pdf_{ano}_{mes:02d}")
         st.markdown("#### Atualizar lançamentos")
         for r in registros:
             with st.expander(f"{r.get('data')} — {r.get('descricao')} — {_fmt_brl(r.get('valor', 0))}"):
