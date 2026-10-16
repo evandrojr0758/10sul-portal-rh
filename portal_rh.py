@@ -3877,12 +3877,31 @@ def tela_fechamento_aracruz():
         resumo_suzano = tabela[["Data", "Descrição", "Fornecedor", "NF", "Repasse Suzano (R$)"]].copy()
         resumo_suzano.loc[len(resumo_suzano)] = ["", "TOTAL A REPASSAR À SUZANO", "", "", round(pendente + recebido, 2)]
         st.markdown("#### Resumo para envio ao cliente")
-        st.dataframe(resumo_suzano, use_container_width=True, hide_index=True)
-        st.dataframe(tabela, use_container_width=True, hide_index=True)
+        st.dataframe(
+            resumo_suzano.style.format({"Repasse Suzano (R$)": lambda v: _fmt_qtd(v)}),
+            use_container_width=True, hide_index=True,
+        )
+        st.dataframe(
+            tabela.style.format({
+                "Valor pago (R$)": lambda v: _fmt_qtd(v),
+                "Repasse Suzano (R$)": lambda v: _fmt_qtd(v),
+            }),
+            use_container_width=True, hide_index=True,
+        )
         excel = BytesIO()
         with pd.ExcelWriter(excel, engine="openpyxl") as writer:
             resumo_suzano.to_excel(writer, index=False, sheet_name="Resumo Suzano")
             tabela.to_excel(writer, index=False, sheet_name="Controle Interno")
+            for aba, colunas in (("Resumo Suzano", ["Repasse Suzano (R$)"]),
+                                 ("Controle Interno", ["Valor pago (R$)", "Repasse Suzano (R$)"])):
+                ws = writer.sheets[aba]
+                headers = {cell.value: cell.column for cell in ws[1]}
+                for nome in colunas:
+                    if nome in headers:
+                        for linha in ws.iter_rows(min_row=2, min_col=headers[nome],
+                                                   max_col=headers[nome]):
+                            for cell in linha:
+                                cell.number_format = '#,##0.00'
         st.download_button("📥 Exportar fechamento Excel", excel.getvalue(),
             file_name=f"FECHAMENTO_REEMBOLSOS_ARACRUZ_{ano}_{mes:02d}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
