@@ -5038,7 +5038,16 @@ if alteracoes:
                 st.rerun(scope="app")
         _aguardar_salvamento_rh()
         _salvar_grade_slot.caption("⏳ Aguardando 5 segundos sem alterações para salvar...")
-    _pronto_auto = pode_salvar and not edicoes_salvas and not _aguardando_debounce
+    _confirmacoes_ok = pode_salvar and not edicoes_salvas
+    # Salvamento manual de emergência: não depende do relógio do fragmento.
+    _salvar_agora = st.button(
+        "💾 Salvar agora",
+        key=f"rh_salvar_agora_{_periodo_key}_{_escopo_hash}",
+        type="primary",
+        disabled=not _confirmacoes_ok,
+        use_container_width=True,
+    )
+    _pronto_auto = _confirmacoes_ok and (not _aguardando_debounce or _salvar_agora)
     _erro_auto = st.session_state.get(_auto_erro_key)
     _tentar_novamente = False
     if _erro_auto:
@@ -5052,7 +5061,7 @@ if alteracoes:
 
     # A alteração do editor já provoca rerun. Não é necessário clicar em Salvar.
     # Após erro, aguarda tentativa explícita para não repetir chamadas indefinidamente.
-    if _pronto_auto and (not _erro_auto or _tentar_novamente):
+    if _pronto_auto and (not _erro_auto or _tentar_novamente or _salvar_agora):
         _salvar_grade_slot.caption("⏳ Salvando...")
         _gravados = []
         try:
@@ -5515,7 +5524,6 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
-
 
 
 
