@@ -4960,7 +4960,8 @@ if alteracoes:
                 st.error("Selecione meio período ou dia inteiro.")
             else:
                 st.session_state.rh_atestados_periodo[chave] = (periodo, nota.strip())
-                st.session_state[_nonce_key] += 1
+                # Não recria o editor durante a confirmação: a seleção do
+                # atestado ainda está no rascunho e será salva no rerun.
                 st.rerun()
 
     # Só abre a classificação depois das autorizações de edição e LB/COMP.
@@ -5497,7 +5498,6 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
-
 
 
 
