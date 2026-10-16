@@ -3783,6 +3783,14 @@ def tela_fechamento_aracruz():
     a, b = st.columns(2)
     mes = a.selectbox("Mês de competência", list(range(1, 13)), index=hoje.month - 1, key="ara_reembolso_mes")
     ano = int(b.number_input("Ano de competência", min_value=2020, max_value=2100, value=hoje.year, key="ara_reembolso_ano"))
+    try:
+        buckets = _storage_cmc("GET", "bucket") or []
+        if not any(b.get("id") == "rh-fechamentos-aracruz" for b in buckets):
+            _storage_cmc("POST", "bucket", {"id": "rh-fechamentos-aracruz",
+                "name": "rh-fechamentos-aracruz", "public": False})
+    except Exception as exc:
+        st.error(f"Não foi possível preparar armazenamento dos reembolsos: {exc}")
+        st.stop()
     caminho = f"object/rh-fechamentos-aracruz/reembolsos-{ano}-{mes:02d}.json"
     chave = f"ara_reembolso_{ano}_{mes:02d}"
     if st.session_state.get("ara_reembolso_competencia") != chave:
