@@ -487,7 +487,17 @@ def ler_frequencia(ano, mes):
         "select=*&data=gte." + urllib.parse.quote(ini) +
         "&data=lte." + urllib.parse.quote(fim)
     )
-    return sb("GET", "rh_frequencia", params) or []
+    # PostgREST limita a resposta padrão a 1000 registros. Paginar é
+    # obrigatório para não omitir colaboradores/dias já salvos.
+    registros = []
+    pagina = 0
+    while True:
+        lote = sb("GET", "rh_frequencia", params + f"&order=data.asc,colaborador_id.asc&limit=1000&offset={pagina * 1000}") or []
+        registros.extend(lote)
+        if len(lote) < 1000:
+            break
+        pagina += 1
+    return registros
 
 
 
@@ -5527,7 +5537,6 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
-
 
 
 
