@@ -202,10 +202,8 @@ TARIFAS_R10 = {'50': '116.90', '100': '155.87', '200': '311.74'}
 
 def horarios_padrao(data):
     data = date.fromisoformat(data) if isinstance(data, str) else data
-    if data.weekday() != 5:
-        return {}
     return {'entrada1': '07:30', 'saida1': '11:00', 'entrada2': '12:00', 'saida2': '17:18',
-            'tarifas': TARIFAS_R10.copy(), 'origem': 'padrao_sabado'}
+            'tarifas': TARIFAS_R10.copy(), 'origem': 'padrao'}
 
 
 def apuracao_do_registro(r):
@@ -306,8 +304,8 @@ def editar_apuracao(sb, registros):
         format_func=lambda k: f"{date.fromisoformat(mapa[k]['data']).strftime('%d/%m/%Y')} — {mapa[k]['colaborador']} — {mapa[k]['funcao']}")
     r = mapa[rid]
     a = apuracao_do_registro(r)
-    if a.get('origem') == 'padrao_sabado':
-        st.info('Horários padrão de sábado: 07:30–11:00 e 12:00–17:18. Confira as batidas no ponto eletrônico e ajuste antes de salvar.')
+    if a.get('origem') in ('padrao', 'padrao_sabado'):
+        st.info('Horários padrão: 07:30–11:00 e 12:00–17:18. Confira as batidas no ponto eletrônico e ajuste antes de salvar.')
     with st.form(f'he_apuracao_{rid}_{r.get("apuracao_versao", 0)}'):
         cols = st.columns(4)
         campos = ('entrada1', 'saida1', 'entrada2', 'saida2')
@@ -456,7 +454,7 @@ def tela_gestao(sb):
             'Entrada 1': a.get('entrada1', ''), 'Saída 1': a.get('saida1', ''),
             'Entrada 2': a.get('entrada2', ''), 'Saída 2': a.get('saida2', ''),
             'Total de horas': hhmm(c['total_minutos']) if preenchido else 'Pendente',
-            'Conferência dos horários': ('Padrão de sábado — conferir no ponto' if a.get('origem') == 'padrao_sabado'
+            'Conferência dos horários': ('Padrão — conferir no ponto' if a.get('origem') in ('padrao', 'padrao_sabado')
                                        else 'Horários salvos' if preenchido else 'Pendente'),
             'Horas sábado até 12h': hhmm(c['sabado_ate_12']),
             'Horas sábado após 12h': hhmm(c['sabado_apos_12']),
@@ -480,8 +478,8 @@ def tela_gestao(sb):
     bruto_card.metric('Valor bruto no período', reais(bruto_total))
     desconto_card.metric('Descontos no período', reais(desconto_periodo))
     liquido_card.metric('Valor total apurado no período', reais(total))
-    if any(apuracao_do_registro(r).get('origem') == 'padrao_sabado' for r in registros):
-        st.caption('O total inclui os horários padrão de sábado ainda aguardando conferência no ponto eletrônico.')
+    if any(apuracao_do_registro(r).get('origem') in ('padrao', 'padrao_sabado') for r in registros):
+        st.caption('O total inclui os horários padrão ainda aguardando conferência no ponto eletrônico.')
     if pendentes:
         st.caption(f'{pendentes} registro(s) aguardando horários; não entram no valor total.')
     st.dataframe(tabela, hide_index=True, use_container_width=True,
