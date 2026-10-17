@@ -318,10 +318,35 @@ def editar_apuracao(sb, registros):
             st.error('Não foi possível confirmar o salvamento. Os horários digitados foram mantidos; tente novamente.')
     if st.session_state.get('he_apuracao_salva'):
         st.success(st.session_state.pop('he_apuracao_salva'))
+    with st.expander('🗑️ Excluir registro selecionado', expanded=False):
+        data_registro = date.fromisoformat(r['data']).strftime('%d/%m/%Y')
+        st.write(f"Colaborador: **{r['colaborador']}** • Data: **{data_registro}** • Função: **{r['funcao']}**")
+        st.caption('Exclui somente a participação deste colaborador nesta data, incluindo horários e descontos. '
+                   'O cadastro do colaborador e as demais solicitações permanecem salvos. Depois, você poderá lançar novamente nesta data.')
+        versao = int(r.get('apuracao_versao') or 0)
+        with st.form(f'he_excluir_{rid}_{versao}'):
+            confirmar = st.checkbox('Confirmo a exclusão deste registro')
+            excluir = st.form_submit_button('Excluir registro', type='secondary')
+        if excluir:
+            if not confirmar:
+                st.warning('Marque a confirmação para excluir o registro selecionado.')
+            else:
+                try:
+                    removidos = sb('DELETE', 'rh_horas_extras',
+                        f'id=eq.{int(rid)}&apuracao_versao=eq.{versao}', prefer='return=representation') or []
+                    if removidos:
+                        st.session_state['he_exclusao_sucesso'] = f"Registro de {r['colaborador']} em {data_registro} excluído."
+                        st.rerun()
+                    else:
+                        st.warning('O registro foi alterado ou já foi excluído em outra sessão. Atualize a lista antes de tentar novamente.')
+                except Exception:
+                    st.error('Não foi possível confirmar a exclusão. Atualize a lista para conferir e tente novamente.')
 
 
 def tela_gestao(sb):
     st.subheader('⏱️ Solicitações de horas extras')
+    if st.session_state.get('he_exclusao_sucesso'):
+        st.success(st.session_state.pop('he_exclusao_sucesso'))
     st.caption('Os registros permanecem salvos. Consulte qualquer período nas datas abaixo, inclusive meses anteriores.')
     st.markdown('#### Valores de hora extra — Proposta Comercial R10')
     st.caption('Referência: Proposta Comercial 030724 — Revisão 10, página 18, seção “Preço”. Valores com DSR incluído.')
