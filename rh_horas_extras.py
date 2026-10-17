@@ -185,6 +185,22 @@ def tela_supervisor(sb, token):
 def tela_gestao(sb):
     st.subheader('⏱️ Solicitações de horas extras')
     st.caption('Os registros permanecem salvos. Consulte qualquer período nas datas abaixo, inclusive meses anteriores.')
+    st.markdown('#### Valores de hora extra — Proposta Comercial R10')
+    st.caption('Referência: Proposta Comercial 030724 — Revisão 10, página 18, seção “Preço”. Valores com DSR incluído.')
+    st.dataframe(pd.DataFrame([
+        {'Tipo de hora extra': '50% + DSR',
+         'Quando se aplica': 'Excedente de jornada de segunda a sexta-feira',
+         'Valor': 'R$ 116,90'},
+        {'Tipo de hora extra': '100% + DSR',
+         'Quando se aplica': 'Excedente de jornada no sábado trabalhado até as 12h',
+         'Valor': 'R$ 155,87'},
+        {'Tipo de hora extra': '200% + DSR',
+         'Quando se aplica': 'Sábado após as 12h, domingos, feriados e folgas trabalhadas',
+         'Valor': 'R$ 311,74'},
+    ]), hide_index=True, use_container_width=True)
+    st.info('Cobrança para horas extras solicitadas pela contratante para serviços fora da programação gerados pela contratante. '
+            'A autorização e a validação da responsabilidade devem ocorrer durante a execução das atividades, pela contratante e pela contratada.')
+
     with st.expander('🔗 Link para o supervisor', expanded=False):
         try:
             link = link_supervisor(sb)
