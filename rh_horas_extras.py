@@ -66,6 +66,24 @@ def resumo_por_funcao(registros):
     return resumo.sort_values(['Colaboradores', 'Função'], ascending=[False, True]).reset_index(drop=True)
 
 
+def texto_resumo_envio(linhas):
+    """Resumo dos colaboradores efetivamente registrados, pronto para compartilhar."""
+    validas = [r for r in linhas if r.get('Função') != 'Nenhuma nova inclusão']
+    if not validas:
+        return ''
+    liderancas = list(dict.fromkeys(str(r.get('Solicitação de quem?') or '').strip() for r in validas))
+    datas = list(dict.fromkeys(str(r.get('Data') or '') for r in validas))
+    atuacoes = list(dict.fromkeys(str(r.get('Finalidade / Onde vai atuar?') or 'Não informado').strip() for r in validas))
+    resumo = resumo_por_funcao(validas)
+    partes = ['*Liderança:* ' + ', '.join(liderancas),
+              '*Data:* ' + ', '.join(datas),
+              '', '*Colaboradores por função:*']
+    partes.extend(f"• {r['Função']}: {int(r['Colaboradores'])}" for r in resumo.to_dict('records'))
+    partes.extend(['*Total de colaboradores:* ' + str(int(resumo['Colaboradores'].sum())),
+                   '', '*Atuando em:* ' + '; '.join(atuacoes)])
+    return '\n'.join(partes)
+
+
 def tela_supervisor(sb, token):
     st.title('⏱️ Solicitação de hora extra')
     st.caption('10 Sul • Portal RH • Supervisor')
@@ -99,6 +117,14 @@ def tela_supervisor(sb, token):
             columns={'Colaboradores': 'Quantidade'}), hide_index=True, use_container_width=True)
         st.dataframe(pd.DataFrame(recibo['linhas']).assign(**{'Finalidade / Onde vai atuar?': [r.get('Finalidade / Onde vai atuar?') or 'Não informado' for r in recibo['linhas']]})[['Data', 'Solicitação de quem?', 'Colaborador', 'Função', 'Finalidade / Onde vai atuar?']],
                      hide_index=True, use_container_width=True)
+        texto_envio = texto_resumo_envio(recibo['linhas'])
+        if texto_envio:
+            st.markdown('#### Resumo para envio')
+            st.text(texto_envio.replace('*', ''))
+            st.link_button('📲 Enviar resumo pelo WhatsApp',
+                'https://wa.me/?text=' + quote(texto_envio, safe=''),
+                type='primary', use_container_width=True)
+            st.caption('Escolha o contato ou grupo no WhatsApp e confirme o envio.')
         if st.button('Nova solicitação', type='primary'):
             for key in ('he_recibo', 'he_data', 'he_solicitante', 'he_selecionados', 'he_protocolo', 'he_finalidade_atuacao'):
                 st.session_state.pop(key, None)
@@ -126,6 +152,7 @@ def tela_supervisor(sb, token):
         key='he_finalidade_atuacao', max_chars=2000,
         placeholder='Ex.: Manutenção das carretas na oficina de Aracruz — revisão e troca de lonas.',
         help='Informe o serviço e o local de atuação dos colaboradores selecionados nesta solicitação.')
+    st.caption('Após registrar a solicitação, use “Enviar resumo pelo WhatsApp” para compartilhar com a liderança primeiro.')
     st.session_state.setdefault('he_protocolo', str(uuid.uuid4()))
     if st.button('Enviar solicitação ao RH', type='primary', use_container_width=True):
         try:
@@ -211,3 +238,4 @@ def tela_gestao(sb):
     st.download_button('📥 Exportar solicitações em Excel', excel.getvalue(),
         file_name=f'horas_extras_{inicio.isoformat()}_{fim.isoformat()}.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
