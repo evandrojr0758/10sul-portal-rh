@@ -1,5 +1,6 @@
 """Solicitação de horas extras com acesso restrito ao link do supervisor."""
 from datetime import date, datetime
+import calendar
 from io import BytesIO
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -50,6 +51,21 @@ def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id, f
     return linhas
 
 
+def resumo_por_funcao(registros):
+    """Conta pessoas distintas e participações por dia sem misturar os dois totais."""
+    colunas = ['Função', 'Colaboradores', 'Participações (colaborador/dia)']
+    if not registros:
+        return pd.DataFrame(columns=colunas)
+    linhas = [{'Função': str(r.get('funcao') or r.get('Função') or 'Não cadastrada').strip().upper() or 'NÃO CADASTRADA',
+               'Pessoa': str(r.get('colaborador_id') or r.get('id') or r.get('colaborador') or r.get('Colaborador') or '')}
+              for r in registros]
+    base = pd.DataFrame(linhas)
+    resumo = base.groupby('Função', as_index=False).agg(
+        **{'Colaboradores': ('Pessoa', 'nunique'),
+           'Participações (colaborador/dia)': ('Pessoa', 'size')})
+    return resumo.sort_values(['Colaboradores', 'Função'], ascending=[False, True]).reset_index(drop=True)
+
+
 def tela_supervisor(sb, token):
     st.title('⏱️ Solicitação de hora extra')
     st.caption('10 Sul • Portal RH • Supervisor')
@@ -78,6 +94,9 @@ def tela_supervisor(sb, token):
         recibo = st.session_state['he_recibo']
         st.success(recibo['mensagem'])
         st.caption('Protocolo: ' + recibo['protocolo'])
+        st.markdown('#### Resumo por função')
+        st.dataframe(resumo_por_funcao([r for r in recibo['linhas'] if r.get('Função') != 'Nenhuma nova inclusão'])[['Função', 'Colaboradores']].rename(
+            columns={'Colaboradores': 'Quantidade'}), hide_index=True, use_container_width=True)
         st.dataframe(pd.DataFrame(recibo['linhas']).assign(**{'Finalidade / Onde vai atuar?': [r.get('Finalidade / Onde vai atuar?') or 'Não informado' for r in recibo['linhas']]})[['Data', 'Solicitação de quem?', 'Colaborador', 'Função', 'Finalidade / Onde vai atuar?']],
                      hide_index=True, use_container_width=True)
         if st.button('Nova solicitação', type='primary'):
@@ -94,6 +113,11 @@ def tela_supervisor(sb, token):
         format_func=lambda cid: f"{mapa[cid]['colaborador']} • {mapa[cid].get('funcao') or 'Não cadastrada'} (#{cid})",
         key='he_selecionados', placeholder='Digite para buscar um ou mais colaboradores')
     if selecionados:
+        st.markdown('#### Resumo por função')
+        st.metric('Total de colaboradores selecionados', len(selecionados))
+        st.dataframe(resumo_por_funcao([mapa[cid] for cid in selecionados])[['Função', 'Colaboradores']].rename(
+            columns={'Colaboradores': 'Quantidade'}), hide_index=True, use_container_width=True)
+        st.markdown('#### Colaboradores selecionados')
         st.dataframe(pd.DataFrame([{'Colaborador': mapa[cid]['colaborador'],
                                    'Função': mapa[cid].get('funcao') or 'Não cadastrada'}
                                   for cid in selecionados]), hide_index=True, use_container_width=True)
@@ -133,7 +157,7 @@ def tela_supervisor(sb, token):
 
 def tela_gestao(sb):
     st.subheader('⏱️ Solicitações de horas extras')
-    st.caption('Consulte as solicitações enviadas pelos supervisores.')
+    st.caption('Os registros permanecem salvos. Consulte qualquer período nas datas abaixo, inclusive meses anteriores.')
     with st.expander('🔗 Link para o supervisor', expanded=False):
         try:
             link = link_supervisor(sb)
@@ -143,7 +167,7 @@ def tela_gestao(sb):
             st.error('Não foi possível carregar o link do supervisor.')
     a, b = st.columns(2)
     inicio = a.date_input('De', value=hoje().replace(day=1), format='DD/MM/YYYY', key='he_filtro_inicio')
-    fim = b.date_input('Até', value=hoje(), format='DD/MM/YYYY', key='he_filtro_fim')
+    fim = b.date_input('Até', value=hoje().replace(day=calendar.monthrange(hoje().year, hoje().month)[1]), format='DD/MM/YYYY', key='he_filtro_fim')
     if inicio > fim:
         st.warning('A data inicial deve ser anterior ou igual à data final.')
         return
@@ -161,10 +185,18 @@ def tela_gestao(sb):
     except Exception:
         st.error('Não foi possível consultar as solicitações salvas. Tente atualizar novamente.')
         return
-    st.metric('Colaboradores programados no período', len(registros))
+    pessoas = len({r['colaborador_id'] for r in registros})
+    a, b = st.columns(2)
+    a.metric('Colaboradores distintos no período', pessoas)
+    b.metric('Participações (colaborador/dia)', len(registros))
+    st.caption('Cada colaborador conta uma vez por função. Se trabalhar em vários dias, cada dia soma uma participação.')
     if not registros:
         st.info('Nenhuma solicitação registrada neste período.')
         return
+    resumo = resumo_por_funcao(registros)
+    st.markdown('#### Resumo por função — período selecionado')
+    st.dataframe(resumo, hide_index=True, use_container_width=True)
+    st.markdown('#### Histórico de solicitações')
     tabela = pd.DataFrame([{'Data': date.fromisoformat(r['data']).strftime('%d/%m/%Y'),
         'Solicitação de quem?': r['solicitante'], 'Colaborador': r['colaborador'],
         'Função': r['funcao'], 'Finalidade / Onde vai atuar?': r.get('finalidade_atuacao') or 'Não informado',
@@ -175,6 +207,7 @@ def tela_gestao(sb):
     excel = BytesIO()
     with pd.ExcelWriter(excel, engine='openpyxl') as writer:
         tabela.to_excel(writer, index=False, sheet_name='Horas extras')
+        resumo.to_excel(writer, index=False, sheet_name='Resumo por função')
     st.download_button('📥 Exportar solicitações em Excel', excel.getvalue(),
         file_name=f'horas_extras_{inicio.isoformat()}_{fim.isoformat()}.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
