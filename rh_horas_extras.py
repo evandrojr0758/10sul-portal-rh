@@ -24,7 +24,7 @@ def link_supervisor(sb):
     return BASE_URL + '?horas_extras=' + quote(rows[0]['token'], safe='')
 
 
-def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id):
+def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id, finalidade_atuacao):
     solicitante = str(solicitante or '').strip()
     if not solicitante:
         raise ValueError('Informe de quem é a solicitação.')
@@ -32,6 +32,11 @@ def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id):
         raise ValueError('O nome do solicitante deve ter até 200 caracteres.')
     if not selecionados:
         raise ValueError('Selecione pelo menos um colaborador.')
+    finalidade_atuacao = str(finalidade_atuacao or '').strip()
+    if not finalidade_atuacao:
+        raise ValueError('Informe a finalidade da hora extra e onde o colaborador vai atuar.')
+    if len(finalidade_atuacao) > 2000:
+        raise ValueError('A finalidade e o local devem ter até 2000 caracteres.')
     mapa = {int(c['id']): c for c in cadastro if c.get('ativo', True)}
     linhas = []
     for cid in dict.fromkeys(selecionados):
@@ -39,7 +44,7 @@ def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id):
             raise ValueError('Um colaborador não está mais ativo. Atualize a seleção.')
         c = mapa[int(cid)]
         linhas.append({'solicitacao_id': str(solicitacao_id), 'data': data.isoformat(),
-                       'solicitante': solicitante, 'colaborador_id': int(cid),
+                       'solicitante': solicitante, 'finalidade_atuacao': finalidade_atuacao, 'colaborador_id': int(cid),
                        'colaborador': str(c['colaborador']).strip(),
                        'funcao': str(c.get('funcao') or '').strip() or 'Não cadastrada'})
     return linhas
@@ -73,10 +78,10 @@ def tela_supervisor(sb, token):
         recibo = st.session_state['he_recibo']
         st.success(recibo['mensagem'])
         st.caption('Protocolo: ' + recibo['protocolo'])
-        st.dataframe(pd.DataFrame(recibo['linhas'])[['Data', 'Solicitação de quem?', 'Colaborador', 'Função']],
+        st.dataframe(pd.DataFrame(recibo['linhas']).assign(**{'Finalidade / Onde vai atuar?': [r.get('Finalidade / Onde vai atuar?') or 'Não informado' for r in recibo['linhas']]})[['Data', 'Solicitação de quem?', 'Colaborador', 'Função', 'Finalidade / Onde vai atuar?']],
                      hide_index=True, use_container_width=True)
         if st.button('Nova solicitação', type='primary'):
-            for key in ('he_recibo', 'he_data', 'he_solicitante', 'he_selecionados', 'he_protocolo'):
+            for key in ('he_recibo', 'he_data', 'he_solicitante', 'he_selecionados', 'he_protocolo', 'he_finalidade_atuacao'):
                 st.session_state.pop(key, None)
             st.rerun()
         return
@@ -93,13 +98,17 @@ def tela_supervisor(sb, token):
                                    'Função': mapa[cid].get('funcao') or 'Não cadastrada'}
                                   for cid in selecionados]), hide_index=True, use_container_width=True)
         st.caption(f'{len(selecionados)} colaborador(es) selecionado(s).')
+    finalidade_atuacao = st.text_area('Finalidade da hora extra / Onde vai atuar?',
+        key='he_finalidade_atuacao', max_chars=2000,
+        placeholder='Ex.: Manutenção das carretas na oficina de Aracruz — revisão e troca de lonas.',
+        help='Informe o serviço e o local de atuação dos colaboradores selecionados nesta solicitação.')
     st.session_state.setdefault('he_protocolo', str(uuid.uuid4()))
     if st.button('Enviar solicitação ao RH', type='primary', use_container_width=True):
         try:
             # Relê o cadastro no envio: preserva o vínculo e a função atuais.
             atuais = sb('GET', 'rh_colaboradores',
                         'select=id,colaborador,funcao,ativo&ativo=eq.true&order=colaborador.asc') or []
-            linhas = preparar_linhas(data, solicitante, selecionados, atuais, st.session_state['he_protocolo'])
+            linhas = preparar_linhas(data, solicitante, selecionados, atuais, st.session_state['he_protocolo'], finalidade_atuacao)
             novos = sb('POST', 'rh_horas_extras', 'on_conflict=data,colaborador_id', linhas,
                        'resolution=ignore-duplicates,return=representation') or []
             repetidos = len(linhas) - len(novos)
@@ -109,11 +118,12 @@ def tela_supervisor(sb, token):
             st.session_state['he_recibo'] = {'mensagem': mensagem,
                 'protocolo': st.session_state['he_protocolo'],
                 'linhas': [{'Data': data.strftime('%d/%m/%Y'), 'Solicitação de quem?': r['solicitante'],
-                            'Colaborador': r['colaborador'], 'Função': r['funcao']} for r in novos]}
+                            'Colaborador': r['colaborador'], 'Função': r['funcao'],
+                            'Finalidade / Onde vai atuar?': r.get('finalidade_atuacao') or 'Não informado'} for r in novos]}
             if not novos:
                 st.session_state['he_recibo']['linhas'] = [{'Data': data.strftime('%d/%m/%Y'),
                     'Solicitação de quem?': solicitante.strip(), 'Colaborador': 'Todos já registrados nesta data',
-                    'Função': 'Nenhuma nova inclusão'}]
+                    'Função': 'Nenhuma nova inclusão', 'Finalidade / Onde vai atuar?': finalidade_atuacao.strip()}]
             st.rerun()
         except ValueError as exc:
             st.warning(str(exc))
@@ -157,7 +167,8 @@ def tela_gestao(sb):
         return
     tabela = pd.DataFrame([{'Data': date.fromisoformat(r['data']).strftime('%d/%m/%Y'),
         'Solicitação de quem?': r['solicitante'], 'Colaborador': r['colaborador'],
-        'Função': r['funcao'], 'Protocolo': r['solicitacao_id'],
+        'Função': r['funcao'], 'Finalidade / Onde vai atuar?': r.get('finalidade_atuacao') or 'Não informado',
+        'Protocolo': r['solicitacao_id'],
         'Registrado em': datetime.fromisoformat(r['criado_em']).astimezone(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y %H:%M')}
         for r in registros])
     st.dataframe(tabela, hide_index=True, use_container_width=True)
