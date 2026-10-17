@@ -1,5 +1,6 @@
 """Solicitação de horas extras com acesso restrito ao link do supervisor."""
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 import calendar
 from io import BytesIO
 from urllib.parse import quote
@@ -182,6 +183,119 @@ def tela_supervisor(sb, token):
             st.error('Não foi possível confirmar o envio. Seus dados foram mantidos; tente enviar novamente.')
 
 
+
+TARIFAS_R10 = {'50': '116.90', '100': '155.87', '200': '311.74'}
+
+
+def apurar_horas(data, entrada1='', saida1='', entrada2='', saida2='', especial=False, tarifas=None):
+    """Apura minutos por dia/faixa, sem cobrar o intervalo e sem arredondar horas."""
+    data = date.fromisoformat(data) if isinstance(data, str) else data
+    tarifas = tarifas or TARIFAS_R10
+    minutos = {'50': 0, '100': 0, '200': 0}
+    sabado_antes = sabado_depois = 0
+    anterior = None
+    for entrada, saida in ((entrada1, saida1), (entrada2, saida2)):
+        if not entrada and not saida:
+            continue
+        if not entrada or not saida:
+            raise ValueError('Preencha a entrada e a saída de cada período utilizado.')
+        try:
+            ini_h = datetime.strptime(str(entrada).strip(), '%H:%M').time()
+            fim_h = datetime.strptime(str(saida).strip(), '%H:%M').time()
+        except ValueError:
+            raise ValueError('Use horários no formato HH:MM, por exemplo 08:00.')
+        dia = anterior.date() if anterior else data
+        ini = datetime.combine(dia, ini_h)
+        if anterior and ini < anterior:
+            raise ValueError('A entrada 2 deve ser igual ou posterior à saída 1.')
+        fim = datetime.combine(dia, fim_h)
+        if fim == ini:
+            raise ValueError('A entrada e a saída não podem ser iguais.')
+        if fim < ini:
+            fim += timedelta(days=1)
+        if fim > datetime.combine(data + timedelta(days=1), time(23, 59)):
+            raise ValueError('Confira os horários: a apuração excede o dia seguinte.')
+        anterior = fim
+        atual = ini
+        while atual < fim:
+            if atual.weekday() == 5:
+                corte = datetime.combine(atual.date(), time(12))
+                antes = atual < corte
+                limite = corte if antes else datetime.combine(atual.date() + timedelta(days=1), time())
+                faixa = '100' if antes else '200'
+            else:
+                limite = datetime.combine(atual.date() + timedelta(days=1), time())
+                faixa = '200' if atual.weekday() == 6 else '50'
+            trecho = min(fim, limite)
+            qtd = int((trecho - atual).total_seconds() // 60)
+            if atual.weekday() == 5:
+                if antes:
+                    sabado_antes += qtd
+                else:
+                    sabado_depois += qtd
+            minutos['200' if especial else faixa] += qtd
+            atual = trecho
+    valores = {k: (Decimal(v) * Decimal(str(tarifas[k])) / 60).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+               for k, v in minutos.items()}
+    return {'minutos': minutos, 'total_minutos': sum(minutos.values()),
+            'sabado_ate_12': sabado_antes, 'sabado_apos_12': sabado_depois,
+            'valores': valores, 'valor': sum(valores.values())}
+
+
+def hhmm(minutos):
+    return f'{minutos // 60:02d}:{minutos % 60:02d}'
+
+
+def reais(valor):
+    return 'R$ ' + f'{valor:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+
+
+def calculo_registro(r):
+    a = r.get('apuracao') or {}
+    return apurar_horas(r['data'], *(a.get(k, '') for k in ('entrada1', 'saida1', 'entrada2', 'saida2')),
+                        especial=a.get('especial', False), tarifas=a.get('tarifas'))
+
+
+def editar_apuracao(sb, registros):
+    st.markdown('#### Apuração de horas e valores')
+    st.caption('Informe somente os períodos de hora extra. O intervalo entre os períodos não é cobrado. '
+               'Saída menor que a entrada indica término no dia seguinte. Feriado ou folga trabalhada usa 200% em todas as horas informadas.')
+    mapa = {r['id']: r for r in registros}
+    rid = st.selectbox('Colaborador / data para lançar horários', list(mapa),
+        format_func=lambda k: f"{date.fromisoformat(mapa[k]['data']).strftime('%d/%m/%Y')} — {mapa[k]['colaborador']} — {mapa[k]['funcao']}")
+    r = mapa[rid]
+    a = r.get('apuracao') or {}
+    with st.form(f'he_apuracao_{rid}_{r.get("apuracao_versao", 0)}'):
+        cols = st.columns(4)
+        campos = ('entrada1', 'saida1', 'entrada2', 'saida2')
+        labels = ('Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2')
+        horarios = [col.text_input(label, value=a.get(campo, ''), max_chars=5, placeholder='HH:MM')
+                    for col, campo, label in zip(cols, campos, labels)]
+        especial = st.checkbox('Feriado ou folga trabalhada (200% + DSR)', value=a.get('especial', False))
+        salvar = st.form_submit_button('Calcular e salvar horários', type='primary')
+    if salvar:
+        try:
+            calculo = apurar_horas(r['data'], *horarios, especial=especial)
+            if not calculo['total_minutos']:
+                raise ValueError('Informe pelo menos um período de hora extra.')
+            payload = dict(zip(campos, [h.strip() for h in horarios]))
+            payload.update(especial=especial, tarifas=TARIFAS_R10.copy())
+            versao = int(r.get('apuracao_versao') or 0)
+            salvos = sb('PATCH', 'rh_horas_extras', f'id=eq.{rid}&apuracao_versao=eq.{versao}',
+                {'apuracao': payload, 'apuracao_versao': versao + 1}, 'return=representation') or []
+            if not salvos:
+                st.warning('Este registro foi alterado em outra sessão. Atualize e confira antes de salvar novamente.')
+            else:
+                st.session_state['he_apuracao_salva'] = f"Horários salvos. Total: {hhmm(calculo['total_minutos'])} — {reais(calculo['valor'])}."
+                st.rerun()
+        except ValueError as exc:
+            st.warning(str(exc))
+        except Exception:
+            st.error('Não foi possível confirmar o salvamento. Os horários digitados foram mantidos; tente novamente.')
+    if st.session_state.get('he_apuracao_salva'):
+        st.success(st.session_state.pop('he_apuracao_salva'))
+
+
 def tela_gestao(sb):
     st.subheader('⏱️ Solicitações de horas extras')
     st.caption('Os registros permanecem salvos. Consulte qualquer período nas datas abaixo, inclusive meses anteriores.')
@@ -239,14 +353,48 @@ def tela_gestao(sb):
     resumo = resumo_por_funcao(registros)
     st.markdown('#### Resumo por função — período selecionado')
     st.dataframe(resumo, hide_index=True, use_container_width=True)
-    st.markdown('#### Histórico de solicitações')
+    editar_apuracao(sb, registros)
+    st.markdown('#### Histórico de solicitações e apuração')
     tabela = pd.DataFrame([{'Data': date.fromisoformat(r['data']).strftime('%d/%m/%Y'),
         'Solicitação de quem?': r['solicitante'], 'Colaborador': r['colaborador'],
         'Função': r['funcao'], 'Finalidade / Onde vai atuar?': r.get('finalidade_atuacao') or 'Não informado',
         'Protocolo': r['solicitacao_id'],
         'Registrado em': datetime.fromisoformat(r['criado_em']).astimezone(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y %H:%M')}
         for r in registros])
-    st.dataframe(tabela, hide_index=True, use_container_width=True)
+    detalhes = []
+    total = Decimal('0.00')
+    pendentes = 0
+    for r in registros:
+        a = r.get('apuracao') or {}
+        c = calculo_registro(r)
+        preenchido = c['total_minutos'] > 0
+        if not preenchido:
+            pendentes += 1
+        total += c['valor']
+        detalhes.append({
+            'Entrada 1': a.get('entrada1', ''), 'Saída 1': a.get('saida1', ''),
+            'Entrada 2': a.get('entrada2', ''), 'Saída 2': a.get('saida2', ''),
+            'Total de horas': hhmm(c['total_minutos']) if preenchido else 'Pendente',
+            'Horas sábado até 12h': hhmm(c['sabado_ate_12']),
+            'Horas sábado após 12h': hhmm(c['sabado_apos_12']),
+            'Horas 50%': hhmm(c['minutos']['50']),
+            'Horas 100%': hhmm(c['minutos']['100']),
+            'Horas 200%': hhmm(c['minutos']['200']),
+            'Valor 50% (R$)': float(c['valores']['50']) if preenchido else None,
+            'Valor 100% (R$)': float(c['valores']['100']) if preenchido else None,
+            'Valor 200% (R$)': float(c['valores']['200']) if preenchido else None,
+            'Valor (R$)': float(c['valor']) if preenchido else None,
+            'Feriado / Folga': 'Sim' if a.get('especial') else 'Não'})
+    tabela = pd.concat([tabela, pd.DataFrame(detalhes)], axis=1)
+    primeiras = ['Data', 'Colaborador', 'Função', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2',
+                 'Total de horas', 'Horas sábado até 12h', 'Horas sábado após 12h', 'Valor (R$)']
+    tabela = tabela[primeiras + [col for col in tabela.columns if col not in primeiras]]
+    st.metric('Valor total apurado no período', reais(total))
+    if pendentes:
+        st.caption(f'{pendentes} registro(s) aguardando horários; não entram no valor total.')
+    st.dataframe(tabela, hide_index=True, use_container_width=True,
+        column_config={col: st.column_config.NumberColumn(col, format='R$ %.2f')
+                       for col in tabela.columns if '(R$)' in col})
     excel = BytesIO()
     with pd.ExcelWriter(excel, engine='openpyxl') as writer:
         tabela.to_excel(writer, index=False, sheet_name='Horas extras')
