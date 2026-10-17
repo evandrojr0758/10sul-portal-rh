@@ -252,16 +252,31 @@ def reais(valor):
 
 def calculo_registro(r):
     a = r.get('apuracao') or {}
-    return apurar_horas(r['data'], *(a.get(k, '') for k in ('entrada1', 'saida1', 'entrada2', 'saida2')),
-                        especial=a.get('especial', False), tarifas=a.get('tarifas'))
+    c = apurar_horas(r['data'], *(a.get(k, '') for k in ('entrada1', 'saida1', 'entrada2', 'saida2')),
+                     especial=a.get('especial', False), tarifas=a.get('tarifas'))
+    c.update(calcular_desconto(c['valor'], a.get('desconto', '0'), a.get('desconto_total', False)))
+    return c
+
+
+def calcular_desconto(bruto, desconto='0', total=False):
+    desconto = Decimal(str(desconto)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if not desconto.is_finite() or desconto < 0:
+        raise ValueError('O desconto deve ser um valor válido maior ou igual a zero.')
+    if total:
+        desconto = bruto
+    if desconto > bruto:
+        raise ValueError('O desconto não pode ultrapassar o valor bruto da hora extra.')
+    return {'desconto': desconto, 'liquido': bruto - desconto}
+
 
 
 def editar_apuracao(sb, registros):
-    st.markdown('#### Apuração de horas e valores')
+    st.markdown('#### Conferência do ponto — editar horários e descontos')
     st.caption('Informe somente os períodos de hora extra. O intervalo entre os períodos não é cobrado. '
-               'Saída menor que a entrada indica término no dia seguinte. Feriado ou folga trabalhada usa 200% em todas as horas informadas.')
+               'Saída menor que a entrada indica término no dia seguinte. Feriado ou folga trabalhada usa 200% em todas as horas informadas. '
+               'Os quatro horários permanecem editáveis após salvar: selecione o colaborador e a data para corrigir conforme o ponto eletrônico.')
     mapa = {r['id']: r for r in registros}
-    rid = st.selectbox('Colaborador / data para lançar horários', list(mapa),
+    rid = st.selectbox('Colaborador / data para lançar ou editar horários', list(mapa),
         format_func=lambda k: f"{date.fromisoformat(mapa[k]['data']).strftime('%d/%m/%Y')} — {mapa[k]['colaborador']} — {mapa[k]['funcao']}")
     r = mapa[rid]
     a = r.get('apuracao') or {}
@@ -272,21 +287,30 @@ def editar_apuracao(sb, registros):
         horarios = [col.text_input(label, value=a.get(campo, ''), max_chars=5, placeholder='HH:MM')
                     for col, campo, label in zip(cols, campos, labels)]
         especial = st.checkbox('Feriado ou folga trabalhada (200% + DSR)', value=a.get('especial', False))
+        desconto_total = st.checkbox('Desconto total — zerar o valor a cobrar', value=a.get('desconto_total', False),
+            help='Mantém os horários e as horas apuradas, mas desconta 100% do valor bruto deste colaborador nesta data.')
+        desconto = st.number_input('Desconto (R$)', min_value=0.0, value=float(a.get('desconto') or 0), step=0.01, format='%.2f',
+            help='Para desconto parcial, informe o valor em reais. Com desconto total marcado, o sistema usa todo o valor bruto.')
+        motivo_desconto = st.text_input('Motivo do desconto', value=a.get('motivo_desconto', ''), max_chars=1000,
+            placeholder='Ex.: Ajuste após conferência no ponto eletrônico')
         salvar = st.form_submit_button('Calcular e salvar horários', type='primary')
     if salvar:
         try:
-            calculo = apurar_horas(r['data'], *horarios, especial=especial)
+            calculo = apurar_horas(r['data'], *horarios, especial=especial, tarifas=a.get('tarifas'))
+            calculo.update(calcular_desconto(calculo['valor'], desconto, desconto_total))
             if not calculo['total_minutos']:
                 raise ValueError('Informe pelo menos um período de hora extra.')
             payload = dict(zip(campos, [h.strip() for h in horarios]))
-            payload.update(especial=especial, tarifas=TARIFAS_R10.copy())
+            payload.update(especial=especial, tarifas=a.get('tarifas') or TARIFAS_R10.copy(),
+                           desconto=str(Decimal(str(desconto))), desconto_total=desconto_total,
+                           motivo_desconto=motivo_desconto.strip())
             versao = int(r.get('apuracao_versao') or 0)
             salvos = sb('PATCH', 'rh_horas_extras', f'id=eq.{rid}&apuracao_versao=eq.{versao}',
                 {'apuracao': payload, 'apuracao_versao': versao + 1}, 'return=representation') or []
             if not salvos:
                 st.warning('Este registro foi alterado em outra sessão. Atualize e confira antes de salvar novamente.')
             else:
-                st.session_state['he_apuracao_salva'] = f"Horários salvos. Total: {hhmm(calculo['total_minutos'])} — {reais(calculo['valor'])}."
+                st.session_state['he_apuracao_salva'] = f"Horários salvos. Total: {hhmm(calculo['total_minutos'])} — Bruto: {reais(calculo['valor'])}; desconto: {reais(calculo['desconto'])}; valor final: {reais(calculo['liquido'])}."
                 st.rerun()
         except ValueError as exc:
             st.warning(str(exc))
@@ -363,6 +387,7 @@ def tela_gestao(sb):
         for r in registros])
     detalhes = []
     total = Decimal('0.00')
+    bruto_total = desconto_periodo = Decimal('0.00')
     pendentes = 0
     for r in registros:
         a = r.get('apuracao') or {}
@@ -370,7 +395,9 @@ def tela_gestao(sb):
         preenchido = c['total_minutos'] > 0
         if not preenchido:
             pendentes += 1
-        total += c['valor']
+        bruto_total += c['valor']
+        desconto_periodo += c['desconto']
+        total += c['liquido']
         detalhes.append({
             'Entrada 1': a.get('entrada1', ''), 'Saída 1': a.get('saida1', ''),
             'Entrada 2': a.get('entrada2', ''), 'Saída 2': a.get('saida2', ''),
@@ -383,13 +410,20 @@ def tela_gestao(sb):
             'Valor 50% (R$)': float(c['valores']['50']) if preenchido else None,
             'Valor 100% (R$)': float(c['valores']['100']) if preenchido else None,
             'Valor 200% (R$)': float(c['valores']['200']) if preenchido else None,
-            'Valor (R$)': float(c['valor']) if preenchido else None,
+            'Valor bruto (R$)': float(c['valor']) if preenchido else None,
+            'Desconto (R$)': float(c['desconto']) if preenchido else None,
+            'Valor (R$)': float(c['liquido']) if preenchido else None,
+            'Desconto total': 'Sim' if a.get('desconto_total') else 'Não',
+            'Motivo do desconto': a.get('motivo_desconto', ''),
             'Feriado / Folga': 'Sim' if a.get('especial') else 'Não'})
     tabela = pd.concat([tabela, pd.DataFrame(detalhes)], axis=1)
     primeiras = ['Data', 'Colaborador', 'Função', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2',
-                 'Total de horas', 'Horas sábado até 12h', 'Horas sábado após 12h', 'Valor (R$)']
+                 'Total de horas', 'Horas sábado até 12h', 'Horas sábado após 12h', 'Valor bruto (R$)', 'Desconto (R$)', 'Valor (R$)']
     tabela = tabela[primeiras + [col for col in tabela.columns if col not in primeiras]]
-    st.metric('Valor total apurado no período', reais(total))
+    bruto_card, desconto_card, liquido_card = st.columns(3)
+    bruto_card.metric('Valor bruto no período', reais(bruto_total))
+    desconto_card.metric('Descontos no período', reais(desconto_periodo))
+    liquido_card.metric('Valor total apurado no período', reais(total))
     if pendentes:
         st.caption(f'{pendentes} registro(s) aguardando horários; não entram no valor total.')
     st.dataframe(tabela, hide_index=True, use_container_width=True,
