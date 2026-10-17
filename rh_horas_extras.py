@@ -51,6 +51,7 @@ def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id, f
         linhas.append({'solicitacao_id': str(solicitacao_id), 'data': data.isoformat(),
                        'lideranca_id': int(lideranca_id), 'lideranca': str(lideranca['colaborador']).strip(),
                        'solicitante': solicitante, 'finalidade_atuacao': finalidade_atuacao, 'colaborador_id': int(cid),
+                       'apuracao': horarios_padrao(data),
                        'colaborador': str(c['colaborador']).strip(),
                        'funcao': str(c.get('funcao') or '').strip() or 'Não cadastrada'})
     return linhas
@@ -198,6 +199,20 @@ def tela_supervisor(sb, token):
 TARIFAS_R10 = {'50': '116.90', '100': '155.87', '200': '311.74'}
 
 
+
+def horarios_padrao(data):
+    data = date.fromisoformat(data) if isinstance(data, str) else data
+    if data.weekday() != 5:
+        return {}
+    return {'entrada1': '07:30', 'saida1': '11:00', 'entrada2': '12:00', 'saida2': '17:18',
+            'tarifas': TARIFAS_R10.copy(), 'origem': 'padrao_sabado'}
+
+
+def apuracao_do_registro(r):
+    # Horários já gravados prevalecem, inclusive campos explicitamente vazios.
+    return r.get('apuracao') or horarios_padrao(r['data'])
+
+
 def apurar_horas(data, entrada1='', saida1='', entrada2='', saida2='', especial=False, tarifas=None):
     """Apura minutos por dia/faixa, sem cobrar o intervalo e sem arredondar horas."""
     data = date.fromisoformat(data) if isinstance(data, str) else data
@@ -262,7 +277,7 @@ def reais(valor):
 
 
 def calculo_registro(r):
-    a = r.get('apuracao') or {}
+    a = apuracao_do_registro(r)
     c = apurar_horas(r['data'], *(a.get(k, '') for k in ('entrada1', 'saida1', 'entrada2', 'saida2')),
                      especial=a.get('especial', False), tarifas=a.get('tarifas'))
     c.update(calcular_desconto(c['valor'], a.get('desconto', '0'), a.get('desconto_total', False)))
@@ -290,7 +305,9 @@ def editar_apuracao(sb, registros):
     rid = st.selectbox('Colaborador / data para lançar ou editar horários', list(mapa),
         format_func=lambda k: f"{date.fromisoformat(mapa[k]['data']).strftime('%d/%m/%Y')} — {mapa[k]['colaborador']} — {mapa[k]['funcao']}")
     r = mapa[rid]
-    a = r.get('apuracao') or {}
+    a = apuracao_do_registro(r)
+    if a.get('origem') == 'padrao_sabado':
+        st.info('Horários padrão de sábado: 07:30–11:00 e 12:00–17:18. Confira as batidas no ponto eletrônico e ajuste antes de salvar.')
     with st.form(f'he_apuracao_{rid}_{r.get("apuracao_versao", 0)}'):
         cols = st.columns(4)
         campos = ('entrada1', 'saida1', 'entrada2', 'saida2')
@@ -314,7 +331,7 @@ def editar_apuracao(sb, registros):
             payload = dict(zip(campos, [h.strip() for h in horarios]))
             payload.update(especial=especial, tarifas=a.get('tarifas') or TARIFAS_R10.copy(),
                            desconto=str(Decimal(str(desconto))), desconto_total=desconto_total,
-                           motivo_desconto=motivo_desconto.strip())
+                           motivo_desconto=motivo_desconto.strip(), origem='conferido')
             versao = int(r.get('apuracao_versao') or 0)
             salvos = sb('PATCH', 'rh_horas_extras', f'id=eq.{rid}&apuracao_versao=eq.{versao}',
                 {'apuracao': payload, 'apuracao_versao': versao + 1}, 'return=representation') or []
@@ -427,7 +444,7 @@ def tela_gestao(sb):
     bruto_total = desconto_periodo = Decimal('0.00')
     pendentes = 0
     for r in registros:
-        a = r.get('apuracao') or {}
+        a = apuracao_do_registro(r)
         c = calculo_registro(r)
         preenchido = c['total_minutos'] > 0
         if not preenchido:
@@ -439,6 +456,8 @@ def tela_gestao(sb):
             'Entrada 1': a.get('entrada1', ''), 'Saída 1': a.get('saida1', ''),
             'Entrada 2': a.get('entrada2', ''), 'Saída 2': a.get('saida2', ''),
             'Total de horas': hhmm(c['total_minutos']) if preenchido else 'Pendente',
+            'Conferência dos horários': ('Padrão de sábado — conferir no ponto' if a.get('origem') == 'padrao_sabado'
+                                       else 'Horários salvos' if preenchido else 'Pendente'),
             'Horas sábado até 12h': hhmm(c['sabado_ate_12']),
             'Horas sábado após 12h': hhmm(c['sabado_apos_12']),
             'Horas 50%': hhmm(c['minutos']['50']),
@@ -461,6 +480,8 @@ def tela_gestao(sb):
     bruto_card.metric('Valor bruto no período', reais(bruto_total))
     desconto_card.metric('Descontos no período', reais(desconto_periodo))
     liquido_card.metric('Valor total apurado no período', reais(total))
+    if any(apuracao_do_registro(r).get('origem') == 'padrao_sabado' for r in registros):
+        st.caption('O total inclui os horários padrão de sábado ainda aguardando conferência no ponto eletrônico.')
     if pendentes:
         st.caption(f'{pendentes} registro(s) aguardando horários; não entram no valor total.')
     st.dataframe(tabela, hide_index=True, use_container_width=True,
