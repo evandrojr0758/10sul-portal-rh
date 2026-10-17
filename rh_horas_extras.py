@@ -26,7 +26,7 @@ def link_supervisor(sb):
     return BASE_URL + '?horas_extras=' + quote(rows[0]['token'], safe='')
 
 
-def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id, finalidade_atuacao):
+def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id, finalidade_atuacao, lideranca_id=None):
     solicitante = str(solicitante or '').strip()
     if not solicitante:
         raise ValueError('Informe de quem é a solicitação.')
@@ -40,12 +40,16 @@ def preparar_linhas(data, solicitante, selecionados, cadastro, solicitacao_id, f
     if len(finalidade_atuacao) > 2000:
         raise ValueError('A finalidade e o local devem ter até 2000 caracteres.')
     mapa = {int(c['id']): c for c in cadastro if c.get('ativo', True)}
+    if lideranca_id is None or int(lideranca_id) not in mapa:
+        raise ValueError('Selecione quem é a liderança à frente da equipe neste dia.')
+    lideranca = mapa[int(lideranca_id)]
     linhas = []
     for cid in dict.fromkeys(selecionados):
         if int(cid) not in mapa:
             raise ValueError('Um colaborador não está mais ativo. Atualize a seleção.')
         c = mapa[int(cid)]
         linhas.append({'solicitacao_id': str(solicitacao_id), 'data': data.isoformat(),
+                       'lideranca_id': int(lideranca_id), 'lideranca': str(lideranca['colaborador']).strip(),
                        'solicitante': solicitante, 'finalidade_atuacao': finalidade_atuacao, 'colaborador_id': int(cid),
                        'colaborador': str(c['colaborador']).strip(),
                        'funcao': str(c.get('funcao') or '').strip() or 'Não cadastrada'})
@@ -72,12 +76,14 @@ def texto_resumo_envio(linhas):
     validas = [r for r in linhas if r.get('Função') != 'Nenhuma nova inclusão']
     if not validas:
         return ''
-    liderancas = list(dict.fromkeys(str(r.get('Solicitação de quem?') or '').strip() for r in validas))
+    liderancas = list(dict.fromkeys(str(r.get('Liderança') or 'Não informada').strip() for r in validas))
+    solicitantes = list(dict.fromkeys(str(r.get('Solicitação de quem?') or 'Não informado').strip() for r in validas))
     datas = list(dict.fromkeys(str(r.get('Data') or '') for r in validas))
     atuacoes = list(dict.fromkeys(str(r.get('Finalidade / Onde vai atuar?') or 'Não informado').strip() for r in validas))
     resumo = resumo_por_funcao(validas)
     partes = ['*Liderança:* ' + ', '.join(liderancas),
               '*Data:* ' + ', '.join(datas),
+              '*Solicitado por:* ' + ', '.join(solicitantes),
               '', '*Colaboradores por função:*']
     partes.extend(f"• {r['Função']}: {int(r['Colaboradores'])}" for r in resumo.to_dict('records'))
     partes.extend(['*Total de colaboradores:* ' + str(int(resumo['Colaboradores'].sum())),
@@ -116,7 +122,7 @@ def tela_supervisor(sb, token):
         st.markdown('#### Resumo por função')
         st.dataframe(resumo_por_funcao([r for r in recibo['linhas'] if r.get('Função') != 'Nenhuma nova inclusão'])[['Função', 'Colaboradores']].rename(
             columns={'Colaboradores': 'Quantidade'}), hide_index=True, use_container_width=True)
-        st.dataframe(pd.DataFrame(recibo['linhas']).assign(**{'Finalidade / Onde vai atuar?': [r.get('Finalidade / Onde vai atuar?') or 'Não informado' for r in recibo['linhas']]})[['Data', 'Solicitação de quem?', 'Colaborador', 'Função', 'Finalidade / Onde vai atuar?']],
+        st.dataframe(pd.DataFrame(recibo['linhas']).assign(**{'Liderança': [r.get('Liderança') or 'Não informada' for r in recibo['linhas']], 'Finalidade / Onde vai atuar?': [r.get('Finalidade / Onde vai atuar?') or 'Não informado' for r in recibo['linhas']]})[['Liderança', 'Data', 'Solicitação de quem?', 'Colaborador', 'Função', 'Finalidade / Onde vai atuar?']],
                      hide_index=True, use_container_width=True)
         texto_envio = texto_resumo_envio(recibo['linhas'])
         if texto_envio:
@@ -127,15 +133,20 @@ def tela_supervisor(sb, token):
                 type='primary', use_container_width=True)
             st.caption('Escolha o contato ou grupo no WhatsApp e confirme o envio.')
         if st.button('Nova solicitação', type='primary'):
-            for key in ('he_recibo', 'he_data', 'he_solicitante', 'he_selecionados', 'he_protocolo', 'he_finalidade_atuacao'):
+            for key in ('he_recibo', 'he_data', 'he_solicitante', 'he_selecionados', 'he_protocolo', 'he_finalidade_atuacao', 'he_lideranca_id'):
                 st.session_state.pop(key, None)
             st.rerun()
         return
-    st.write('Informe a data e o solicitante. Digite o nome para buscar e selecionar os colaboradores.')
+    st.write('Informe a liderança à frente da equipe, a data e quem solicitou a hora extra. Depois, selecione os colaboradores.')
     data = st.date_input('Data', value=hoje(), format='DD/MM/YYYY', key='he_data')
     solicitante = st.text_input('Solicitação de quem?', max_chars=200, key='he_solicitante',
-                               placeholder='Nome de quem solicitou a hora extra')
+                               placeholder='Ex.: Suzano',
+                               help='Quem solicitou a hora extra. A liderança da equipe é selecionada separadamente abaixo.')
     mapa = {int(c['id']): c for c in cadastro}
+    lideranca_id = st.selectbox('Liderança do dia — quem está à frente da equipe', list(mapa),
+        index=None, placeholder='Selecione a liderança responsável neste dia', key='he_lideranca_id',
+        format_func=lambda cid: f"{mapa[cid]['colaborador']} • {mapa[cid].get('funcao') or 'Não cadastrada'} (#{cid})",
+        help='Seleção obrigatória. A liderança não é incluída automaticamente na quantidade de colaboradores; selecione-a também na lista abaixo se for realizar hora extra.')
     selecionados = st.multiselect('Colaboradores — busque pelo nome', list(mapa),
         format_func=lambda cid: f"{mapa[cid]['colaborador']} • {mapa[cid].get('funcao') or 'Não cadastrada'} (#{cid})",
         key='he_selecionados', placeholder='Digite para buscar um ou mais colaboradores')
@@ -153,14 +164,14 @@ def tela_supervisor(sb, token):
         key='he_finalidade_atuacao', max_chars=2000,
         placeholder='Ex.: Manutenção das carretas na oficina de Aracruz — revisão e troca de lonas.',
         help='Informe o serviço e o local de atuação dos colaboradores selecionados nesta solicitação.')
-    st.caption('Após registrar a solicitação, use “Enviar resumo pelo WhatsApp” para compartilhar com a liderança primeiro.')
+    st.caption('Após registrar a solicitação, use “Enviar resumo pelo WhatsApp” para compartilhar o resumo com o nome da liderança primeiro.')
     st.session_state.setdefault('he_protocolo', str(uuid.uuid4()))
     if st.button('Enviar solicitação ao RH', type='primary', use_container_width=True):
         try:
             # Relê o cadastro no envio: preserva o vínculo e a função atuais.
             atuais = sb('GET', 'rh_colaboradores',
                         'select=id,colaborador,funcao,ativo&ativo=eq.true&order=colaborador.asc') or []
-            linhas = preparar_linhas(data, solicitante, selecionados, atuais, st.session_state['he_protocolo'], finalidade_atuacao)
+            linhas = preparar_linhas(data, solicitante, selecionados, atuais, st.session_state['he_protocolo'], finalidade_atuacao, lideranca_id)
             novos = sb('POST', 'rh_horas_extras', 'on_conflict=data,colaborador_id', linhas,
                        'resolution=ignore-duplicates,return=representation') or []
             repetidos = len(linhas) - len(novos)
@@ -169,12 +180,12 @@ def tela_supervisor(sb, token):
                 mensagem += f' {repetidos} já estava(m) registrado(s) nesta data e não foi(ram) duplicado(s).'
             st.session_state['he_recibo'] = {'mensagem': mensagem,
                 'protocolo': st.session_state['he_protocolo'],
-                'linhas': [{'Data': data.strftime('%d/%m/%Y'), 'Solicitação de quem?': r['solicitante'],
+                'linhas': [{'Liderança': r.get('lideranca') or 'Não informada', 'Data': data.strftime('%d/%m/%Y'), 'Solicitação de quem?': r['solicitante'],
                             'Colaborador': r['colaborador'], 'Função': r['funcao'],
                             'Finalidade / Onde vai atuar?': r.get('finalidade_atuacao') or 'Não informado'} for r in novos]}
             if not novos:
                 st.session_state['he_recibo']['linhas'] = [{'Data': data.strftime('%d/%m/%Y'),
-                    'Solicitação de quem?': solicitante.strip(), 'Colaborador': 'Todos já registrados nesta data',
+                    'Liderança': mapa[lideranca_id]['colaborador'], 'Solicitação de quem?': solicitante.strip(), 'Colaborador': 'Todos já registrados nesta data',
                     'Função': 'Nenhuma nova inclusão', 'Finalidade / Onde vai atuar?': finalidade_atuacao.strip()}]
             st.rerun()
         except ValueError as exc:
@@ -405,6 +416,7 @@ def tela_gestao(sb):
     editar_apuracao(sb, registros)
     st.markdown('#### Histórico de solicitações e apuração')
     tabela = pd.DataFrame([{'Data': date.fromisoformat(r['data']).strftime('%d/%m/%Y'),
+        'Liderança': r.get('lideranca') or 'Não informada',
         'Solicitação de quem?': r['solicitante'], 'Colaborador': r['colaborador'],
         'Função': r['funcao'], 'Finalidade / Onde vai atuar?': r.get('finalidade_atuacao') or 'Não informado',
         'Protocolo': r['solicitacao_id'],
