@@ -4256,7 +4256,7 @@ if _perfil_atual == "ADMIN":
         st.query_params["fechamento"] = "tres-lagoas"
         st.rerun()
 
-if st.button("⏱️ Solicitações de horas extras", key="he_abrir_gestao"):
+if st.button("⏱️ Gestão de horas extras", key="he_abrir_gestao"):
     st.query_params["horas_extras"] = "gestao"
     st.rerun()
 
