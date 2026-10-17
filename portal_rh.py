@@ -20,6 +20,7 @@ import pandas as pd
 import streamlit as st
 import altair as alt
 import rh_sessao
+import rh_horas_extras
 from rh_desligamentos import exige_motivo as deslig_exige_motivo, abrir_modal as abrir_modal_desligamento, validar_motivos as validar_motivos_desligamento, payload_desligamento
 from rh_vencimentos import CAMPOS as CAMPOS_VENC, data_iso as venc_data_iso, tela_alertas as tela_alertas_venc, tela_importacao as tela_importacao_venc
 
@@ -4126,6 +4127,12 @@ if _qp_token:
     tela_publica_aprovacao_gratificacao(_qp_token)
     st.stop()
 
+# Link restrito do supervisor: permite somente solicitar horas extras.
+_he_rota = str(st.query_params.get("horas_extras") or "")
+if _he_rota and _he_rota != "gestao":
+    rh_horas_extras.tela_supervisor(sb, _he_rota)
+    st.stop()
+
 rh_sessao.sincronizar(sb)
 if st.session_state.get("rh_storage_error"):
     st.warning("Permita o armazenamento deste site no navegador para manter o acesso ao reabrir o link.")
@@ -4152,6 +4159,15 @@ if _perfil_atual == "SEGURANCA":
     st.stop()
 if _perfil_atual not in ("RH", "ADMIN"):
     st.error("Seu perfil não possui acesso a este portal.")
+    st.stop()
+
+# A consulta de horas extras usa a autenticação normal do RH/Admin.
+if _he_rota == "gestao":
+    cabecalho_sessao(mostrar_ajuda=False)
+    if st.button("← Voltar ao Portal RH", key="he_voltar_rh"):
+        st.query_params.pop("horas_extras", None)
+        st.rerun()
+    rh_horas_extras.tela_gestao(sb)
     st.stop()
 
 # O menu de fechamentos só aparece depois da autenticação.
@@ -4239,6 +4255,10 @@ if _perfil_atual == "ADMIN":
         st.session_state["pagina_portal_rh"] = "TRES_LAGOAS"
         st.query_params["fechamento"] = "tres-lagoas"
         st.rerun()
+
+if st.button("⏱️ Solicitações de horas extras", key="he_abrir_gestao"):
+    st.query_params["horas_extras"] = "gestao"
+    st.rerun()
 
 with st.expander("💰 Regras de Gratificação", expanded=False):
     tela_regras_gratificacao()
