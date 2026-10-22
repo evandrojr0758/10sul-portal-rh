@@ -4043,30 +4043,6 @@ def tela_fechamento_aracruz():
 
 def tela_fechamento_tres_lagoas():
     st.markdown('### Fechamento Três Lagoas')
-    with st.expander('📊 Power BI — Eficiência de Manutenção', expanded=False):
-        st.caption('Consulte os indicadores de manutenção para apoiar o fechamento. '
-                   'O acesso exige uma conta Microsoft autorizada pela Suzano.')
-        relatorio_url = (
-            'https://app.powerbi.com/groups/me/apps/beec19e1-2ee7-4136-8f98-7b1536aef32c/'
-            'reports/79b57ecb-df91-4336-8423-91d2ac213448/dbb8f200b34048170dd3'
-            '?ctid=a7109315-9727-4adf-97ad-4849bb63edcb&experience=power-bi'
-        )
-        st.link_button('Abrir relatório no Power BI / entrar na conta Microsoft', relatorio_url)
-        st.caption('Se a entrada não abrir dentro do painel, use o botão acima e permita '
-                   'os pop-ups da Microsoft. Os filtros do relatório são independentes '
-                   'da competência selecionada neste fechamento.')
-        st.info('A visualização incorporada depende da autorização do responsável pelo relatório na Suzano. '
-                'Se aparecer “solicite acesso ao autor”, use o botão acima para consultar o relatório original.')
-        if st.checkbox('Exibir relatório nesta tela', key='tl_exibir_powerbi'):
-            import streamlit.components.v1 as components
-            embed_url = (
-                'https://app.powerbi.com/reportEmbed'
-                '?reportId=79b57ecb-df91-4336-8423-91d2ac213448'
-                '&appId=beec19e1-2ee7-4136-8f98-7b1536aef32c'
-                '&ctid=a7109315-9727-4adf-97ad-4849bb63edcb'
-                '&autoAuth=true&pageName=dbb8f200b34048170dd3'
-            )
-            components.iframe(embed_url, height=850, scrolling=True)
     hoje_tl = date.today()
     c1, c2 = st.columns(2)
     mes_tl = int(c1.selectbox('Mês', range(1, 13), index=hoje_tl.month-1, key='tl_mes'))
