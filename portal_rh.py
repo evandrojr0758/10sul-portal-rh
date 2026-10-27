@@ -4787,6 +4787,9 @@ st.session_state[_banco_grade_key] = df.copy()
 st.session_state[_fp_key] = _base_fingerprint
 
 _editor_grade_key = f"rh_grade_v2_{ano}_{mes}_{_escopo_hash}_{st.session_state[_nonce_key]}"
+_atestados_reconfirmar_key = f"{_draft_key}_atestados_reconfirmar"
+if _atestados_reconfirmar_key not in st.session_state:
+    st.session_state[_atestados_reconfirmar_key] = set()
 _entrada_grade_key = f"{_editor_grade_key}_entrada"
 if _entrada_grade_key not in st.session_state:
     st.session_state[_entrada_grade_key] = _base_editor.copy()
@@ -4795,6 +4798,7 @@ if _entrada_grade_key not in st.session_state:
 def _capturar_edicao_grade(
     editor_key=_editor_grade_key, entrada_key=_entrada_grade_key,
     draft_key=_draft_key, dias=tuple(colunas_dia), cids=tuple(ids),
+    atestados_key=_atestados_reconfirmar_key, ano_grade=int(ano), mes_grade=mes,
 ):
     # Liga posições aos IDs do exato editor que enviou o evento. Aplica somente
     # deltas novos: edited_rows é cumulativo e contém lançamentos já salvos.
@@ -4816,6 +4820,15 @@ def _capturar_edicao_grade(
             _antes = _velhas.get(_coluna, _entrada.iloc[_pos][_coluna])
             if _valor != _antes:
                 _atual.at[_pos, _coluna] = _valor
+                # Reescolher A exige confirmação mesmo ao voltar ao valor do banco.
+                _chave_at = f"{cids[_pos]}_{ano_grade}_{mes_grade}_{int(_coluna)}"
+                st.session_state.get("rh_atestados_periodo", {}).pop(_chave_at, None)
+                st.session_state.pop(f"rh_periodo_escolha_{_chave_at}", None)
+                st.session_state.pop(f"rh_periodo_nota_{_chave_at}", None)
+                if _codigo_grade(_valor) == "A":
+                    st.session_state[atestados_key].add(_chave_at)
+                else:
+                    st.session_state[atestados_key].discard(_chave_at)
     st.session_state[draft_key] = _atual
     if not _atual.equals(st.session_state[entrada_key]):
         import time
@@ -5252,7 +5265,11 @@ for i, cid in enumerate(ids):
             # DEM nunca pode ser lançado manualmente.
             editado.at[i, col] = df.iloc[i][col]
             continue
-        if antes != depois:
+        _reconfirmar_atestado = (
+            depois == "A"
+            and f"{cid}_{int(ano)}_{mes}_{dia}" in st.session_state[_atestados_reconfirmar_key]
+        )
+        if antes != depois or _reconfirmar_atestado:
             alteracoes.append((i, cid, dia, antes, depois))
 
 if alteracoes:
@@ -5537,6 +5554,7 @@ if alteracoes:
                 st.session_state.rh_observacoes_pendentes.pop(chave_ed, None)
                 st.session_state.rh_responsaveis_pendentes.pop(chave_ed, None)
                 st.session_state.rh_atestados_periodo.pop(chave_ed, None)
+                st.session_state[_atestados_reconfirmar_key].discard(chave_ed)
 
             st.session_state.pop(_auto_erro_key, None)
             st.session_state[_auto_sucesso_key] = (
