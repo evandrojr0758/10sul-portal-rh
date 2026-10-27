@@ -1303,7 +1303,14 @@ def tela_publica_aprovacao_gratificacao(token):
             ]
             for _titulo_grupo, _mascara_grupo in _grupos_gestor:
                 st.markdown(f"### {_titulo_grupo}")
-                _df_grupo = dfp.loc[_mascara_grupo, vis].copy()
+                _vis_grupo = list(vis)
+                if (_mascara_grupo & _revisao_gestor).any():
+                    _pos_tempo = _vis_grupo.index("GRATIFICAÇÃO") if "GRATIFICAÇÃO" in _vis_grupo else len(_vis_grupo)
+                    for _col_tempo in ["EQUIPE REVISÃO", "MÉDIA TEMPO (h)"]:
+                        if _col_tempo in dfp.columns:
+                            _vis_grupo.insert(_pos_tempo, _col_tempo)
+                            _pos_tempo += 1
+                _df_grupo = dfp.loc[_mascara_grupo, _vis_grupo].copy()
                 if "COLABORADOR" in _df_grupo.columns:
                     _df_grupo = _df_grupo.sort_values("COLABORADOR", kind="stable")
                 _total_grupo = float(_valores_gestor.loc[_mascara_grupo].fillna(0).sum())
@@ -1316,6 +1323,7 @@ def tela_publica_aprovacao_gratificacao(token):
                         _df_grupo, hide_index=True, use_container_width=True,
                         height=min(600, 38 + 35 * len(_df_grupo)),
                         column_config={
+                            "MÉDIA TEMPO (h)": st.column_config.NumberColumn("MÉDIA TEMPO (h)", format="%.2f"),
                             "GRATIFICAÇÃO": st.column_config.NumberColumn(
                                 "GRATIFICAÇÃO", format="R$ %.2f"
                             ),
