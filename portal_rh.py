@@ -1275,8 +1275,11 @@ def tela_publica_aprovacao_gratificacao(token):
     meses=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
     mes=int(reg.get("mes") or 1); ano=int(reg.get("ano") or 0); status=str(reg.get("status") or "")
     st.markdown("<div style='height:3vh'></div>",unsafe_allow_html=True)
-    a,b,c=st.columns([1,2.2,1])
-    with b:
+    st.markdown(
+        "<style>.block-container {max-width: 100%; padding-left: 2rem; padding-right: 2rem;}</style>",
+        unsafe_allow_html=True,
+    )
+    with st.container():
         st.markdown("## ✅ Aprovação de Gratificação")
         st.markdown(f"### {meses[mes-1]} / {ano}")
         st.caption("Confira a apuração abaixo. Esta página é somente leitura e não exige login.")
