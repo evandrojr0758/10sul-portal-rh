@@ -1284,7 +1284,40 @@ def tela_publica_aprovacao_gratificacao(token):
         if linhas:
             dfp=pd.DataFrame(linhas)
             vis=[c for c in ["COLABORADOR","EMPRESA","FRENTE","GRATIFICAÇÃO","STATUS","MOTIVO / CÁLCULO"] if c in dfp.columns]
-            st.dataframe(dfp[vis],hide_index=True,use_container_width=True,height=430)
+            _valores_gestor = pd.to_numeric(
+                dfp.get("GRATIFICAÇÃO", pd.Series(index=dfp.index, dtype=float)),
+                errors="coerce",
+            )
+            _frentes_gestor = dfp.get(
+                "FRENTE", pd.Series("", index=dfp.index)
+            ).fillna("").astype(str).str.strip().str.upper()
+            _recebendo_gestor = _valores_gestor.gt(0)
+            _revisao_gestor = _frentes_gestor.isin(["REVISÃO", "REVISAO"])
+            _grupos_gestor = [
+                ("REVISÃO — QUEM ESTÁ RECEBENDO", _recebendo_gestor & _revisao_gestor),
+                ("DEMAIS — QUEM ESTÁ RECEBENDO", _recebendo_gestor & ~_revisao_gestor),
+                ("QUEM NÃO ESTÁ RECEBENDO", ~_recebendo_gestor),
+            ]
+            for _titulo_grupo, _mascara_grupo in _grupos_gestor:
+                st.markdown(f"### {_titulo_grupo}")
+                _df_grupo = dfp.loc[_mascara_grupo, vis].copy()
+                if "COLABORADOR" in _df_grupo.columns:
+                    _df_grupo = _df_grupo.sort_values("COLABORADOR", kind="stable")
+                _total_grupo = float(_valores_gestor.loc[_mascara_grupo].fillna(0).sum())
+                _total_txt = f"R$ {_total_grupo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                st.caption(f"{len(_df_grupo)} colaborador(es) • Total: {_total_txt}")
+                if _df_grupo.empty:
+                    st.info("Nenhum colaborador neste grupo.")
+                else:
+                    st.dataframe(
+                        _df_grupo, hide_index=True, use_container_width=True,
+                        height=min(600, 38 + 35 * len(_df_grupo)),
+                        column_config={
+                            "GRATIFICAÇÃO": st.column_config.NumberColumn(
+                                "GRATIFICAÇÃO", format="R$ %.2f"
+                            ),
+                        },
+                    )
         if status=="AGUARDANDO_AUTORIZACAO":
             st.warning("Ao autorizar, você confirma o pagamento exatamente conforme esta apuração.")
             if st.button("✅ AUTORIZAR PAGAMENTO DA GRATIFICAÇÃO",type="primary",use_container_width=True,key="public_autorizar_grat"):
