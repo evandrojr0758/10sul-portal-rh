@@ -1527,9 +1527,27 @@ def tela_apuracao_gratificacao():
         placeholder="Digite parte do nome...",
         key=f"grat_busca_{ano_g}_{mes_g}",
     ).strip()
+    _filtro_status_col, _filtro_frente_col = st.columns(2)
+    filtro_status_grat = _filtro_status_col.selectbox(
+        "Filtrar por STATUS",
+        ["TODOS"] + sorted(df["STATUS"].dropna().unique().tolist()),
+        key=f"grat_filtro_status_{ano_g}_{mes_g}",
+    )
+    filtro_frente_grat = _filtro_frente_col.selectbox(
+        "Filtrar por FRENTE",
+        ["TODAS"] + sorted(df["FRENTE"].dropna().unique().tolist()),
+        key=f"grat_filtro_frente_{ano_g}_{mes_g}",
+    )
     df_view = df.copy()
     if busca_grat:
-        df_view = df_view[df_view["COLABORADOR"].astype(str).str.contains(busca_grat, case=False, na=False)]
+        df_view = df_view[df_view["COLABORADOR"].astype(str).str.contains(busca_grat, case=False, na=False, regex=False)]
+    if filtro_status_grat != "TODOS":
+        df_view = df_view[df_view["STATUS"] == filtro_status_grat]
+    if filtro_frente_grat != "TODAS":
+        df_view = df_view[df_view["FRENTE"] == filtro_frente_grat]
+    st.caption(f"Exibindo {len(df_view)} de {len(df)} colaboradores.")
+    if df_view.empty:
+        st.info("Nenhum colaborador encontrado com os filtros selecionados.")
 
     st.caption(
         "**EQUIPE REVISÃO** vem do Cadastro do Colaborador. **MÉDIA TEMPO** pode ser aplicada em lote acima ou alterada individualmente direto na linha. "
@@ -1594,7 +1612,7 @@ def tela_apuracao_gratificacao():
                 help="Na REVISÃO, altere aqui para lançar uma média individual."
             ),
         },
-        key=f"grat_editor_{ano_g}_{mes_g}",
+        key=f"grat_editor_{ano_g}_{mes_g}_{filtro_status_grat}_{filtro_frente_grat}_{busca_grat}",
     )
 
     # Salva automaticamente qualquer alteração individual feita na coluna MÉDIA TEMPO.
