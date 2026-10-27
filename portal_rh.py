@@ -4041,75 +4041,124 @@ def tela_fechamento_aracruz():
                         st.download_button("Salvar arquivo", st.session_state["ara_download_" + r["id"]],
                             file_name=r["anexo"].split("/")[-1], key="ara_download_btn_" + r["id"])
 
+def _calcular_dm_hexas(resumo, equipamentos):
+    inicio = date.fromisoformat(resumo['inicio'])
+    fim = date.fromisoformat(resumo['fim'])
+    dias = (fim - inicio).days + 1
+    if dias <= 0:
+        raise ValueError('Confira o período da apuração.')
+    restante = round(float(resumo['manutencao_total']) - float(resumo['corretiva_cavalo']) - float(resumo['preventiva_cavalo']), 2)
+    if restante < 0:
+        raise ValueError('As horas de cavalo não podem superar a manutenção total.')
+    if equipamentos is None:
+        return None, None, restante
+    if int(equipamentos) != equipamentos or equipamentos < 1:
+        raise ValueError('Informe uma quantidade inteira e positiva de hexas.')
+    base = int(equipamentos) * dias * 24
+    if restante > base:
+        raise ValueError('As horas de manutenção sem cavalo superam as horas previstas. Confira a quantidade de hexas.')
+    return (1 - restante / base) * 100, base, restante
+
+
 def _resumo_dm_tres_lagoas(ano, mes):
-    """Consulta pontual, armazenada em tabela privada e restrita ao ADMIN."""
+    """Resumo privado por competência; quantidade mensal recalcula a DM."""
     if str((st.session_state.get('usuario_logado') or {}).get('perfil', '')).upper() != 'ADMIN':
         return
     st.markdown('#### Disponibilidade mecânica — Hexatrem')
     competencia = f'{ano}-{mes:02d}-01'
     try:
-        registros = sb('GET', 'rh_dm_resumos', params=f'competencia=eq.{competencia}&select=resumo&limit=1') or []
-        resumo = registros[0]['resumo'] if registros else {}
+        registros = sb('GET', 'rh_dm_resumos', params='select=competencia,resumo&order=competencia.desc') or []
+        resumo = next((r['resumo'] for r in registros if r['competencia'] == competencia), {})
     except Exception:
         st.warning('Não foi possível carregar o resumo privado da DM.')
         return
     def numero(valor):
         return f'{valor:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+    def persistir(payload):
+        salvo = sb('POST', 'rh_dm_resumos', params='on_conflict=competencia',
+                   payload={'competencia': competencia, 'resumo': payload, 'atualizado_em': datetime.now().isoformat()},
+                   prefer='resolution=merge-duplicates,return=representation')
+        if not salvo or salvo[0].get('resumo') != payload:
+            raise RuntimeError('Não foi possível confirmar a gravação do resumo.')
+    quantidade = st.number_input('Quantidade de hexas neste mês', min_value=1,
+                                value=int(resumo['equipamentos']) if resumo.get('equipamentos') else None,
+                                step=1, placeholder='Informe a quantidade deste mês', key=f'dm_hexas_{competencia}')
     if resumo:
+        if quantidade is not None and quantidade != resumo.get('equipamentos'):
+            atualizado = dict(resumo, equipamentos=int(quantidade))
+            try:
+                _calcular_dm_hexas(atualizado, quantidade)
+                persistir(atualizado)
+                resumo = atualizado
+                for registro in registros:
+                    if registro['competencia'] == competencia:
+                        registro['resumo'] = atualizado
+                st.caption('Quantidade salva para esta competência.')
+            except Exception as exc:
+                st.error(f'Não foi possível salvar a quantidade. {exc}')
         inicio = date.fromisoformat(resumo['inicio'])
         fim = date.fromisoformat(resumo['fim'])
-        horas_base = resumo['equipamentos'] * ((fim - inicio).days + 1) * 24
-        horas_cavalo = resumo['corretiva_cavalo'] + resumo['preventiva_cavalo']
-        restante = resumo['manutencao_total'] - horas_cavalo
-        dm = (1 - restante / horas_base) * 100
-        st.caption(f"Período: {inicio:%d/%m/%Y} a {fim:%d/%m/%Y} • Três Lagoas • "
-                   f"{resumo['equipamentos']} hexas • 24 horas/dia")
-        c1, c2 = st.columns(2)
-        c1.metric('DM sem cavalo', numero(dm) + '%')
-        c2.metric('Horas de manutenção sem cavalo', numero(restante) + ' h')
-        c1, c2 = st.columns(2)
-        c1.metric('Horas disponíveis sem cavalo', numero(horas_base - restante) + ' h')
-        c2.metric('Horas previstas no período', numero(horas_base) + ' h')
+        st.caption(f'Período consultado: {inicio:%d/%m/%Y} a {fim:%d/%m/%Y} • Três Lagoas • 24 horas/dia')
+        try:
+            dm, horas_base, restante = _calcular_dm_hexas(resumo, quantidade)
+            c1, c2 = st.columns(2)
+            c1.metric('DM sem cavalo', numero(dm) + '%' if dm is not None else 'Informe os hexas')
+            c2.metric('Horas de manutenção sem cavalo', numero(restante) + ' h')
+            if horas_base is not None:
+                c1, c2 = st.columns(2)
+                c1.metric('Horas disponíveis sem cavalo', numero(horas_base - restante) + ' h')
+                c2.metric('Horas previstas no período', numero(horas_base) + ' h')
+            else:
+                st.info('As horas já foram consultadas. Informe a quantidade de hexas deste mês para calcular a DM.')
+        except ValueError as exc:
+            st.error(str(exc))
         with st.expander('Conferir a apuração da DM'):
             st.table(pd.DataFrame([
                 {'Apuração': 'Manutenção total no Power BI', 'Horas': numero(resumo['manutencao_total'])},
                 {'Apuração': 'Retirado: manutenção corretiva cavalo', 'Horas': numero(resumo['corretiva_cavalo'])},
                 {'Apuração': 'Retirado: manutenção preventiva cavalo', 'Horas': numero(resumo['preventiva_cavalo'])},
-                {'Apuração': 'Total de cavalo retirado', 'Horas': numero(horas_cavalo)},
-                {'Apuração': 'Manutenção restante', 'Horas': numero(restante)},
+                {'Apuração': 'Manutenção restante', 'Horas': numero(float(resumo['manutencao_total']) - float(resumo['corretiva_cavalo']) - float(resumo['preventiva_cavalo']))},
             ]))
-            st.caption('DM = (1 − horas de manutenção sem cavalo ÷ horas previstas) × 100.')
-            st.write('Retirados somente os apontamentos identificados como CAVALO. '
-                     'SOS, borracharia, espera e demais apontamentos permanecem na apuração.')
+            st.caption('DM = (1 − manutenção sem cavalo ÷ (quantidade de hexas × dias do período × 24)) × 100.')
+            st.write('Retirados somente os apontamentos identificados como CAVALO. SOS, borracharia, espera e demais apontamentos permanecem.')
         st.caption('Fonte: Power BI Suzano — Transporte MS / Eficiência de Manutenção. '
-                   'Resumo fixo do período informado, sem atualização automática. '
-                   'Este indicador não aplica descontos nem altera o faturamento.')
+                   'Horas da última consulta registrada; a quantidade de hexas recalcula a DM automaticamente. '
+                   'Sem sincronização automática com o Power BI. Este indicador não altera o faturamento.')
     else:
-        st.info('Nenhum resumo de DM registrado para esta competência.')
-    with st.expander('Registrar / atualizar resumo da DM', expanded=not bool(resumo)):
+        st.info('Nenhum resumo de DM consultado para esta competência.')
+    if registros:
+        with st.expander('Comparativo dos meses consultados'):
+            linhas = []
+            for registro in registros:
+                r = registro['resumo']
+                try:
+                    d, base, horas = _calcular_dm_hexas(r, r.get('equipamentos'))
+                    linhas.append({'Competência': date.fromisoformat(registro['competencia']).strftime('%m/%Y'),
+                                   'Hexas': str(r['equipamentos']) if r.get('equipamentos') else 'A informar',
+                                   'Período': f"{date.fromisoformat(r['inicio']):%d/%m} a {date.fromisoformat(r['fim']):%d/%m}",
+                                   'Manutenção sem cavalo (h)': numero(horas),
+                                   'DM sem cavalo': numero(d) + '%' if d is not None else 'A informar'})
+                except (ValueError, KeyError, TypeError):
+                    continue
+            st.table(pd.DataFrame(linhas))
+    with st.expander('Registrar / atualizar horas consultadas', expanded=not bool(resumo)):
         with st.form(f'dm_tl_{ano}_{mes}'):
             inicio = st.date_input('Início da apuração', value=date.fromisoformat(resumo['inicio']) if resumo else date(ano, mes, 1))
             fim = st.date_input('Fim da apuração', value=date.fromisoformat(resumo['fim']) if resumo else date(ano, mes, calendar.monthrange(ano, mes)[1]))
-            equipamentos = st.number_input('Quantidade de hexas na apuração', min_value=1, value=int(resumo.get('equipamentos', 1)), step=1)
             total = st.number_input('Manutenção total do Power BI (h)', min_value=0.0, value=float(resumo.get('manutencao_total', 0)), step=0.01, format='%.2f')
             corretiva = st.number_input('Corretiva CAVALO a retirar (h)', min_value=0.0, value=float(resumo.get('corretiva_cavalo', 0)), step=0.01, format='%.2f')
             preventiva = st.number_input('Preventiva CAVALO a retirar (h)', min_value=0.0, value=float(resumo.get('preventiva_cavalo', 0)), step=0.01, format='%.2f')
-            salvar = st.form_submit_button('Salvar resumo privado da DM')
+            salvar = st.form_submit_button('Salvar horas consultadas')
         if salvar:
             if fim < inicio or (inicio.year, inicio.month) != (ano, mes) or (fim.year, fim.month) != (ano, mes):
                 st.error('Informe um período válido dentro da competência selecionada.')
-            elif corretiva + preventiva > total or total > equipamentos * ((fim - inicio).days + 1) * 24:
-                st.error('Confira as horas: cavalo não pode superar o total e o total não pode superar as horas previstas.')
             else:
                 try:
-                    payload = {'inicio': inicio.isoformat(), 'fim': fim.isoformat(), 'equipamentos': int(equipamentos),
+                    payload = {'inicio': inicio.isoformat(), 'fim': fim.isoformat(), 'equipamentos': int(quantidade) if quantidade else None,
                                'manutencao_total': total, 'corretiva_cavalo': corretiva, 'preventiva_cavalo': preventiva,
                                'atualizado': datetime.now().isoformat()}
-                    salvo = sb('POST', 'rh_dm_resumos', params='on_conflict=competencia',
-                               payload={'competencia': competencia, 'resumo': payload, 'atualizado_em': datetime.now().isoformat()},
-                               prefer='resolution=merge-duplicates,return=representation')
-                    if not salvo or salvo[0].get('resumo') != payload:
-                        raise RuntimeError('Não foi possível confirmar a gravação do resumo.')
+                    _calcular_dm_hexas(payload, quantidade)
+                    persistir(payload)
                     st.rerun()
                 except Exception as exc:
                     st.error(f'Não foi possível salvar o resumo da DM. {exc}')
