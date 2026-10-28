@@ -1876,6 +1876,15 @@ def tela_apuracao_gratificacao():
 
 def tela_dna_seguranca():
     usr=st.session_state.get("usuario_logado") or {}
+    area_seguranca = st.radio(
+        "Área da Segurança", ["Controle de DNA", "Mapa de riscos e plano preventivo"],
+        horizontal=True, key="seguranca_area",
+    )
+    if area_seguranca == "Mapa de riscos e plano preventivo":
+        from rh_riscos import tela_riscos
+        cabecalho_sessao()
+        tela_riscos(sb, usr)
+        return
     st.title("🦺 Controle de DNA — Segurança do Trabalho")
     st.caption("Informe somente a quantidade de DNAs realizados por colaborador em cada competência.")
     cabecalho_sessao()
