@@ -1050,6 +1050,14 @@ def tela_regras_gratificacao():
                 }
             elif codigo == "FABRICACAO":
                 dados = rh_fabricacao.tela_regra(st, r)
+                st.markdown("**Link para conferência diária do estoque**")
+                try:
+                    _link_estoque = rh_fabricacao.link_estoque(sb)
+                    st.code(_link_estoque, language=None)
+                    st.link_button("Abrir conferência diária do estoque", _link_estoque)
+                    st.caption("Compartilhe com quem fará a conferência. O link permite somente consultar e registrar o estoque de Fabricação.")
+                except Exception as exc:
+                    st.error(f"Não foi possível carregar o link do estoque: {exc}")
             else:
                 st.caption("Regra-base para ITR, SOS, CNP, BORRACHARIA, CAPD e CRAVEJAMENTO. FABRICAÇÃO não entra nesta regra.")
                 c1,c2,c3 = st.columns(3)
@@ -4360,6 +4368,12 @@ except Exception:
     _qp_token = None
 if _qp_token:
     tela_publica_aprovacao_gratificacao(_qp_token)
+    st.stop()
+
+# Link exclusivo de estoque: encerra a rota antes do login e dos demais módulos.
+_estoque_rota = str(st.query_params.get("estoque_fabricacao") or "")
+if _estoque_rota:
+    rh_fabricacao.tela_conferencia(sb, _estoque_rota)
     st.stop()
 
 # Link restrito do supervisor: permite somente solicitar horas extras.

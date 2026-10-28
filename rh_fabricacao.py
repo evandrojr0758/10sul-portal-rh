@@ -2,7 +2,10 @@
 import calendar
 import hashlib
 import json
+import secrets
+import re
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from decimal import Decimal, ROUND_HALF_UP
 
 
@@ -13,6 +16,110 @@ METAS = {
 }
 CONFIG = {"desconto_2_atestados_percentual": 50, "desconto_item_percentual": 5,
           "limite_he_sem_solicitacao": 5, "metas": METAS}
+BASE_URL = "https://10sul-app-rh-jacpdfktaczhihbjnuucm2.streamlit.app/"
+
+
+def hoje_local():
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+
+def dias_pendentes(registros, ano, mes, metas):
+    presentes = {str(r["data"]) for r in registros
+                 if all((r.get("quantidades") or {}).get(item) is not None for item in metas)}
+    return [date(ano, mes, dia) for dia in range(1, calendar.monthrange(ano, mes)[1] + 1)
+            if date(ano, mes, dia).isoformat() not in presentes]
+
+
+def verificar_aberta(sb, ano, mes):
+    atuais = sb("GET", "rh_gratificacao_aprovacoes", f"select=status&ano=eq.{ano}&mes=eq.{mes}&order=id.desc&limit=1") or []
+    if atuais and atuais[0].get("status") in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA"):
+        raise ValueError("Competência enviada/autorizada: estoque bloqueado. Solicite a reabertura ao RH.")
+
+
+def link_estoque(sb):
+    rows = sb("GET", "rh_fabricacao_links", "select=token&ativo=eq.true&order=criado_em.desc&limit=1") or []
+    if not rows:
+        token = secrets.token_hex(32)
+        rows = sb("POST", "rh_fabricacao_links", "", {"token": token}, "return=representation") or []
+    return BASE_URL + "?estoque_fabricacao=" + rows[0]["token"]
+
+
+def validar_link(sb, token):
+    if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{64}", token):
+        return False
+    return bool(sb("GET", "rh_fabricacao_links", f"select=id&ativo=eq.true&token=eq.{token}&limit=1"))
+
+
+def tabela_resumo(st, pd, registros, metas, ano, mes):
+    medias, assinatura = resumo_estoque(registros, metas)
+    pendentes = dias_pendentes(registros, ano, mes, metas)
+    total = calendar.monthrange(ano, mes)[1]
+    st.caption(f"{total - len(pendentes)}/{total} dias conferidos. Média = soma das quantidades ÷ dias conferidos. Dias sem lançamento ficam pendentes; não são considerados zero.")
+    st.dataframe(pd.DataFrame([{
+        "ITEM": item, "META DA MÉDIA": meta, "MÉDIA DO MÊS": medias[item],
+        "SITUAÇÃO": "PENDENTE" if medias[item] is None else ("ABAIXO DA META" if medias[item] < float(meta) else "META ATINGIDA")
+    } for item, meta in metas.items()]), hide_index=True, use_container_width=True)
+    if pendentes:
+        st.caption("Dias sem conferência: " + ", ".join(d.strftime("%d/%m") for d in pendentes))
+    return medias, assinatura, pendentes
+
+
+def tela_conferencia(sb, token):
+    import streamlit as st
+    import pandas as pd
+    st.markdown("## 🏭 Conferência diária do estoque — Fabricação")
+    try:
+        if not validar_link(sb, token):
+            st.error("Link inválido ou desativado. Solicite o link atualizado ao RH.")
+            return
+        regras = sb("GET", "rh_regras_gratificacao", "select=fabricacao_config&codigo=eq.FABRICACAO&limit=1") or []
+        if not regras:
+            raise ValueError("Metas não cadastradas. Avise o RH.")
+        metas = configuracao(regras[0])["metas"]
+        st.caption("Informe a quantidade real de cada item. Registre zero quando não houver estoque.")
+        dia = st.date_input("Data da conferência", value=hoje_local(), max_value=hoje_local(), key="fab_public_dia")
+        registros = sb("GET", "rh_fabricacao_estoque", f"select=*&data=gte.{dia.replace(day=1)}&data=lte.{date(dia.year,dia.month,calendar.monthrange(dia.year,dia.month)[1])}&order=data.asc") or []
+        anterior = next((r for r in registros if str(r["data"]) == dia.isoformat()), {})
+        try:
+            verificar_aberta(sb, dia.year, dia.month)
+            bloqueada = False
+        except ValueError as exc:
+            st.warning(str(exc))
+            bloqueada = True
+        versao = str(anterior.get("atualizado_em") or "novo")
+        with st.form(f"fab_diario_{dia}_{versao}"):
+            responsavel = st.text_input("Nome de quem conferiu", disabled=bloqueada)
+            quantidades = {}
+            cols = st.columns(2)
+            for n, item in enumerate(metas):
+                salvo = (anterior.get("quantidades") or {}).get(item)
+                quantidades[item] = cols[n % 2].number_input(item, min_value=0.0, value=float(salvo) if salvo is not None else None, step=1.0, key=f"fab_public_{dia}_{versao}_{n}", disabled=bloqueada)
+            confirma = st.checkbox("Confirmo a substituição da conferência já registrada nesta data", disabled=bloqueada) if anterior else True
+            salvar = st.form_submit_button("Salvar conferência do dia", type="primary", disabled=bloqueada)
+        if salvar:
+            if not responsavel.strip() or any(v is None for v in quantidades.values()) or not confirma:
+                st.error("Informe seu nome e os oito itens. Se já existe conferência, confirme a substituição.")
+            else:
+                if not validar_link(sb, token):
+                    raise ValueError("Este link foi desativado.")
+                verificar_aberta(sb, dia.year, dia.month)
+                atual = sb("GET", "rh_fabricacao_estoque", f"select=atualizado_em&data=eq.{dia}") or []
+                if (atual[0].get("atualizado_em") if atual else None) != anterior.get("atualizado_em"):
+                    raise ValueError("Outra pessoa alterou esta data. Recarregue antes de salvar.")
+                sb("POST", "rh_fabricacao_estoque", "on_conflict=data", {
+                    "data": dia.isoformat(), "quantidades": quantidades,
+                    "atualizado_por": responsavel.strip(), "atualizado_em": datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
+                }, "resolution=merge-duplicates,return=minimal")
+                st.session_state["fab_public_sucesso"] = f"Conferência de {dia.strftime('%d/%m/%Y')} salva."
+                st.rerun()
+        if st.session_state.get("fab_public_sucesso"):
+            st.success(st.session_state.pop("fab_public_sucesso"))
+        st.markdown("### Resumo do estoque no mês")
+        tabela_resumo(st, pd, registros, metas, dia.year, dia.month)
+        with st.expander("Conferências registradas"):
+            st.dataframe(pd.DataFrame([{"DATA": r["data"], "CONFERIDO POR": r.get("atualizado_por"), **r["quantidades"]} for r in registros]), hide_index=True, use_container_width=True)
+    except Exception as exc:
+        st.error(f"Não foi possível concluir a conferência: {exc}")
 
 
 def numero(regra, campo, padrao):
@@ -113,36 +220,14 @@ def tela_lancamentos(st, pd, sb, ano, mes, colabs, regra, usr, bloqueada):
     ap = sb("GET", "rh_fabricacao_apuracao", f"select=*&ano=eq.{ano}&mes=eq.{mes}") or []
     medias, assinatura = resumo_estoque(regs, cfg["metas"])
     por_id = {int(r["colaborador_id"]): r for r in ap}
-    def verificar_aberta():
-        atuais = sb("GET", "rh_gratificacao_aprovacoes", f"select=status&ano=eq.{ano}&mes=eq.{mes}&order=id.desc&limit=1") or []
-        if atuais and atuais[0].get("status") in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA"):
-            raise ValueError("Competência enviada/autorizada em outra sessão. Recarregue a tela.")
-    with st.expander("🏭 Fabricação — estoque e horas extras", expanded=True):
-        st.caption("Estoque compartilhado pela frente; horas extras e conferência por colaborador. Informe somente horas SEM solicitação Suzano/10 Sul.")
+    pendentes = dias_pendentes(regs, ano, mes, cfg["metas"])
+    with st.expander("🏭 Fabricação — resumo mensal do estoque", expanded=True):
+        st.caption("Os lançamentos diários são feitos no link de conferência do estoque. Aqui são exibidas apenas as médias e metas do mês.")
+        tabela_resumo(st, pd, regs, cfg["metas"], ano, mes)
+        if pendentes:
+            st.info("Resumo provisório: faltam conferências diárias. A bonificação ficará pendente até completar o mês.")
         if bloqueada:
-            st.info("Competência enviada ou autorizada: lançamentos bloqueados.")
-        with st.form(f"fab_estoque_{ano}_{mes}"):
-            dia = st.date_input("Data do estoque", value=min(max(date.today(), ini), fim), min_value=ini, max_value=fim, disabled=bloqueada)
-            st.caption("Consulte os valores salvos na tabela abaixo. Salvar substitui todos os 8 valores da data selecionada.")
-            quantidades = {}
-            cols = st.columns(4)
-            for n, item in enumerate(cfg["metas"]):
-                quantidades[item] = cols[n % 4].number_input(item, min_value=0.0, value=None, key=f"fab_qtd_{ano}_{mes}_{n}", disabled=bloqueada)
-            salvar = st.form_submit_button("Salvar estoque do dia", disabled=bloqueada)
-        if salvar:
-            if any(v is None for v in quantidades.values()):
-                st.error("Preencha os 8 itens; informe zero quando não houver estoque.")
-            else:
-                verificar_aberta()
-                sb("POST", "rh_fabricacao_estoque", "on_conflict=data", {
-                    "data": dia.isoformat(), "quantidades": quantidades,
-                    "atualizado_por": str(usr), "atualizado_em": datetime.now().isoformat()},
-                    "resolution=merge-duplicates,return=minimal")
-                st.rerun()
-        if regs:
-            st.dataframe(pd.DataFrame([{"DATA": r["data"], **r["quantidades"]} for r in regs]), hide_index=True, use_container_width=True)
-        st.caption(f"{len(regs)} dia(s) registrado(s). A média usa apenas os dias lançados; confira se todos os dias de acompanhamento foram incluídos antes de concluir.")
-        st.dataframe(pd.DataFrame([{"ITEM": item, "META": meta, "MÉDIA MENSAL": medias[item]} for item, meta in cfg["metas"].items()]), hide_index=True, use_container_width=True)
+            st.info("Competência enviada ou autorizada: conferência mensal bloqueada.")
         opcoes = {int(c["id"]): c for c in colabs if str(c.get("frente") or "").upper().strip() == "FABRICAÇÃO"}
         if opcoes:
             cid = st.selectbox("Colaborador da Fabricação", list(opcoes), format_func=lambda x: f"{opcoes[x]['colaborador']} (ID {x})", key=f"fab_colab_{ano}_{mes}")
@@ -152,10 +237,10 @@ def tela_lancamentos(st, pd, sb, ano, mes, colabs, regra, usr, bloqueada):
                 conferido = st.checkbox("Conferi os registros de estoque do mês e as horas extras deste colaborador", value=anterior.get("estoque_assinatura") == assinatura, disabled=bloqueada)
                 salvar_ap = st.form_submit_button("Salvar conferência da Fabricação", disabled=bloqueada)
             if salvar_ap:
-                if horas is None or not conferido or any(v is None for v in medias.values()):
-                    st.error("Informe as horas (inclusive zero), preencha o estoque e marque a conferência.")
+                if horas is None or not conferido or pendentes or any(v is None for v in medias.values()):
+                    st.error("Informe as horas (inclusive zero), complete as conferências diárias pelo link e marque a conferência mensal.")
                 else:
-                    verificar_aberta()
+                    verificar_aberta(sb, ano, mes)
                     atuais = sb("GET", "rh_fabricacao_estoque", f"select=*&data=gte.{ini}&data=lte.{fim}&order=data.asc") or []
                     if resumo_estoque(atuais, cfg["metas"])[1] != assinatura:
                         raise ValueError("O estoque mudou em outra sessão. Recarregue e confira novamente.")
@@ -164,4 +249,4 @@ def tela_lancamentos(st, pd, sb, ano, mes, colabs, regra, usr, bloqueada):
                         "estoque_assinatura": assinatura, "atualizado_por": str(usr),
                         "atualizado_em": datetime.now().isoformat()}, "resolution=merge-duplicates,return=minimal")
                     st.rerun()
-    return medias, assinatura, por_id
+    return medias, (None if pendentes else assinatura), por_id

@@ -1,5 +1,5 @@
 import unittest
-from rh_fabricacao import METAS, calcular, resumo_estoque
+from rh_fabricacao import METAS, calcular, resumo_estoque, dias_pendentes, validar_link
 
 
 class FabricacaoTest(unittest.TestCase):
@@ -49,6 +49,20 @@ class FabricacaoTest(unittest.TestCase):
     def test_configuracao_zero_respeitada(self):
         self.assertEqual(self.apurar(regra={"percentual_salario": 0})[1], 0)
         self.assertEqual(self.apurar(dna=0, regra={"dna_minimo": 0})[1], 1091.65)
+
+    def test_diario_completo_media_tres(self):
+        regs = [{"data": f"2026-10-{dia:02d}", "quantidades": dict(METAS)} for dia in range(1, 32)]
+        self.assertEqual(dias_pendentes(regs, 2026, 10, METAS), [])
+        self.assertEqual(resumo_estoque(regs, METAS)[0]["Chapa de Dimensão"], 3)
+        regs.pop()
+        self.assertEqual(len(dias_pendentes(regs, 2026, 10, METAS)), 1)
+        self.assertEqual(resumo_estoque(regs, METAS)[0]["Chapa de Dimensão"], 3)
+
+    def test_link_invalido_nao_consulta_banco(self):
+        def sb(*args):
+            self.fail("Link inválido não deve consultar o banco")
+        for token in (None, "", "'or true", "a" * 65):
+            self.assertFalse(validar_link(sb, token))
 
 
 if __name__ == "__main__":
