@@ -147,7 +147,7 @@ def resumo_estoque(registros, metas):
     return medias, assinatura
 
 
-def calcular(salario, faltas, atestados, dna, horas, medias, conferido, regra):
+def calcular(salario, faltas, atestados, dna, horas, medias, conferido, regra, estoque_atendido=False):
     cfg = configuracao(regra)
     integral = Decimal(str(salario or 0)) * Decimal(str(numero(regra, "percentual_salario", 35))) / 100
     integral = integral.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -156,9 +156,9 @@ def calcular(salario, faltas, atestados, dna, horas, medias, conferido, regra):
         pendencias.append("informar salário-base")
     if horas is None:
         pendencias.append("informar horas extras sem solicitação (inclusive zero)")
-    if not conferido:
+    if not conferido and not estoque_atendido:
         pendencias.append("conferir estoque mensal")
-    if any(medias.get(item) is None for item in cfg["metas"]):
+    if not estoque_atendido and any(medias.get(item) is None for item in cfg["metas"]):
         pendencias.append("informar estoque dos 8 itens")
     # O termo não define o desconto para meio período; não presumir penalidade.
     if 0 < float(atestados) <= 2 and not float(atestados).is_integer():
@@ -178,12 +178,14 @@ def calcular(salario, faltas, atestados, dna, horas, medias, conferido, regra):
         pct = numero(regra, "desconto_1_atestado_percentual", 25) if atestados == 1 else float(cfg["desconto_2_atestados_percentual"])
         desconto += Decimal(str(pct))
         motivos.append(f"{atestados:g} dia(s) de atestado (-{pct:g}%)")
-    abaixo = [item for item, meta in cfg["metas"].items()
+    abaixo = [] if estoque_atendido else [item for item, meta in cfg["metas"].items()
               if medias.get(item) is not None and medias[item] < float(meta)]
     if abaixo:
         pct = Decimal(str(cfg["desconto_item_percentual"])) * len(abaixo)
         desconto += pct
         motivos.append(f"Estoque: {len(abaixo)} item(ns) abaixo da meta (-{pct}%): " + ", ".join(abaixo))
+    if estoque_atendido:
+        motivos.append("Estoque do mês considerado atendido por opção do RH")
     if pendencias:
         return float(integral), None, " • ".join(pendencias + motivos)
     valor = Decimal("0") if zerada else max(Decimal("0"), integral * (1 - desconto / 100))
@@ -218,13 +220,30 @@ def tela_lancamentos(st, pd, sb, ano, mes, colabs, regra, usr, bloqueada):
     fim = date(ano, mes, calendar.monthrange(ano, mes)[1])
     regs = sb("GET", "rh_fabricacao_estoque", f"select=*&data=gte.{ini}&data=lte.{fim}&order=data.asc") or []
     ap = sb("GET", "rh_fabricacao_apuracao", f"select=*&ano=eq.{ano}&mes=eq.{mes}") or []
+    opcoes_mes = sb("GET", "rh_fabricacao_mes", f"select=*&ano=eq.{ano}&mes=eq.{mes}&limit=1") or []
+    opcao_mes = opcoes_mes[0] if opcoes_mes else {}
+    estoque_atendido = bool(opcao_mes.get("estoque_atendido", False))
     medias, assinatura = resumo_estoque(regs, cfg["metas"])
     por_id = {int(r["colaborador_id"]): r for r in ap}
     pendentes = dias_pendentes(regs, ano, mes, cfg["metas"])
     with st.expander("🏭 Fabricação — resumo mensal do estoque", expanded=True):
         st.caption("Os lançamentos diários são feitos no link de conferência do estoque. Aqui são exibidas apenas as médias e metas do mês.")
         tabela_resumo(st, pd, regs, cfg["metas"], ano, mes)
-        if pendentes:
+        with st.form(f"fab_opcao_mes_{ano}_{mes}"):
+            considerar = st.checkbox("Deseja considerar o estoque do mês como atendido?", value=estoque_atendido, disabled=bloqueada)
+            st.caption("Ao marcar e salvar, o estoque será considerado atendido para todos os colaboradores da Fabricação nesta competência. Não haverá desconto de estoque nem pendência por conferências diárias. Os demais critérios permanecem válidos.")
+            salvar_opcao = st.form_submit_button("Salvar opção do estoque do mês", disabled=bloqueada)
+        if salvar_opcao:
+            verificar_aberta(sb, ano, mes)
+            sb("POST", "rh_fabricacao_mes", "on_conflict=ano,mes", {
+                "ano": ano, "mes": mes, "estoque_atendido": considerar,
+                "atualizado_por": str(usr), "atualizado_em": datetime.now().isoformat()
+            }, "resolution=merge-duplicates,return=minimal")
+            st.rerun()
+        if estoque_atendido:
+            st.success("Estoque do mês considerado atendido. Desconto de estoque: 0%.")
+            st.caption(f"Registrado por: {opcao_mes.get('atualizado_por') or '-'} • Em: {opcao_mes.get('atualizado_em') or '-'}")
+        elif pendentes:
             st.info("Resumo provisório: faltam conferências diárias. A bonificação ficará pendente até completar o mês.")
         if bloqueada:
             st.info("Competência enviada ou autorizada: conferência mensal bloqueada.")
@@ -234,11 +253,11 @@ def tela_lancamentos(st, pd, sb, ano, mes, colabs, regra, usr, bloqueada):
             anterior = por_id.get(cid, {})
             with st.form(f"fab_ap_{ano}_{mes}_{cid}_{assinatura[:12]}"):
                 horas = st.number_input("Horas extras sem solicitação no mês (h)", min_value=0.0, value=float(anterior["horas_sem_solicitacao"]) if anterior.get("horas_sem_solicitacao") is not None else None, step=0.5, disabled=bloqueada)
-                conferido = st.checkbox("Conferi os registros de estoque do mês e as horas extras deste colaborador", value=anterior.get("estoque_assinatura") == assinatura, disabled=bloqueada)
+                conferido = st.checkbox("Conferi as horas extras deste colaborador" if estoque_atendido else "Conferi os registros de estoque do mês e as horas extras deste colaborador", value=anterior.get("estoque_assinatura") == assinatura, disabled=bloqueada)
                 salvar_ap = st.form_submit_button("Salvar conferência da Fabricação", disabled=bloqueada)
             if salvar_ap:
-                if horas is None or not conferido or pendentes or any(v is None for v in medias.values()):
-                    st.error("Informe as horas (inclusive zero), complete as conferências diárias pelo link e marque a conferência mensal.")
+                if horas is None or not conferido or (not estoque_atendido and (pendentes or any(v is None for v in medias.values()))):
+                    st.error("Informe as horas (inclusive zero) e marque a conferência das horas extras." if estoque_atendido else "Informe as horas (inclusive zero), complete as conferências diárias pelo link e marque a conferência mensal.")
                 else:
                     verificar_aberta(sb, ano, mes)
                     atuais = sb("GET", "rh_fabricacao_estoque", f"select=*&data=gte.{ini}&data=lte.{fim}&order=data.asc") or []
@@ -249,4 +268,4 @@ def tela_lancamentos(st, pd, sb, ano, mes, colabs, regra, usr, bloqueada):
                         "estoque_assinatura": assinatura, "atualizado_por": str(usr),
                         "atualizado_em": datetime.now().isoformat()}, "resolution=merge-duplicates,return=minimal")
                     st.rerun()
-    return medias, (None if pendentes else assinatura), por_id
+    return medias, (None if pendentes else assinatura), por_id, estoque_atendido

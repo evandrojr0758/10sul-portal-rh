@@ -54,9 +54,23 @@ class FabricacaoTest(unittest.TestCase):
         regs = [{"data": f"2026-10-{dia:02d}", "quantidades": dict(METAS)} for dia in range(1, 32)]
         self.assertEqual(dias_pendentes(regs, 2026, 10, METAS), [])
         self.assertEqual(resumo_estoque(regs, METAS)[0]["Chapa de Dimensão"], 3)
+
         regs.pop()
         self.assertEqual(len(dias_pendentes(regs, 2026, 10, METAS)), 1)
         self.assertEqual(resumo_estoque(regs, METAS)[0]["Chapa de Dimensão"], 3)
+
+    def test_estoque_atendido_ignora_faltantes_e_desconto(self):
+        integral, valor, motivo = self.apurar(estoque_atendido=True, medias={}, conferido=False)
+        self.assertEqual(valor, integral)
+        self.assertIn("considerado atendido", motivo)
+        self.assertEqual(self.apurar(estoque_atendido=True, medias={i:0 for i in METAS})[1], 1091.65)
+        self.assertIsNone(self.apurar(estoque_atendido=False, medias={}, conferido=False)[1])
+
+    def test_estoque_atendido_preserva_demais_criterios(self):
+        for mudanca in [dict(faltas=1), dict(dna=1), dict(horas=6), dict(atestados=3)]:
+            self.assertEqual(self.apurar(estoque_atendido=True, **mudanca)[1], 0)
+        self.assertEqual(self.apurar(estoque_atendido=True, atestados=1)[1], 818.74)
+        self.assertIsNone(self.apurar(estoque_atendido=True, horas=None)[1])
 
     def test_link_invalido_nao_consulta_banco(self):
         def sb(*args):

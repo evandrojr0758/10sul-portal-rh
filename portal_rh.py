@@ -1423,14 +1423,14 @@ def tela_apuracao_gratificacao():
     ap_por={int(r["colaborador_id"]):r for r in ap_regs if r.get("colaborador_id") is not None}
 
     fab = _regra_por_codigo(regras, "FABRICACAO")
-    fab_medias, fab_assinatura, fab_ap = {}, None, {}
+    fab_medias, fab_assinatura, fab_ap, fab_estoque_atendido = {}, None, {}, False
     fab_erro = None
     if any(str(c.get("frente") or "").upper().strip() == "FABRICAÇÃO" for c in colabs):
         try:
             if not fab:
                 raise ValueError("Regra de Fabricação não cadastrada.")
             apr_fab = _grat_aprovacao(ano_g, mes_g)
-            fab_medias, fab_assinatura, fab_ap = rh_fabricacao.tela_lancamentos(
+            fab_medias, fab_assinatura, fab_ap, fab_estoque_atendido = rh_fabricacao.tela_lancamentos(
                 st, pd, sb, ano_g, mes_g, colabs, fab,
                 usr.get("nome") or usr.get("usuario"),
                 str((apr_fab or {}).get("status") or "") in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA"))
@@ -1595,7 +1595,8 @@ def tela_apuracao_gratificacao():
             fab_manual = fab_ap.get(cid, {})
             integral, valor, motivo_fab = rh_fabricacao.calcular(
                 c.get("salario_base"), fa, at, dna, fab_manual.get("horas_sem_solicitacao"),
-                fab_medias, bool(fab_assinatura) and fab_manual.get("estoque_assinatura") == fab_assinatura, fab)
+                fab_medias, bool(fab_assinatura) and fab_manual.get("estoque_assinatura") == fab_assinatura, fab,
+                estoque_atendido=fab_estoque_atendido)
             motivos = [motivo_fab]
             if fab_erro:
                 valor = None
