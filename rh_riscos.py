@@ -27,11 +27,8 @@ def tela_riscos(sb, usuario):
     except Exception as exc:
         st.error(f"Não foi possível carregar o mapeamento: {exc}")
         return
-    if not regs:
-        st.info("Nenhuma atividade cadastrada.")
-        return
-    linhas = [dict(r.get("dados") or {}, id=r["id"]) for r in regs]
-    df = pd.DataFrame(linhas)
+    linhas = [dict(r.get("dados") or {}, id=r["id"]) for r in regs if not (r.get("dados") or {}).get("excluido")]
+    df = pd.DataFrame(linhas, columns=list(PADRAO) + ["id"])
     df["consequencia"] = df["consequencia"].fillna("A validar")
     df["severidade"] = df["consequencia"].map(severidade)
     painel, plano, editar = st.tabs(["Painel e atividades", "Plano de ação", "Validar / editar atividade"])
@@ -71,7 +68,7 @@ def tela_riscos(sb, usuario):
             st.caption("Clique em uma barra para abrir as atividades abaixo. Dê dois cliques no gráfico para limpar a seleção. Cada atividade é contada uma vez, pela consequência prioritária da triagem.")
         else:
             st.info("Nenhuma atividade para os filtros selecionados.")
-        mostrar_atividades(view)
+        mostrar_atividades(view, sb, usuario, linhas)
     with plano:
         st.subheader("Plano de ação preventivo")
         atrasadas = df.apply(lambda r: bool(r.get("prazo") and str(r["prazo"]) < date.today().isoformat() and r.get("status_acao") != "Concluída"), axis=1)
@@ -82,12 +79,17 @@ def tela_riscos(sb, usuario):
         st.dataframe(view_plano[campos].rename(columns=ROTULOS), use_container_width=True, hide_index=True)
         st.caption("Atualize responsáveis, prazos, ações e evidências na aba Validar / editar atividade. Concluir uma ação não valida automaticamente a eficácia ou o risco residual.")
     with editar:
+        if df.empty:
+            st.info("Acrescente a primeira atividade na tabela da aba Painel e atividades.")
+            return
         ids = df["id"].tolist()
         alvo = st.selectbox("Atividade", ids, format_func=lambda i: str(df.loc[df["id"].eq(i), "atividade"].iloc[0]), key="riscos_editar_id")
         original = next(r for r in linhas if r["id"] == alvo)
         with st.form(f"risco_form_{alvo}"):
             st.caption(f"Classificação original: {original.get('classificacao_original') or '—'} • Severidade original: {original.get('severidade_original') or '—'}")
             dados = dict(original)
+            dados["atividade"] = st.text_input("Nome da atividade", value=str(original.get("atividade") or ""))
+            dados["nr"] = st.text_input("NR informada na matriz", value=str(original.get("nr") or ""))
             for campo in ["riscos", "controles", "cenario", "lacuna", "acao"]:
                 dados[campo] = st.text_area(ROTULOS[campo], value=str(original.get(campo) or ""))
             atual = original.get("consequencia") or "A validar"
@@ -104,7 +106,9 @@ def tela_riscos(sb, usuario):
                 dados[campo] = st.text_input(ROTULOS[campo], value=str(original.get(campo) or "Não avaliado"))
             salvar = st.form_submit_button("Salvar atividade e plano de ação", type="primary")
         if salvar:
-            if dados["validacao"] == "Validada" and (dados["consequencia"] == "A validar" or not dados["cenario"].strip()):
+            if not dados["atividade"].strip():
+                st.error("Informe o nome da atividade.")
+            elif dados["validacao"] == "Validada" and (dados["consequencia"] == "A validar" or not dados["cenario"].strip()):
                 st.error("Para validar, informe o cenário e a consequência prioritária.")
             elif dados["status_acao"] == "Concluída" and not dados["evidencia"].strip():
                 st.error("Informe a evidência antes de concluir a ação.")
@@ -125,9 +129,107 @@ def tela_riscos(sb, usuario):
 ROTULOS = {"atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Consequência potencial", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
 
 
-def mostrar_atividades(df):
+PADRAO = {
+    "atividade": "", "riscos": "", "controles": "", "responsavel": "", "nr": "",
+    "consequencia": "A validar", "validacao": "Pendente", "cenario": "",
+    "lacuna": "", "acao": "", "hierarquia": "", "prazo": None,
+    "status_acao": "Não iniciada", "evidencia": "",
+    "probabilidade_residual": "Não avaliada", "severidade_residual": "Não avaliada",
+    "nivel_residual": "Não avaliado", "classificacao_original": "", "severidade_original": "",
+}
+CAMPOS_GRADE = ["atividade", "consequencia", "riscos", "controles", "responsavel", "nr"]
+
+
+def preparar_alteracoes(editado, visiveis, originais):
+    """Compara somente IDs da seleção atual; remoção é lógica, com histórico."""
+    por_id = {int(r["id"]): r for r in originais}
+    permitidos = set(int(i) for i in visiveis)
+    vistos = set()
+    alteracoes = []
+    for linha in editado.to_dict(orient="records"):
+        valor_id = linha.get("id")
+        novo = pd.isna(valor_id)
+        cid = None if novo else int(valor_id)
+        if cid is not None and (cid not in permitidos or cid in vistos):
+            raise ValueError("Identificação inválida na tabela. Atualize a página.")
+        if cid is not None:
+            vistos.add(cid)
+        nome = str(linha.get("atividade") or "").strip()
+        # A linha vazia de inclusão do editor não gera cadastro.
+        if novo and not any(str(linha.get(c) or "").strip() for c in CAMPOS_GRADE if not pd.isna(linha.get(c))):
+            continue
+        if not nome or pd.isna(linha.get("atividade")):
+            raise ValueError("Toda atividade precisa de um nome.")
+        anterior = por_id.get(cid)
+        dados = dict(anterior) if anterior else dict(PADRAO)
+        for campo in CAMPOS_GRADE:
+            valor = linha.get(campo)
+            dados[campo] = "" if pd.isna(valor) else str(valor).strip()
+        dados["consequencia"] = dados["consequencia"] or "A validar"
+        if dados["consequencia"] not in CONSEQUENCIAS:
+            raise ValueError("Selecione uma consequência válida.")
+        if novo or any(dados.get(c) != anterior.get(c) for c in CAMPOS_GRADE):
+            dados["validacao"] = "Pendente"
+            alteracoes.append((cid, dados, anterior))
+    for cid in permitidos - vistos:
+        anterior = por_id[cid]
+        dados = dict(anterior, excluido=True)
+        alteracoes.append((cid, dados, anterior))
+    return alteracoes
+
+
+def mostrar_atividades(df, sb, usuario, originais):
+    import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
-    campos = ["atividade", "consequencia", "severidade", "riscos", "controles", "responsavel", "nr", "validacao"]
-    st.dataframe(df[campos].rename(columns=ROTULOS), use_container_width=True, hide_index=True)
+    st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. A severidade é calculada pela consequência; alterações voltam para validação pendente.")
+    campos = ["id", "atividade", "consequencia", "severidade", "riscos", "controles", "responsavel", "nr", "validacao"]
+    base = df[campos].copy()
+    # Uma seleção ou gravação diferente nunca reutiliza deltas de outras linhas.
+    assinatura = hashlib.sha256(base.to_json(orient="records").encode()).hexdigest()[:16]
+    editado = st.data_editor(
+        base, use_container_width=True, hide_index=True, num_rows="dynamic",
+        disabled=["id", "severidade", "validacao"],
+        column_config={
+            "id": None,
+            **{c: st.column_config.TextColumn(ROTULOS[c]) for c in ["atividade", "riscos", "controles", "responsavel", "nr"]},
+            "atividade": st.column_config.TextColumn("Atividade", required=True),
+            "consequencia": st.column_config.SelectboxColumn("Consequência potencial", options=CONSEQUENCIAS),
+            "severidade": st.column_config.TextColumn("Severidade (automática)"),
+            "validacao": st.column_config.TextColumn("Validação operacional"),
+        },
+        key=f"riscos_grade_{assinatura}_{st.session_state.get('riscos_grade_versao', 0)}",
+    )
+    try:
+        alteracoes = preparar_alteracoes(editado, base["id"].tolist(), originais)
+    except ValueError as exc:
+        st.error(str(exc))
+        alteracoes = None
+    excluidas = sum(bool(d.get("excluido")) for _, d, _ in (alteracoes or []))
+    confirmar = not excluidas
+    if excluidas:
+        confirmar = st.checkbox(f"Confirmar exclusão de {excluidas} atividade(s) do painel", key=f"riscos_excluir_{assinatura}")
+    if st.button("💾 Salvar alterações das atividades", type="primary", disabled=not alteracoes or not confirmar, key=f"riscos_salvar_{assinatura}"):
+        autor = str(usuario.get("nome") or usuario.get("usuario") or "Segurança")
+        quando = datetime.now(timezone.utc).isoformat()
+        try:
+            for cid, dados, anterior in alteracoes:
+                dados = dict(dados)
+                dados.pop("id", None)
+                dados["historico"] = list(dados.get("historico") or []) + [{
+                    "em": quando, "por": autor,
+                    "operacao": "exclusao" if dados.get("excluido") else ("inclusao" if cid is None else "edicao"),
+                    "antes": {k: v for k, v in (anterior or {}).items() if k not in ("historico", "id")},
+                }]
+                payload = {"dados": dados, "atualizado_em": quando, "atualizado_por": autor}
+                if cid is None:
+                    sb("POST", "rh_seguranca_riscos", "", payload, "return=minimal")
+                else:
+                    sb("PATCH", "rh_seguranca_riscos", f"id=eq.{cid}", payload, "return=minimal")
+            st.session_state["riscos_grade_versao"] = st.session_state.get("riscos_grade_versao", 0) + 1
+            st.success("Alterações salvas. O gráfico será atualizado.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Não foi possível concluir todas as alterações. Atualize a página antes de tentar novamente: {exc}")
     if not df.empty:
-        st.download_button("Baixar atividades selecionadas (CSV)", df[campos].rename(columns=ROTULOS).to_csv(index=False, sep=";").encode("utf-8-sig"), "atividades_riscos.csv", "text/csv")
+        exportar = df[[c for c in campos if c != "id"]].rename(columns=ROTULOS)
+        st.download_button("Baixar atividades selecionadas (CSV)", exportar.to_csv(index=False, sep=";").encode("utf-8-sig"), "atividades_riscos.csv", "text/csv")
