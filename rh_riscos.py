@@ -51,7 +51,7 @@ def tela_riscos(sb, usuario):
             view = view[view["validacao"].eq(validacao)]
         contagem = view.groupby("consequencia").size().reset_index(name="atividades")
         if not view.empty:
-            clique = alt.selection_point(name="categoria", fields=["consequencia"], on="click", clear="dblclick")
+            clique = alt.selection_point(name="categoria", fields=["consequencia"], on="click", clear="dblclick", toggle="true")
             grafico = alt.Chart(contagem).mark_bar(cornerRadiusEnd=5).encode(
                 x=alt.X("atividades:Q", title="Quantidade de atividades", axis=alt.Axis(tickMinStep=1)),
                 y=alt.Y("consequencia:N", title=None, sort=CONSEQUENCIAS),
@@ -65,7 +65,7 @@ def tela_riscos(sb, usuario):
                 categorias = [p["consequencia"] for p in selecionadas if "consequencia" in p]
                 if categorias:
                     view = view[view["consequencia"].isin(categorias)]
-            st.caption("Clique em uma barra para abrir as atividades abaixo. Dê dois cliques no gráfico para limpar a seleção. Cada atividade é contada uma vez, pela consequência prioritária da triagem.")
+            st.caption("Clique em uma barra para filtrar as atividades. Clique novamente na mesma barra para remover a seleção e mostrar todas. Cada atividade é contada uma vez, pela consequência prioritária da triagem.")
         else:
             st.info("Nenhuma atividade para os filtros selecionados.")
         mostrar_atividades(view, sb, usuario, linhas)
