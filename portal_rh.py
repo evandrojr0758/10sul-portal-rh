@@ -21,6 +21,7 @@ import streamlit as st
 import altair as alt
 import rh_sessao
 import rh_fabricacao
+import rh_gratificacao_export
 import rh_horas_extras
 from rh_desligamentos import exige_motivo as deslig_exige_motivo, abrir_modal as abrir_modal_desligamento, validar_motivos as validar_motivos_desligamento, payload_desligamento
 from rh_vencimentos import CAMPOS as CAMPOS_VENC, data_iso as venc_data_iso, tela_alertas as tela_alertas_venc, tela_importacao as tela_importacao_venc
@@ -1295,6 +1296,18 @@ def tela_publica_aprovacao_gratificacao(token):
         st.markdown(f"### {meses[mes-1]} / {ano}")
         st.caption("Confira a apuração abaixo. Esta página é somente leitura e não exige login.")
         k1,k2=st.columns(2); k1.metric("Colaboradores", int(snap.get("quantidade") or len(linhas))); k2.metric("Total da gratificação", f"R$ {float(snap.get('total') or 0):,.2f}".replace(",","X").replace(".",",").replace("X","."))
+        if status in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA"):
+            try:
+                st.download_button(
+                    "📥 Baixar Excel organizado da apuração",
+                    data=rh_gratificacao_export.excel_gestor(reg),
+                    file_name=f"Gratificacao_Gestor_{ano}_{mes:02d}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="public_excel_gratificacao",
+                )
+                st.caption("Resumo com totais e abas de Revisão, demais frentes e colaboradores sem pagamento. Dados da apuração enviada para autorização.")
+            except Exception as exc:
+                st.error(f"Não foi possível gerar o Excel: {exc}")
         if linhas:
             dfp=pd.DataFrame(linhas)
             vis=[c for c in ["COLABORADOR","EMPRESA","FRENTE","GRATIFICAÇÃO","STATUS","MOTIVO / CÁLCULO"] if c in dfp.columns]
@@ -1771,8 +1784,11 @@ def tela_apuracao_gratificacao():
             except Exception:
                 _base=""
             _link=f"{_base}?aprovar_gratificacao={_token}" if _base else f"?aprovar_gratificacao={_token}"
+            _link, _whatsapp_gestor = rh_gratificacao_export.whatsapp_aprovacao(
+                _base or rh_fabricacao.BASE_URL, _token, ano_g, mes_g)
             st.code(_link, language=None)
-            st.caption("Envie este link ao gestor. Ele abre a apuração em modo somente leitura, sem login.")
+            st.link_button("📲 Enviar para o gestor pelo WhatsApp", _whatsapp_gestor, type="primary")
+            st.caption("O WhatsApp abre com a mensagem e o link prontos. Escolha o contato do gestor e confirme o envio. Na página, ele pode conferir e baixar o Excel organizado.")
     elif _apr_status == "AUTORIZADA":
         st.success("✅ GRATIFICAÇÃO AUTORIZADA — À ENVIAR À CONTABILIDADE")
         st.caption(f"Autorizada em: {(_apr or {}).get('autorizado_em') or '-'} • A competência permanece bloqueada.")
