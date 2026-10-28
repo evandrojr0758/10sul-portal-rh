@@ -20,6 +20,7 @@ import pandas as pd
 import streamlit as st
 import altair as alt
 import rh_sessao
+import rh_fabricacao
 import rh_horas_extras
 from rh_desligamentos import exige_motivo as deslig_exige_motivo, abrir_modal as abrir_modal_desligamento, validar_motivos as validar_motivos_desligamento, payload_desligamento
 from rh_vencimentos import CAMPOS as CAMPOS_VENC, data_iso as venc_data_iso, tela_alertas as tela_alertas_venc, tela_importacao as tela_importacao_venc
@@ -998,7 +999,7 @@ def salvar_regra_gratificacao(regra_id, dados, atualizado_por):
 def tela_regras_gratificacao():
     usr = st.session_state.get("usuario_logado") or {}
     st.markdown("### 💰 Cadastro de Regras de Gratificação")
-    st.caption("As regras abaixo ficam salvas no banco e podem ser alteradas pelo RH/Administrador. FABRICAÇÃO será configurada em uma etapa separada.")
+    st.caption("As regras abaixo ficam salvas no banco e podem ser alteradas pelo RH/Administrador.")
     try:
         regras = ler_regras_gratificacao()
     except Exception as e:
@@ -1009,7 +1010,7 @@ def tela_regras_gratificacao():
         st.warning("Nenhuma regra cadastrada. Execute o SQL desta versão no Supabase para carregar as regras iniciais.")
         return
 
-    rotulos = {"REVISAO": "REVISÃO", "ITR_DEMAIS": "ITR E DEMAIS FRENTES"}
+    rotulos = {"REVISAO": "REVISÃO", "ITR_DEMAIS": "ITR E DEMAIS FRENTES", "FABRICACAO": "FABRICAÇÃO"}
     for r in regras:
         codigo = str(r.get("codigo") or "")
         titulo = rotulos.get(codigo, str(r.get("nome") or codigo))
@@ -1047,6 +1048,8 @@ def tela_regras_gratificacao():
                     "tempo_ate_24_percentual": tempo_24,
                     "tempo_acima_24_percentual": tempo_acima,
                 }
+            elif codigo == "FABRICACAO":
+                dados = rh_fabricacao.tela_regra(st, r)
             else:
                 st.caption("Regra-base para ITR, SOS, CNP, BORRACHARIA, CAPD e CRAVEJAMENTO. FABRICAÇÃO não entra nesta regra.")
                 c1,c2,c3 = st.columns(3)
@@ -1398,6 +1401,22 @@ def tela_apuracao_gratificacao():
     dna_por={int(r["colaborador_id"]):int(r.get("quantidade") or 0) for r in dna_regs if r.get("colaborador_id") is not None}
     ap_por={int(r["colaborador_id"]):r for r in ap_regs if r.get("colaborador_id") is not None}
 
+    fab = _regra_por_codigo(regras, "FABRICACAO")
+    fab_medias, fab_assinatura, fab_ap = {}, None, {}
+    fab_erro = None
+    if any(str(c.get("frente") or "").upper().strip() == "FABRICAÇÃO" for c in colabs):
+        try:
+            if not fab:
+                raise ValueError("Regra de Fabricação não cadastrada.")
+            apr_fab = _grat_aprovacao(ano_g, mes_g)
+            fab_medias, fab_assinatura, fab_ap = rh_fabricacao.tela_lancamentos(
+                st, pd, sb, ano_g, mes_g, colabs, fab,
+                usr.get("nome") or usr.get("usuario"),
+                str((apr_fab or {}).get("status") or "") in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA"))
+        except Exception as exc:
+            fab_erro = str(exc)
+            st.error(f"Fabricação pendente: não foi possível carregar/salvar os lançamentos: {exc}")
+
     # Médias mensais da REVISÃO são informadas em lote, uma vez por equipe.
     def _media_salva_equipe(nome_equipe):
         vals=[]
@@ -1515,10 +1534,6 @@ def tela_apuracao_gratificacao():
         frente=str(frente_raw).upper().strip()
         if frente not in frentes_validas:
             continue
-        # FABRICAÇÃO já fica identificada pelo cadastro, mas seu cálculo específico
-        # será implementado na etapa própria; por enquanto não entra no fechamento.
-        if frente=="FABRICAÇÃO":
-            continue
         dd=c.get("data_desligamento")
         if dd and str(dd) < ini: continue
         sal=float(c.get("salario_base") or 0); fa=faltas.get(cid,0); at=atest.get(cid,0); dna=dna_por.get(cid,0); des=desvios.get(cid,0)
@@ -1555,6 +1570,15 @@ def tela_apuracao_gratificacao():
             if at>=int(demais.get("atestados_zera_tudo") or 2): valor=0; motivos.append(f"{at} dias de atestado")
             elif at>=1:
                 desc=float(demais.get("desconto_1_atestado_percentual") or 20); valor=integral*(1-desc/100); motivos.append(f"1 dia de atestado (-{desc:.0f}%)")
+        if frente == "FABRICAÇÃO":
+            fab_manual = fab_ap.get(cid, {})
+            integral, valor, motivo_fab = rh_fabricacao.calcular(
+                c.get("salario_base"), fa, at, dna, fab_manual.get("horas_sem_solicitacao"),
+                fab_medias, bool(fab_assinatura) and fab_manual.get("estoque_assinatura") == fab_assinatura, fab)
+            motivos = [motivo_fab]
+            if fab_erro:
+                valor = None
+                motivos.append("Lançamentos de Fabricação indisponíveis")
         if pendencia_atestado:
             valor=None
             motivos.append(f"{pendencia_atestado} atestado(s) sem classificação de período")
@@ -1786,7 +1810,9 @@ def tela_apuracao_gratificacao():
     if _apr_status not in ("AGUARDANDO_AUTORIZACAO", "AUTORIZADA"):
         st.info("Após enviar ao gestor, esta competência será bloqueada e não permitirá mais alterações.")
         _confirm_key=f"grat_confirm_envio_{ano_g}_{mes_g}"
-        if st.button("📨 Enviar para autorização do gestor",type="primary",use_container_width=True,key=f"grat_enviar_gestor_{ano_g}_{mes_g}"):
+        if df["GRATIFICAÇÃO"].isna().any():
+            st.warning("Conclua as pendências da apuração antes de enviar ao gestor.")
+        if st.button("📨 Enviar para autorização do gestor",type="primary",use_container_width=True,disabled=bool(df["GRATIFICAÇÃO"].isna().any()),key=f"grat_enviar_gestor_{ano_g}_{mes_g}"):
             st.session_state[_confirm_key]=True
         if st.session_state.get(_confirm_key):
             st.warning("Confirma o envio? Depois desta etapa não será possível alterar nenhum dado desta competência.")
@@ -1794,6 +1820,8 @@ def tela_apuracao_gratificacao():
             if _ca.button("🔒 Confirmar e bloquear",type="primary",key=f"grat_confirma_envio_{ano_g}_{mes_g}"):
                 try:
                     _usr_nome=(usr.get("nome") or usr.get("usuario") or "ADMIN")
+                    if df["GRATIFICAÇÃO"].isna().any():
+                        raise ValueError("Há colaboradores com apuração pendente.")
                     _enviar_gratificacao_gestor(df,ano_g,mes_g,_usr_nome)
                     st.session_state.pop(_confirm_key,None); st.success("Apuração enviada e bloqueada."); st.rerun()
                 except Exception as e:
