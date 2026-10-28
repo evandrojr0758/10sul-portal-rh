@@ -5890,7 +5890,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "empresa": st.column_config.SelectboxColumn("Empresa", options=opcoes_empresas_cadastro, required=True),
                 "tipo_contratacao": st.column_config.SelectboxColumn("Tipo de contratação", options=["", "CONTRATO", "SPOT"], required=False),
                 "salario_base": st.column_config.NumberColumn("Salário base (R$)", min_value=0.0, step=0.01, format="R$ %.2f"),
-                "frente": st.column_config.SelectboxColumn("Frente", options=["REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"], required=False),
+                "frente": st.column_config.SelectboxColumn("Frente", options=["SEM FRENTE", "REVISÃO", "ITR", "SOS", "CNP", "BORRACHARIA", "CAPD", "FABRICAÇÃO", "CRAVEJAMENTO"], required=False, help="Selecione SEM FRENTE para retirar a frente. Ao salvar, o campo ficará vazio."),
                 "equipe_revisao": st.column_config.SelectboxColumn("Equipe Revisão", options=["EQUIPE 1", "EQUIPE 2"], required=False),
                 "status": st.column_config.SelectboxColumn(
                     "Status",
@@ -5925,7 +5925,12 @@ with st.expander("👥 Cadastro de colaboradores"):
             except Exception:
                 novo_salario = None
             salario_antigo = original_salario.get(cid)
-            nova_frente = str(linha.get("frente") or "").strip().upper()
+            # A opção explícita evita depender da opção vazia do editor.
+            # Valores ausentes também devem resultar em NULL, nunca em "NAN".
+            frente_val = linha.get("frente")
+            nova_frente = "" if pd.isna(frente_val) else str(frente_val or "").strip().upper()
+            if nova_frente == "SEM FRENTE":
+                nova_frente = ""
             frente_antiga = original_frente.get(cid, "")
             nova_destra = str(linha.get("destra") or "").strip()
             destra_antiga = original_destra.get(cid, "")
