@@ -2223,7 +2223,7 @@ def abrir_ajuda_portal():
 O **Portal RH — Aracruz** foi criado para registrar e acompanhar a frequência mensal dos colaboradores de forma simples e segura.
 
 ### 1. Resumo do mês
-Na parte superior você acompanha os totais de **Faltas, Atestados, Folgas, Presenças, Liberados e Compensações**. A **Média de Colaboradores** soma os dias de vínculo dos colaboradores **OPERACIONAIS / CONTRATO** e divide pelos dias corridos do período (até hoje no mês atual). Admissão e desligamento entram proporcionalmente, incluindo o dia de entrada e de saída. Férias, folgas, liberados, compensações, afastamentos e dias sem lançamento continuam no quadro. Cadastros antigos sem admissão são considerados desde o início do período.
+Na parte superior você acompanha os totais de **Faltas, Atestados, Folgas, Presenças, Liberados e Compensações**. A **Média de Colaboradores** soma **OK + FA + A + FO + LB + COMP** dos **OPERACIONAIS / CONTRATO** e divide pelos dias corridos do período (até hoje no mês atual). Férias e dias pendentes não contam. Admissão e desligamento delimitam os dias válidos, incluindo o dia de entrada e de saída. Cadastros antigos sem admissão usam o início do período.
 
 ### 2. Colaboradores
 O quadro **Colaboradores** mostra o total de pessoas cadastradas e a divisão entre **Operacionais** e **Outros**. Você pode usar **Buscar colaborador** para localizar rapidamente um nome e o filtro **STATUS** para visualizar TODOS, OPERACIONAL ou OUTROS.
@@ -5221,9 +5221,9 @@ with _rankings_topo:
             "Barras na mesma escala."
         )
 
-# Média do quadro: dias de vínculo dos OPERACIONAIS / CONTRATO.
-# Não depende do preenchimento da frequência nem do filtro visual de nome/status.
-def _media_quadro_contrato(cadastros, ano, mes, dias_periodo):
+# Média: frequência contabilizada dos OPERACIONAIS / CONTRATO.
+# Férias e pendências ficam fora; admissão e desligamento delimitam o vínculo.
+def _media_quadro_contrato(cadastros, ano, mes, dias_periodo, frequencia):
     if dias_periodo <= 0:
         return 0.0, []
     inicio = date(int(ano), int(mes), 1)
@@ -5239,26 +5239,32 @@ def _media_quadro_contrato(cadastros, ano, mes, dias_periodo):
         inicio_vinculo = max(inicio, admissao.date()) if pd.notna(admissao) else inicio
         fim_vinculo = min(fim, desligamento.date()) if pd.notna(desligamento) else fim
         dias_vinculo = max(0, (fim_vinculo - inicio_vinculo).days + 1)
+        dias_contados = sum(
+            1 for dia in range(1, dias_periodo + 1)
+            if inicio_vinculo <= date(int(ano), int(mes), dia) <= fim_vinculo
+            and _codigo_grade(frequencia.get((int(c["id"]), dia), "")) in {"OK", "FA", "A", "FO", "LB", "COMP"}
+        )
         detalhes.append({
             "COLABORADOR": _nome_colaborador(c),
             "ADMISSÃO": admissao.date() if pd.notna(admissao) else None,
             "DESLIGAMENTO": desligamento.date() if pd.notna(desligamento) else None,
             "DIAS DE VÍNCULO": dias_vinculo,
+            "DIAS CONTABILIZADOS": dias_contados,
             "DIAS DO PERÍODO": dias_periodo,
-            "CONTRIBUIÇÃO NA MÉDIA": dias_vinculo / dias_periodo,
+            "CONTRIBUIÇÃO NA MÉDIA": dias_contados / dias_periodo,
         })
-    return sum(d["DIAS DE VÍNCULO"] for d in detalhes) / dias_periodo, detalhes
+    return sum(d["DIAS CONTABILIZADOS"] for d in detalhes) / dias_periodo, detalhes
 
 
-_media_diaria, _detalhes_media = _media_quadro_contrato(
-    _colaboradores_todos, int(ano), mes, ultimo_visivel
-)
-
-# A frequência continua alimentando exclusivamente os indicadores de ocorrências.
+# Frequência salva com as alterações atuais da grade.
 _mapa_media = dict(mapa)
 for i, cid in enumerate(ids):
     for dia in range(1, ultimo_visivel + 1):
         _mapa_media[(cid, dia)] = _codigo_grade(editado.iloc[i][f"{dia:02d}"])
+
+_media_diaria, _detalhes_media = _media_quadro_contrato(
+    _colaboradores_todos, int(ano), mes, ultimo_visivel, _mapa_media
+)
 
 # Absenteísmo operacional: ausências / dias com frequência efetivamente apurada.
 # Folgas, desligamentos e pendências não entram no denominador.
@@ -5476,8 +5482,8 @@ with resumo_topo:
             "SPOT, não classificados, folgas, desligamentos e dias pendentes são excluídos da base. "
             "Os indicadores de frequência mantêm o escopo e os filtros atuais da grade."
         )
-        st.markdown("**Média de colaboradores:** soma dos dias de vínculo dos OPERACIONAIS / CONTRATO ÷ dias corridos do período (até hoje no mês atual). Conta do dia da admissão até o dia do desligamento, inclusive. Férias, folgas, liberados, compensações, afastamentos e pendências de frequência não reduzem o quadro. SPOT e OUTROS ficam fora. Cadastros antigos sem admissão contam desde o início do período. A média respeita o filtro de empresa e independe da busca por nome e do filtro de STATUS.")
-        st.write(f"Dias do período: {ultimo_visivel} · Dias de vínculo: {sum(d['DIAS DE VÍNCULO'] for d in _detalhes_media)}.")
+        st.markdown("**Média de colaboradores:** (OK + FA + A + FO + LB + COMP) dos OPERACIONAIS / CONTRATO ÷ dias corridos do período (até hoje no mês atual). Férias e dias pendentes não entram na soma. Folgas, liberados e compensações contam normalmente. Somente lançamentos entre a admissão e o desligamento, inclusive, são válidos. SPOT e OUTROS ficam fora. Cadastros antigos sem admissão usam o início do período. A média respeita o filtro de empresa e independe da busca por nome e do filtro de STATUS.")
+        st.write(f"Dias do período: {ultimo_visivel} · Dias contabilizados: {sum(d['DIAS CONTABILIZADOS'] for d in _detalhes_media)}.")
         if _detalhes_media:
             st.dataframe(pd.DataFrame(_detalhes_media), use_container_width=True, hide_index=True,
                          column_config={"CONTRIBUIÇÃO NA MÉDIA": st.column_config.NumberColumn(format="%.4f")})
