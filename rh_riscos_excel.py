@@ -54,6 +54,15 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
     for numero, campos in [(2, CAMPOS[0]), (3, CAMPOS[1])]:
         nome = f'xl/worksheets/sheet{numero}.xml'
         raiz = ET.fromstring(arquivos[nome])
+        if numero == 2:
+            # A antiga consequência passa a ser a severidade editável.
+            # Mantém a coluna auxiliar agrupada oculta para preservar o modelo.
+            for celula in raiz.iter(_q('c')):
+                if celula.get('r') == 'C5':
+                    _valor(celula, 'Severidade')
+            for coluna in raiz.find(_q('cols')):
+                if int(coluna.get('min')) == 4 and int(coluna.get('max')) == 4:
+                    coluna.set('hidden', '1')
         dados = raiz.find(_q('sheetData'))
         modelos = [deepcopy(r) for r in dados if r.get('r') in ('6', '7')]
         for linha in list(dados):
@@ -167,5 +176,8 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
     saida = BytesIO()
     with ZipFile(saida, 'w', ZIP_DEFLATED) as z:
         for nome, conteudo in arquivos.items():
+            if nome.endswith('.xml'):
+                conteudo = conteudo.replace('Consequência potencial'.encode(), 'Severidade'.encode())
+                conteudo = conteudo.replace('consequência potencial'.encode(), 'severidade'.encode())
             z.writestr(nome, conteudo)
     return saida.getvalue()
