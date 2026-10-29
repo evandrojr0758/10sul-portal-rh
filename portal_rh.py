@@ -5120,6 +5120,8 @@ for coluna in colunas_dia:
 
 # Totais no rodapé de cada dia, com o mesmo escopo da grade visível.
 def _resumo_diario_frequencia(grade, dias):
+    # STATUS é a classificação do fechamento, não o status ativo/inativo.
+    grade = grade.loc[grade["STATUS"].fillna("").astype(str).str.strip().str.upper().eq("OPERACIONAL")]
     grupos = [
         ("Folgas", {"FO", "LB", "COMP"}),
         ("Presenças", {"OK"}),
@@ -5140,7 +5142,7 @@ def _resumo_diario_frequencia(grade, dias):
     ], columns=["RESUMO DO DIA"] + list(dias))
 
 
-st.markdown("#### Totais por dia")
+st.markdown("#### Totais por dia — Operacionais")
 st.dataframe(
     _resumo_diario_frequencia(editado, colunas_dia),
     use_container_width=True,
@@ -5151,7 +5153,7 @@ st.dataframe(
         **{dia: st.column_config.NumberColumn(dia, width="small", format="%d") for dia in colunas_dia},
     },
 )
-st.caption("Totais dos colaboradores exibidos na grade, conforme os filtros atuais. Folgas incluem FO, LB e COMP. Total do dia = Folgas + Presenças + Atestados + Faltas, sem Férias. Pendentes e DEM não entram nos totais.")
+st.caption("Totais somente dos OPERACIONAIS exibidos na grade, conforme os filtros atuais. OUTROS ficam fora de todas as linhas. Folgas incluem FO, LB e COMP. Total do dia = Folgas + Presenças + Atestados + Faltas, sem Férias. Pendentes e DEM não entram nos totais.")
 
 # Ranking combinado por colaborador — Faltas x Atestados.
 # Obedece ao filtro TODOS / OPERACIONAL / OUTROS e considera também alterações ainda não salvas.
