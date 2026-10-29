@@ -106,6 +106,9 @@ def tela_riscos(sb, usuario):
         st.error(f"Não foi possível carregar o mapeamento: {exc}")
         return
     linhas = [dict(r.get("dados") or {}, id=r["id"]) for r in regs if not (r.get("dados") or {}).get("excluido")]
+    preliminares = sum(bool(r.get("probabilidade_preliminar")) and r.get("validacao") != "Validada" for r in linhas)
+    if preliminares:
+        st.caption(f"{preliminares} atividade(s) com probabilidade preliminar, pendente de revisão em campo pela Segurança. A justificativa está na aba Validar / editar atividade.")
     df = pd.DataFrame(linhas, columns=list(PADRAO) + ["id"])
     df["consequencia"] = df["consequencia"].map(normalizar_severidade)
     df["probabilidade"] = df["probabilidade"].map(normalizar_probabilidade)
@@ -220,6 +223,8 @@ def tela_riscos(sb, usuario):
         original = next(r for r in linhas if r["id"] == alvo)
         with st.form(f"risco_form_{alvo}"):
             st.caption(f"Classificação original: {original.get('classificacao_original') or '—'} • Severidade original: {original.get('severidade_original') or '—'}")
+            if original.get("probabilidade_preliminar"):
+                st.info("Probabilidade preliminar: " + str(original.get("justificativa_probabilidade") or "Revisar em campo."))
             dados = dict(original)
             dados["atividade"] = st.text_input("Nome da atividade", value=str(original.get("atividade") or ""))
             dados["nr"] = st.text_input("NR informada na matriz", value=str(original.get("nr") or ""))
