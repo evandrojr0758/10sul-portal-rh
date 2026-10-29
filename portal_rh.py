@@ -23,6 +23,7 @@ import rh_sessao
 import rh_fabricacao
 import rh_gratificacao_export
 import rh_horas_extras
+import rh_ponto_importacao
 import rh_agenda
 import rh_precificacao
 from rh_desligamentos import exige_motivo as deslig_exige_motivo, abrir_modal as abrir_modal_desligamento, validar_motivos as validar_motivos_desligamento, payload_desligamento
@@ -4493,6 +4494,15 @@ if str(st.query_params.get("agenda") or "") == "1":
     rh_agenda.tela(sb)
     st.stop()
 
+# Importação do ponto disponível somente após autenticação RH/Admin.
+if str(st.query_params.get("apuracao_horas_extras") or "") == "1":
+    cabecalho_sessao(mostrar_ajuda=False)
+    if st.button("← Voltar ao Portal RH", key="ponto_voltar_rh"):
+        st.query_params.pop("apuracao_horas_extras", None)
+        st.rerun()
+    rh_ponto_importacao.tela(sb)
+    st.stop()
+
 # A consulta de horas extras usa a autenticação normal do RH/Admin.
 if _he_rota == "gestao":
     cabecalho_sessao(mostrar_ajuda=False)
@@ -4587,6 +4597,10 @@ if _perfil_atual == "ADMIN":
         st.session_state["pagina_portal_rh"] = "TRES_LAGOAS"
         st.query_params["fechamento"] = "tres-lagoas"
         st.rerun()
+
+if st.button("📊 Apuração de horas extras — importar ponto", key="ponto_abrir_apuracao", type="primary"):
+    st.query_params["apuracao_horas_extras"] = "1"
+    st.rerun()
 
 if st.button("⏱️ Gestão de horas extras", key="he_abrir_gestao"):
     st.query_params["horas_extras"] = "gestao"
