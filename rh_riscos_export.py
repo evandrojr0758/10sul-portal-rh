@@ -83,8 +83,8 @@ def gerar_pdf_riscos(df, filtros="Todos os registros", agora=None):
                      colWidths=[doc.width/4]*4)
     metricas.setStyle(TableStyle([("BACKGROUND", (0,0),(-1,-1),colors.HexColor("#f1f5f9")),
                                  ("TOPPADDING",(0,0),(-1,0),10), ("BOTTOMPADDING",(0,-1),(-1,-1),8)]))
-    historia += [metricas, Spacer(1, 16), grafico("Atividades por consequência potencial", CATEGORIAS, "consequencia", CORES),
-                 Spacer(1, 8), p("As cores representam a consequência potencial. A classificação deve ser validada pela Segurança em campo; não representa uma nova avaliação de probabilidade.")]
+    historia += [metricas, Spacer(1, 16), grafico("Atividades por severidade", CATEGORIAS, "consequencia", CORES),
+                 Spacer(1, 8), p("As cores representam a severidade selecionada. A classificação deve ser validada pela Segurança em campo; não representa uma nova avaliação de probabilidade.")]
     if registros:
         historia += [PageBreak(), p("Plano preventivo", "TituloRisco"),
                      grafico("Situação das ações", ["Não iniciada", "Em andamento", "Concluída"], "status_acao", ["#64748b", "#eab308", "#16a34a"])]
@@ -94,7 +94,7 @@ def gerar_pdf_riscos(df, filtros="Todos os registros", agora=None):
                             [[r.get("atividade", ""), r.get("acao", ""), r.get("responsavel", ""), prazo_br(r.get("prazo")), r.get("status_acao", "")] for r in registros],
                             [doc.width*f for f in [.23,.36,.16,.10,.15]]),
                      PageBreak(), p("Atividades e controles", "TituloRisco"),
-                     tabela(["Atividade / NR", "Consequência / validação", "Perigos e riscos", "Controles atuais"],
+                     tabela(["Atividade / NR", "Severidade / validação", "Perigos e riscos", "Controles atuais"],
                             [[str(r.get("atividade", "")) + "\nNR: " + str(r.get("nr", "")),
                               str(r.get("consequencia", "")) + "\n" + str(r.get("validacao", "")),
                               r.get("riscos", ""), r.get("controles", "")] for r in registros],
