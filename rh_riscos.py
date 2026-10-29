@@ -305,7 +305,7 @@ def tela_riscos(sb, usuario):
                     st.error(f"Não foi possível salvar: {exc}")
 
 
-ROTULOS = {"frequencia_atividade": "Frequência da atividade","pontuacao_risco": "Pontuação (P × S)","probabilidade": "Probabilidade (P)","nivel_risco": "Nível de risco", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Severidade", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
+ROTULOS = {"frequencia_observada": "Frequência observada (Monitor)","frequencia_atividade": "Frequência da atividade","pontuacao_risco": "Pontuação (P × S)","probabilidade": "Probabilidade (P)","nivel_risco": "Nível de risco", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Severidade", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
 
 
 PADRAO = {
@@ -374,7 +374,17 @@ def mostrar_atividades(df, sb, usuario, originais):
     import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
     st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. Probabilidade, severidade e validação operacional são editáveis. Pontuação e nível de risco são calculados ao salvar. Para marcar Validada, informe a probabilidade, a severidade e o cenário na aba Validar / editar atividade.")
-    campos = ["id", "atividade", "frequencia_atividade", "probabilidade", "consequencia", "pontuacao_risco", "nivel_risco", "validacao", "riscos", "controles", "responsavel", "nr"]
+    import importlib
+    monitor = importlib.reload(importlib.import_module("rh_riscos_monitor"))
+    df = df.copy()
+    try:
+        observadas, contexto_monitor = monitor.observacao_na_tabela(sb, originais)
+        df["frequencia_observada"] = df["id"].map(lambda cid: observadas.get(str(cid), "Sem correspondência"))
+        st.caption(contexto_monitor)
+    except Exception as exc:
+        df["frequencia_observada"] = "Consulta indisponível"
+        st.caption(f"Não foi possível atualizar a frequência observada: {exc}")
+    campos = ["id", "atividade", "frequencia_atividade", "frequencia_observada", "probabilidade", "consequencia", "pontuacao_risco", "nivel_risco", "validacao", "riscos", "controles", "responsavel", "nr"]
     base = df[campos].copy()
     # Categorias explícitas mantêm os três campos como seletores no editor.
     for campo, opcoes in (
@@ -388,9 +398,10 @@ def mostrar_atividades(df, sb, usuario, originais):
     assinatura = hashlib.sha256(base.to_json(orient="records").encode()).hexdigest()[:16]
     editado = st.data_editor(
         base, use_container_width=True, hide_index=True, num_rows="dynamic",
-        disabled=["id", "pontuacao_risco", "nivel_risco"],
+        disabled=["id", "frequencia_observada", "pontuacao_risco", "nivel_risco"],
         column_config={
             "id": None,
+            "frequencia_observada": st.column_config.TextColumn("Frequência observada (Monitor)", width="medium", help="Calculada pela ASN: dias com registro e quantidade de OS. Não altera a frequência informada."),
             "frequencia_atividade": st.column_config.SelectboxColumn("Frequência da atividade", options=FREQUENCIAS, default="Diária", required=True),
             "probabilidade": st.column_config.SelectboxColumn("Probabilidade (P)", options=PROBABILIDADES),
             "nivel_risco": st.column_config.TextColumn("Nível de risco (automático)"),
