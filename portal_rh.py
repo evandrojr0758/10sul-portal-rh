@@ -5143,18 +5143,65 @@ def _resumo_diario_frequencia(grade, dias):
     ], columns=["RESUMO DO DIA"] + list(dias))
 
 
+def _pendentes_do_dia(grade, dia):
+    operacionais = grade["STATUS"].fillna("").astype(str).str.strip().str.upper().eq("OPERACIONAL")
+    pendentes = grade[dia].map(_codigo_grade).eq("")
+    campos = [c for c in ["COLABORADOR", "FUNÇÃO", "EMPRESA"] if c in grade.columns]
+    return grade.loc[operacionais & pendentes, campos].reset_index(drop=True)
+
+
+@st.dialog("Operacionais com frequência pendente", width="large")
+def _abrir_pendentes_do_dia(grade, dia, ano_ref, mes_ref):
+    pendentes = _pendentes_do_dia(grade, dia)
+    st.markdown(f"**Dia {dia}/{int(mes_ref):02d}/{int(ano_ref)} · {len(pendentes)} pendente(s)**")
+    if pendentes.empty:
+        st.info("Nenhum operacional pendente neste dia para os filtros atuais.")
+    else:
+        st.dataframe(pendentes, use_container_width=True, hide_index=True)
+    if st.button("Fechar", key="rh_fechar_pendentes_dia", use_container_width=True):
+        st.rerun()
+
+
+_resumo_dias = _resumo_diario_frequencia(editado, colunas_dia)
+_resumo_evento_base = f"rh_resumo_dias_{_periodo_key}_{_escopo_hash}"
+_resumo_nonce_key = _resumo_evento_base + "_nonce"
+_resumo_abrir_key = _resumo_evento_base + "_abrir"
+_resumo_widget_key = _resumo_evento_base + "_" + str(st.session_state.get(_resumo_nonce_key, 0))
+
+
+def _selecionar_pendentes_dia(widget_key, resumo, dias, abrir_key, nonce_key):
+    evento = st.session_state.get(widget_key, {})
+    celulas = evento.get("selection", {}).get("cells", [])
+    if not celulas:
+        return
+    linha, dia = celulas[0]
+    if (dia in dias and 0 <= linha < len(resumo)
+            and resumo.iloc[linha]["RESUMO DO DIA"] == "Pendentes"):
+        st.session_state[abrir_key] = dia
+        # Renova a seleção para permitir abrir novamente o mesmo dia após fechar.
+        st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
+
+
 st.markdown("#### Totais por dia — Operacionais")
 st.dataframe(
-    _resumo_diario_frequencia(editado, colunas_dia),
+    _resumo_dias,
     use_container_width=True,
     hide_index=True,
     height=282,
+    key=_resumo_widget_key,
+    selection_mode="single-cell",
+    on_select=lambda: _selecionar_pendentes_dia(
+        _resumo_widget_key, _resumo_dias, colunas_dia, _resumo_abrir_key, _resumo_nonce_key
+    ),
     column_config={
         "RESUMO DO DIA": st.column_config.TextColumn("RESUMO DO DIA", width="medium", pinned=True),
         **{dia: st.column_config.NumberColumn(dia, width="small", format="%d") for dia in colunas_dia},
     },
 )
-st.caption("Totais somente dos OPERACIONAIS exibidos na grade, conforme os filtros atuais. OUTROS ficam fora de todas as linhas. Folgas incluem FO, LB e COMP. Total do dia = Folgas + Presenças + Atestados + Faltas, sem Férias. Pendentes são exibidos separadamente e não entram no Total do dia nem na média. DEM não entra nas contagens.")
+st.caption("Clique na quantidade da linha Pendentes para ver os operacionais sem lançamento naquele dia. Totais somente dos OPERACIONAIS exibidos na grade, conforme os filtros atuais. OUTROS ficam fora de todas as linhas. Folgas incluem FO, LB e COMP. Total do dia = Folgas + Presenças + Atestados + Faltas, sem Férias. Pendentes são exibidos separadamente e não entram no Total do dia nem na média. DEM não entra nas contagens.")
+_dia_pendente_abrir = st.session_state.pop(_resumo_abrir_key, None)
+if _dia_pendente_abrir in colunas_dia:
+    _abrir_pendentes_do_dia(editado, _dia_pendente_abrir, int(ano), mes)
 
 # Ranking combinado por colaborador — Faltas x Atestados.
 # Obedece ao filtro TODOS / OPERACIONAL / OUTROS e considera também alterações ainda não salvas.
