@@ -130,7 +130,7 @@ def apurar(registros, atividades, inicio, fim, unidade="ARA"):
                         "Ocorrências (OS)": len(linhas), "Dias com registro": len(dias),
                         "Semanas com registro": len(semanas), "Meses com registro": len(meses),
                         "Frequência observada": f"{len(dias)} de {(fim-inicio).days+1} dias",
-                        "Última execução": linhas[0]["Data"] if linhas else "Sem registro no período"})
+                        "Último registro": linhas[0]["Data"] if linhas else "Sem registro no período"})
     return resumos, detalhes
 
 def carregar(sb, inicio, fim, unidade):
