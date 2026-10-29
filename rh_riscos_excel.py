@@ -142,6 +142,23 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
                 ET.SubElement(ET.SubElement(ET.SubElement(ponto, '{' + C + '}spPr'), '{' + A + '}solidFill'), '{' + A + '}srgbClr', val=cor)
                 pos = next((j for j, child in enumerate(serie) if child.tag in ('{' + C + '}cat', '{' + C + '}val')), len(serie))
                 serie.insert(pos, ponto)
+        for grafico in raiz.findall('.//{' + C + '}barChart'):
+            rotulos = grafico.find('{' + C + '}dLbls')
+            if rotulos is None:
+                rotulos = ET.Element('{' + C + '}dLbls')
+                pos = next((j for j, child in enumerate(grafico)
+                            if child.tag in ('{' + C + '}gapWidth', '{' + C + '}overlap',
+                                             '{' + C + '}serLines', '{' + C + '}axId')),
+                           len(grafico))
+                grafico.insert(pos, rotulos)
+            else:
+                rotulos.clear()
+            ET.SubElement(rotulos, '{' + C + '}numFmt', formatCode='0', sourceLinked='0')
+            ET.SubElement(rotulos, '{' + C + '}dLblPos', val='outEnd')
+            for campo, valor in [('showLegendKey', '0'), ('showVal', '1'),
+                                 ('showCatName', '0'), ('showSerName', '0'),
+                                 ('showPercent', '0'), ('showBubbleSize', '0')]:
+                ET.SubElement(rotulos, '{' + C + '}' + campo, val=valor)
         for eixo in raiz.findall('.//{' + C + '}valAx'):
             escala = eixo.find('{' + C + '}scaling')
             ET.SubElement(escala, '{' + C + '}min', val='0')
