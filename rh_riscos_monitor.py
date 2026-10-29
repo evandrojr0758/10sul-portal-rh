@@ -152,6 +152,32 @@ def carregar(sb, inicio, fim, unidade):
     recente = sb("GET", "monitor_asn", "select=sincronizado_em&order=sincronizado_em.desc.nullslast&limit=1") or []
     return registros, recente[0].get("sincronizado_em") if recente else None
 
+def observacao_na_tabela(sb, atividades):
+    """Compartilha a consulta ASN entre a grade principal e a aba detalhada."""
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    inicio = st.session_state.get("freq_monitor_inicio", hoje-timedelta(days=29))
+    fim = st.session_state.get("freq_monitor_fim", hoje)
+    unidade = st.session_state.get("freq_monitor_unidade", "ARA")
+    if inicio > fim:
+        return {}, "Período inválido: revise as datas na aba Frequência no Monitor."
+    escopo = (inicio.isoformat(), fim.isoformat(), unidade)
+    agora = datetime.now(ZoneInfo("America/Sao_Paulo")).timestamp()
+    salvo = st.session_state.get("freq_monitor_base")
+    idade = agora - st.session_state.get("freq_monitor_cache_em", 0)
+    if not salvo or salvo[0] != escopo or idade >= 300:
+        registros, sincronizacao = carregar(sb, inicio, fim, unidade)
+        salvo = (escopo, registros, sincronizacao)
+        st.session_state["freq_monitor_base"] = salvo
+        st.session_state["freq_monitor_cache_em"] = agora
+    resumos, _ = apurar(salvo[1], atividades, inicio, fim, unidade)
+    valores = {
+        r["_chave"]: f'{r["Frequência observada"]} ({r["Ocorrências (OS)"]} OS)'
+        for r in resumos
+    }
+    contexto = f"Frequência observada: {inicio:%d/%m/%Y} a {fim:%d/%m/%Y} • Unidade {unidade}. Dias com registros e quantidade de OS finalizadas. Atualização da consulta a cada 5 minutos ao usar a página; período e detalhes na aba Frequência no Monitor."
+    return valores, contexto
+
+
 def tela(sb, atividades):
     st.subheader("Frequência das atividades no Monitor Web / ASN")
     st.caption("Consulta a mesma cópia ASN usada pelo Monitor Web. Conta OS finalizadas pela data de FIM, excluindo CAVALO, exclusões confirmadas e negativas explícitas de execução.")
@@ -170,6 +196,7 @@ def tela(sb, atividades):
             with st.spinner("Consultando registros ASN…"):
                 registros, sincronizacao = carregar(sb, inicio, fim, unidade)
             st.session_state["freq_monitor_base"] = (escopo, registros, sincronizacao)
+            st.session_state["freq_monitor_cache_em"] = datetime.now(ZoneInfo("America/Sao_Paulo")).timestamp()
         except Exception as exc:
             st.error(f"Não foi possível consultar a ASN: {exc}")
             return
