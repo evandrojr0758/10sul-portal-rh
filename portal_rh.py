@@ -24,6 +24,7 @@ import rh_fabricacao
 import rh_gratificacao_export
 import rh_horas_extras
 import rh_agenda
+import rh_precificacao
 from rh_desligamentos import exige_motivo as deslig_exige_motivo, abrir_modal as abrir_modal_desligamento, validar_motivos as validar_motivos_desligamento, payload_desligamento
 from rh_vencimentos import CAMPOS as CAMPOS_VENC, data_iso as venc_data_iso, tela_alertas as tela_alertas_venc, tela_importacao as tela_importacao_venc
 
@@ -4421,6 +4422,9 @@ if bool(st.session_state["usuario_logado"].get("trocar_senha", False)):
     st.stop()
 
 _perfil_atual = str(st.session_state["usuario_logado"].get("perfil") or "").upper()
+if str(st.query_params.get("precificacao") or "") == "1" and _perfil_atual != "ADMIN":
+    st.error("A precificação está disponível somente para o perfil Administrador.")
+    st.stop()
 if str(st.query_params.get("agenda") or "") == "1" and _perfil_atual != "ADMIN":
     st.error("A agenda está disponível somente para o perfil Administrador.")
     st.stop()
@@ -4429,6 +4433,15 @@ if _perfil_atual == "SEGURANCA":
     st.stop()
 if _perfil_atual not in ("RH", "ADMIN"):
     st.error("Seu perfil não possui acesso a este portal.")
+    st.stop()
+
+# Precificação exclusiva do Administrador, inclusive ao abrir por link direto.
+if str(st.query_params.get("precificacao") or "") == "1":
+    cabecalho_sessao(mostrar_ajuda=False)
+    if st.button("← Voltar ao Portal RH", key="prec_voltar_rh"):
+        st.query_params.pop("precificacao", None)
+        st.rerun()
+    rh_precificacao.tela(sb)
     st.stop()
 
 # Rota privada: nunca é atendida pelos links públicos de estoque ou aprovação.
@@ -4542,6 +4555,9 @@ if st.button("⏱️ Gestão de horas extras", key="he_abrir_gestao"):
 if _perfil_atual == "ADMIN":
     if st.button("🗓️ Agenda de Pendências", key="agenda_abrir", type="primary"):
         st.query_params["agenda"] = "1"
+        st.rerun()
+    if st.button("💲 Precificação de Serviços", key="prec_abrir", type="primary"):
+        st.query_params["precificacao"] = "1"
         st.rerun()
 
 with st.expander("💰 Regras de Gratificação", expanded=False):
