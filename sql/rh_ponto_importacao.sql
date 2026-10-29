@@ -7,6 +7,8 @@ create table public.rh_ponto_importacoes (
     registros integer not null check (registros > 0),
     importado_por text not null,
     criado_em timestamptz not null default clock_timestamp(),
+    excluido_em timestamptz,
+    excluido_por text,
     unique (unidade, arquivo_hash)
 );
 create table public.rh_ponto_registros (
@@ -37,6 +39,7 @@ alter table public.rh_ponto_importacoes enable row level security;
 alter table public.rh_ponto_registros enable row level security;
 revoke all on public.rh_ponto_importacoes, public.rh_ponto_registros from anon, authenticated;
 grant select, insert on public.rh_ponto_importacoes, public.rh_ponto_registros to service_role;
+grant update on public.rh_ponto_importacoes to service_role;
 grant usage, select on sequence public.rh_ponto_registros_id_seq to service_role;
 
 -- Uma exportação sem extras não apaga as horas já informadas por exportação completa.
@@ -44,6 +47,7 @@ create view public.rh_ponto_atual with (security_invoker=true) as
 select distinct on (r.chave) r.*, i.unidade, i.arquivo, i.criado_em as importado_em
 from public.rh_ponto_registros r
 join public.rh_ponto_importacoes i on i.id=r.importacao_id
+where i.excluido_em is null
 order by r.chave, r.extras_informadas desc, i.criado_em desc, r.id desc;
 revoke all on public.rh_ponto_atual from anon, authenticated;
 grant select on public.rh_ponto_atual to service_role;
@@ -61,6 +65,14 @@ begin
     if v_qtd < 1 or v_qtd > 50000 then
         raise exception 'Envie entre 1 e 50000 registros por arquivo.';
     end if;
+    update public.rh_ponto_importacoes
+    set excluido_em=null, excluido_por=null, criado_em=clock_timestamp(), importado_por=p_usuario
+    where unidade=p_unidade and arquivo_hash=p_hash and excluido_em is not null
+    returning id,registros into v_id,v_qtd;
+    if found then
+        return jsonb_build_object('duplicado',false,'reativado',true,'registros',v_qtd,'importacao_id',v_id);
+    end if;
+    v_qtd := jsonb_array_length(p_registros);
     insert into public.rh_ponto_importacoes(arquivo, arquivo_hash, unidade, registros, importado_por)
     values(p_arquivo,p_hash,p_unidade,v_qtd,p_usuario)
     on conflict(unidade,arquivo_hash) do nothing returning id into v_id;
@@ -82,4 +94,25 @@ end;
 $$;
 revoke all on function public.rh_importar_ponto(text,text,text,text,jsonb) from public, anon, authenticated;
 grant execute on function public.rh_importar_ponto(text,text,text,text,jsonb) to service_role;
+create function public.rh_excluir_importacao_ponto(p_id uuid, p_unidade text, p_usuario text)
+returns jsonb language plpgsql security invoker set search_path=public, pg_temp as $$
+declare v_arquivo text; v_registros integer;
+begin
+    if p_usuario is null or btrim(p_usuario)='' then
+        raise exception 'Informe o responsável pela exclusão.';
+    end if;
+    update public.rh_ponto_importacoes
+    set excluido_em=clock_timestamp(), excluido_por=p_usuario
+    where id=p_id and unidade=p_unidade and excluido_em is null
+    returning arquivo,registros into v_arquivo,v_registros;
+    if not found then
+        raise exception 'Importação não encontrada nesta unidade ou já excluída. Atualize o histórico.';
+    end if;
+    return jsonb_build_object('excluido',true,'arquivo',v_arquivo,'registros',v_registros);
+end;
+$$;
+revoke all on function public.rh_excluir_importacao_ponto(uuid,text,text) from public,anon,authenticated;
+grant execute on function public.rh_excluir_importacao_ponto(uuid,text,text) to service_role;
+
+
 notify pgrst, 'reload schema';

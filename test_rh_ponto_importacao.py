@@ -62,4 +62,51 @@ class TestPonto(unittest.TestCase):
   ws=wb['Colaborador'];heads=[c.value for c in ws[1]];i=heads.index('Total de extras')+1;self.assertEqual(ws.cell(2,i).number_format,'[h]:mm')
   ws=wb['Detalhamento'];heads=[c.value for c in ws[1]];flag=heads.index('Extras informadas')+1;tot=heads.index('Total de extras')+1
   self.assertTrue(all(ws.cell(r,tot).value is None for r in range(2,ws.max_row+1) if ws.cell(r,flag).value is False))
+
+UI_HISTORICO = '''
+import streamlit as st
+import rh_ponto_importacao as m
+st.session_state['usuario_logado']={'perfil':'RH','nome':'Teste'}
+if 'historico_teste' not in st.session_state:
+    st.session_state['historico_teste']=[dict(id='a',arquivo='planilha_a.xlsx',unidade='Aracruz',registros=10,importado_por='Teste',criado_em='2026-10-29',excluido_em=None,excluido_por=None),dict(id='b',arquivo='planilha_b.xlsx',unidade='Aracruz',registros=20,importado_por='Teste',criado_em='2026-10-28',excluido_em=None,excluido_por=None)]
+def sb(method,table,params='',payload=None):
+    if method=='GET':return st.session_state['historico_teste']
+    assert table=='rpc/rh_excluir_importacao_ponto'
+    for r in st.session_state['historico_teste']:
+        if r['id']==payload['p_id']:
+            r['excluido_em']='2026-10-29';r['excluido_por']=payload['p_usuario']
+            return {'excluido':True}
+    raise ValueError('Não encontrado')
+m.tela_historico(sb,'Aracruz')
+'''
+
+class TestExcluirPonto(unittest.TestCase):
+ def test_payload_exclusao(self):
+  calls=[]
+  m.excluir_importacao(lambda *a:calls.append(a),'a','Aracruz','RH Teste')
+  self.assertEqual(calls[0],('POST','rpc/rh_excluir_importacao_ponto','',{'p_id':'a','p_unidade':'Aracruz','p_usuario':'RH Teste'}))
+ def test_confirmacao_e_resumo(self):
+  from streamlit.testing.v1 import AppTest
+  at=AppTest.from_string(UI_HISTORICO,default_timeout=20).run()
+  self.assertFalse(at.exception);self.assertEqual(len(at.button),0)
+  at.selectbox[0].set_value('a').run()
+  self.assertTrue(at.button[0].disabled)
+  self.assertIn('planilha_a.xlsx',at.warning[0].value)
+  at.checkbox(key='ponto_excluir_confirmacao_a').check().run()
+  self.assertFalse(at.button[0].disabled)
+  at.button[0].click().run()
+  self.assertFalse(at.exception)
+  self.assertIsNotNone(at.session_state['historico_teste'][0]['excluido_em'])
+  self.assertIsNone(at.session_state['historico_teste'][1]['excluido_em'])
+  self.assertTrue(any('Resumos atualizados' in msg.value for msg in at.success))
+ def test_troca_de_arquivo_exige_nova_confirmacao(self):
+  from streamlit.testing.v1 import AppTest
+  at=AppTest.from_string(UI_HISTORICO,default_timeout=20).run()
+  at.selectbox[0].set_value('a').run()
+  at.checkbox(key='ponto_excluir_confirmacao_a').check().run()
+  at.selectbox[0].set_value('b').run()
+  self.assertTrue(at.button[0].disabled)
+  self.assertFalse(at.checkbox(key='ponto_excluir_confirmacao_b').value)
+  self.assertTrue(all(r['excluido_em'] is None for r in at.session_state['historico_teste']))
+
 if __name__=='__main__':unittest.main()

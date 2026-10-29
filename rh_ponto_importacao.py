@@ -191,6 +191,69 @@ def salvar_arquivo(sb, pacote, unidade, usuario):
         'p_unidade': unidade, 'p_usuario': str(usuario), 'p_registros': pacote['registros']})
 
 
+def carregar_importacoes(sb, unidade):
+    from urllib.parse import urlencode
+    historico, offset = [], 0
+    while True:
+        params = urlencode({'select': 'id,arquivo,unidade,registros,importado_por,criado_em,excluido_em,excluido_por',
+                            'unidade': 'eq.' + unidade, 'order': 'criado_em.desc,id.desc',
+                            'limit': 1000, 'offset': offset})
+        lote = sb('GET', 'rh_ponto_importacoes', params) or []
+        historico.extend(lote)
+        if len(lote) < 1000:
+            return historico
+        offset += len(lote)
+
+
+def excluir_importacao(sb, importacao_id, unidade, usuario):
+    return sb('POST', 'rpc/rh_excluir_importacao_ponto', '', {
+        'p_id': importacao_id, 'p_unidade': unidade, 'p_usuario': str(usuario)})
+
+
+def tela_historico(sb, unidade):
+    mensagem = st.session_state.pop('ponto_exclusao_sucesso', None)
+    if mensagem:
+        st.success(mensagem)
+    try:
+        historico = carregar_importacoes(sb, unidade)
+    except Exception as exc:
+        st.error(f'Não foi possível carregar o histórico: {exc}'); return
+    if not historico:
+        st.info('Nenhuma planilha importada nesta unidade.'); return
+    mostrar_excluidas = st.checkbox('Mostrar planilhas excluídas', key='ponto_mostrar_excluidas_' + unidade)
+    visiveis = [r for r in historico if mostrar_excluidas or not r.get('excluido_em')]
+    tabela = pd.DataFrame(visiveis)
+    if not tabela.empty:
+        tabela['Situação'] = ['Excluída' if r.get('excluido_em') else 'Ativa' for r in visiveis]
+        st.dataframe(tabela.drop(columns=['id'], errors='ignore').rename(columns={
+            'arquivo': 'Arquivo', 'unidade': 'Unidade', 'registros': 'Registros',
+            'importado_por': 'Importado por', 'criado_em': 'Importado em',
+            'excluido_em': 'Excluído em', 'excluido_por': 'Excluído por'}), hide_index=True, use_container_width=True)
+    ativos = {r['id']: r for r in historico if not r.get('excluido_em')}
+    if not ativos:
+        st.info('Não há planilhas ativas para excluir.'); return
+    selecionado = st.selectbox('Planilha para excluir', list(ativos), index=None,
+        placeholder='Selecione uma importação...', key='ponto_excluir_selecao_' + unidade,
+        format_func=lambda rid: f"{ativos[rid]['arquivo']} — {ativos[rid]['registros']} registros — {ativos[rid]['criado_em']}")
+    if selecionado is None:
+        return
+    registro = ativos[selecionado]
+    st.warning(f"Excluir a planilha {registro['arquivo']} ({registro['registros']} registros) de {unidade}?")
+    st.caption('Os registros desta importação sairão dos resumos. Se outra planilha contiver os mesmos dias, serão usados os dados dela. Você poderá importar este arquivo novamente depois.')
+    confirmado = st.checkbox('Confirmo a exclusão desta planilha da apuração', key='ponto_excluir_confirmacao_' + selecionado)
+    if st.button('🗑️ Excluir planilha importada', type='primary', disabled=not confirmado, key='ponto_excluir_botao_' + selecionado):
+        try:
+            usr = st.session_state.get('usuario_logado') or {}
+            if str(usr.get('perfil') or '').upper() not in ('RH', 'ADMIN'):
+                raise ValueError('Acesso permitido somente ao RH e Administrador.')
+            excluir_importacao(sb, selecionado, unidade, usr.get('nome') or usr.get('usuario') or usr.get('id'))
+        except Exception as exc:
+            st.error(f'Não foi possível excluir: {exc}')
+        else:
+            st.session_state['ponto_exclusao_sucesso'] = f"Planilha {registro['arquivo']} excluída. Resumos atualizados."
+            st.rerun()
+
+
 def carregar_base(sb, inicio, fim, unidade):
     from urllib.parse import urlencode
     rows, offset = [], 0
@@ -295,12 +358,8 @@ def tela(sb):
         df = carregar_base(sb, inicio, fim, unidade)
     except Exception as exc:
         st.error(f'Não foi possível consultar a base: {exc}'); return
-    with st.expander('Histórico das importações'):
-        from urllib.parse import urlencode
-        try:
-            historico = sb('GET', 'rh_ponto_importacoes', urlencode({'select': 'arquivo,unidade,registros,importado_por,criado_em', 'unidade': 'eq.' + unidade, 'order': 'criado_em.desc', 'limit': 100})) or []
-            st.dataframe(pd.DataFrame(historico).rename(columns={'arquivo': 'Arquivo', 'unidade': 'Unidade', 'registros': 'Registros', 'importado_por': 'Importado por', 'criado_em': 'Importado em'}), hide_index=True, use_container_width=True)
-        except Exception as exc: st.error(f'Não foi possível carregar o histórico: {exc}')
+    with st.expander('📋 Histórico das importações / Excluir planilha'):
+        tela_historico(sb, unidade)
     if df.empty:
         st.info('Nenhum ponto importado para esta unidade e período. Importe as planilhas acima ou altere as datas.'); return
     empresa = st.selectbox('Empresa', ['Todas'] + sorted(df['empresa'].dropna().unique().tolist()), key='ponto_empresa')
