@@ -268,8 +268,15 @@ def mostrar_atividades(df, sb, usuario, originais):
     import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
     st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. Severidade, nível de risco e validação operacional são editáveis. Para marcar Validada, informe a severidade e o cenário na aba Validar / editar atividade.")
-    campos = ["id", "atividade", "nivel_risco", "consequencia", "riscos", "controles", "responsavel", "nr", "validacao"]
+    campos = ["id", "atividade", "nivel_risco", "consequencia", "validacao", "riscos", "controles", "responsavel", "nr"]
     base = df[campos].copy()
+    # Categorias explícitas mantêm os três campos como seletores no editor.
+    for campo, opcoes in (
+        ("nivel_risco", NIVEIS_RISCO),
+        ("consequencia", CONSEQUENCIAS),
+        ("validacao", ["Pendente", "Validada"]),
+    ):
+        base[campo] = pd.Categorical(base[campo], categories=opcoes)
     # Uma seleção ou gravação diferente nunca reutiliza deltas de outras linhas.
     assinatura = hashlib.sha256(base.to_json(orient="records").encode()).hexdigest()[:16]
     editado = st.data_editor(
@@ -281,9 +288,9 @@ def mostrar_atividades(df, sb, usuario, originais):
             **{c: st.column_config.TextColumn(ROTULOS[c]) for c in ["atividade", "riscos", "controles", "responsavel", "nr"]},
             "atividade": st.column_config.TextColumn("Atividade", required=True),
             "consequencia": st.column_config.SelectboxColumn("Severidade", options=CONSEQUENCIAS),
-            "validacao": st.column_config.SelectboxColumn("Validação operacional", options=["Pendente", "Validada"]),
+            "validacao": st.column_config.SelectboxColumn("Validação operacional", options=["Pendente", "Validada"], width="medium", required=True),
         },
-        key=f"riscos_grade_{assinatura}_{st.session_state.get('riscos_grade_versao', 0)}",
+        key=f"riscos_grade_listas_v2_{assinatura}_{st.session_state.get('riscos_grade_versao', 0)}",
     )
     try:
         alteracoes = preparar_alteracoes(editado, base["id"].tolist(), originais)
