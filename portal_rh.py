@@ -421,7 +421,7 @@ def ler_colaboradores():
     return sorted(rows, key=lambda r: _nome_colaborador(r).upper())
 
 
-def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None, destra=None, equipe_revisao=None, tipo_contratacao=None):
+def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_base=None, frente=None, destra=None, equipe_revisao=None, tipo_contratacao=None, data_admissao=None):
     nome = str(nome or "").strip().upper()
     if not nome:
         raise ValueError("Informe o nome do colaborador.")
@@ -446,6 +446,7 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_
         "destra": str(destra or "").strip() or None,
         "equipe_revisao": str(equipe_revisao or "").strip().upper() or None,
         "tipo_contratacao": tipo_contratacao,
+        "data_admissao": venc_data_iso(data_admissao),
     }
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
@@ -5788,6 +5789,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             novo_nome = st.text_input("Colaborador *")
             novo_cracha = st.text_input("Crachá")
             novo_destra = st.text_input("DESTRA")
+            nova_data_admissao = st.date_input("Data de admissão", value=None, format="DD/MM/YYYY", min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
             novo_salario = st.number_input("Salário base (R$)", min_value=0.0, step=0.01, value=0.0)
         with cc2:
             nova_funcao = st.selectbox("Função", [""] + _funcoes_novo)
@@ -5802,7 +5804,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         incluir = st.form_submit_button("➕ Cadastrar colaborador", type="primary")
         if incluir:
             try:
-                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None, novo_destra or None, nova_equipe or None, novo_tipo_contratacao or None)
+                cadastrar_colaborador(novo_nome, nova_funcao, novo_cracha, nova_empresa, novo_salario or None, nova_frente or None, novo_destra or None, nova_equipe or None, novo_tipo_contratacao or None, data_admissao=nova_data_admissao)
                 st.success("Colaborador cadastrado com sucesso.")
                 st.rerun()
             except Exception as e:
@@ -5869,6 +5871,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "FRENTE": _c.get("frente"),
                 "EQUIPE REVISÃO": _c.get("equipe_revisao"),
                 "STATUS": _c.get("status"),
+                "DATA DE ADMISSÃO": (lambda v: date.fromisoformat(v) if v else None)(venc_data_iso(_c.get("data_admissao"))),
                 "DATA DE DESLIGAMENTO": _c.get("data_desligamento"),
                 "MOTIVO DO DESLIGAMENTO": _c.get("motivo_desligamento"),
                 "OBSERVAÇÕES DO DESLIGAMENTO": _c.get("observacao_desligamento"),
@@ -5892,6 +5895,10 @@ with st.expander("👥 Cadastro de colaboradores"):
                 _ws.column_dimensions[_letter].width = min(max(_maxlen + 3, 14), 48)
             for _cell in _ws["I"][1:]:
                 _cell.number_format = '"R$" #,##0.00'
+            for _col in _ws.columns:
+                if _col[0].value == "DATA DE ADMISSÃO":
+                    for _cell in _col[1:]:
+                        _cell.number_format = "DD/MM/YYYY"
         st.download_button(
             "📥 Exportar cadastro para Excel",
             data=_export_buffer.getvalue(),
@@ -5912,6 +5919,10 @@ with st.expander("👥 Cadastro de colaboradores"):
         cadastro_df["status"] = cadastro_df["status"].fillna("ATIVO").astype(str).str.upper()
         if "data_desligamento" not in cadastro_df.columns:
             cadastro_df["data_desligamento"] = None
+        cadastro_df["data_admissao"] = pd.to_datetime(
+            cadastro_df.get("data_admissao", pd.Series(None, index=cadastro_df.index, dtype=object)), errors="coerce"
+        ).dt.date
+        original_admissao = {str(c["id"]): venc_data_iso(c.get("data_admissao")) for c in todos_cadastro}
         if "salario_base" not in cadastro_df.columns:
             cadastro_df["salario_base"] = None
         if "frente" not in cadastro_df.columns:
@@ -5929,7 +5940,7 @@ with st.expander("👥 Cadastro de colaboradores"):
         original_venc = {str(c["id"]): {campo: venc_data_iso(c.get(campo)) for campo in CAMPOS_VENC} for c in todos_cadastro}
         cols_editor = [c for c in [
             "id", "cracha", "destra", "colaborador", "classificacao_fechamento", "funcao", "empresa", "tipo_contratacao", "salario_base", "frente", "equipe_revisao",
-            "status", "data_desligamento", "motivo_desligamento", "observacao_desligamento", *CAMPOS_VENC
+            "status", "data_admissao", "data_desligamento", "motivo_desligamento", "observacao_desligamento", *CAMPOS_VENC
         ] if c in cadastro_df.columns]
 
         opcoes_funcoes_cadastro = ler_funcoes()
@@ -5974,7 +5985,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             cadastro_df[cols_editor],
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in cols_editor if c not in ("colaborador", "classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra", *CAMPOS_VENC)],
+            disabled=[c for c in cols_editor if c not in ("colaborador", "classificacao_fechamento", "empresa", "tipo_contratacao", "funcao", "status", "data_admissao", "data_desligamento", "salario_base", "frente", "equipe_revisao", "destra", *CAMPOS_VENC)],
             column_config={
                 **{campo: st.column_config.DateColumn(label, format="DD/MM/YYYY") for campo, label in CAMPOS_VENC.items()},
                 "motivo_desligamento": st.column_config.TextColumn("Motivo do desligamento", width="large"),
@@ -5998,6 +6009,10 @@ with st.expander("👥 Cadastro de colaboradores"):
                 "data_desligamento": st.column_config.DateColumn(
                     "Data de desligamento",
                     format="DD/MM/YYYY",
+                ),
+                "data_admissao": st.column_config.DateColumn(
+                    "Data de admissão", format="DD/MM/YYYY",
+                    min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
                 ),
             },
             key="editor_colaboradores_" + "_".join(str(c["id"]) for c in todos_cadastro),
@@ -6050,7 +6065,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             novo_tipo = str(linha.get("tipo_contratacao") or "").strip().upper()
             if novo_tipo not in ("CONTRATO", "SPOT"):
                 novo_tipo = ""
-            mudou_venc = any(venc_data_iso(linha.get(campo)) != original_venc[cid][campo] for campo in CAMPOS_VENC)
+            mudou_venc = (venc_data_iso(linha.get("data_admissao")) != original_admissao[cid]) or any(venc_data_iso(linha.get(campo)) != original_venc[cid][campo] for campo in CAMPOS_VENC)
             mudou = mudou_venc or (novo_nome != original_nome.get(cid, "")) or (novo_tipo != original_tipo.get(cid, "")) or (str(linha.get("classificacao_fechamento")) != original_classificacao.get(cid)) or (nova_empresa != original_empresa.get(cid, "")) or (nova_funcao != original_funcao.get(cid, "")) or (novo_status != status_antigo) or (nova_dd != dd_antiga) or (novo_salario != salario_antigo) or (nova_frente != frente_antiga) or (nova_destra != destra_antiga) or (nova_equipe != equipe_antiga)
             if mudou:
                 if not novo_nome or (novo_nome != original_nome.get(cid, "") and any(_nome_colaborador(c).strip().upper() == novo_nome and str(c["id"]) != cid for c in (sb("GET", "rh_colaboradores", "select=id,colaborador") or []))):
@@ -6078,11 +6093,12 @@ with st.expander("👥 Cadastro de colaboradores"):
                 cid = str(linha["id"])
                 anterior = original_cadastro[cid]
                 atual = atuais.get(cid)
-                if atual is None or any(atual.get(k) != anterior.get(k) for k in ("ativo", "status", "data_desligamento", "motivo_desligamento", "observacao_desligamento")):
+                if atual is None or any(atual.get(k) != anterior.get(k) for k in ("ativo", "status", "data_admissao", "data_desligamento", "motivo_desligamento", "observacao_desligamento")):
                     raise ValueError("O cadastro mudou em outra sessão. Recarregue e confira antes de salvar.")
             for linha, novo_status, data_desl, novo_salario, nova_frente, nova_destra, nova_equipe in alteracoes:
                 payload = {**{campo: venc_data_iso(linha.get(campo)) for campo in CAMPOS_VENC}, "colaborador": str(linha.get("colaborador") or "").strip().upper(), "empresa": {"SERVICE": "10 SUL SERVICE", "PRESTADORA": "10 SUL PRESTADORA"}.get(str(linha.get("empresa") or "").strip().upper(), str(linha.get("empresa") or "").strip().upper()) or None, "funcao": None if pd.isna(linha.get("funcao")) else (str(linha.get("funcao") or "").strip().upper() or None), "salario_base": novo_salario, "frente": nova_frente or None, "destra": nova_destra or None, "equipe_revisao": nova_equipe or None, "tipo_contratacao": (lambda v: v if v in ("CONTRATO", "SPOT") else None)(str(linha.get("tipo_contratacao") or "").strip().upper())}
                 payload.update({"ativo": novo_status == "ATIVO", "status": novo_status, "data_desligamento": data_desl.isoformat() if data_desl else None})
+                payload["data_admissao"] = venc_data_iso(linha.get("data_admissao"))
                 info = motivos.get(str(linha["id"]))
                 if info:
                     payload.update(payload_desligamento(info, st.session_state["usuario_logado"]["id"]))
@@ -6163,6 +6179,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
