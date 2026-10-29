@@ -579,7 +579,7 @@ def gerar_excel_frequencia(ano, mes, colaboradores, freq, ocorrencia_codigo_por_
         (6, "FE", "Férias"),
         (7, "DE", "Destra"),
         (8, "FA", "Falta"),
-        (9, "FO", "Folga"),
+        (9, "FO", "Folga (FO + LB + COMP)"),
     ]
     for linha, codigo, descricao in codigos_resumo:
         ws_res.cell(linha, 1, codigo)
@@ -598,6 +598,12 @@ def gerar_excel_frequencia(ano, mes, colaboradores, freq, ocorrencia_codigo_por_
                 f'=COUNTIFS(BaseFuncionário!$E$4:$E${ultima_linha_base},BaseFuncionario!$C$1,'
                 f'BaseFuncionário!{letra_base}$4:{letra_base}${ultima_linha_base},BaseFuncionario!$A{linha})'
             )
+            if linha == 9:
+                # No fechamento, LB e COMP são contabilizados junto das folgas.
+                ws_res.cell(linha, col_res, ws_res.cell(linha, col_res).value + "".join(
+                    f'+COUNTIFS(BaseFuncionário!$E$4:$E${ultima_linha_base},BaseFuncionario!$C$1,BaseFuncionário!{letra_base}$4:{letra_base}${ultima_linha_base},"{codigo}")'
+                    for codigo in ("LB", "COMP")
+                ))
 
     ws_res["B10"] = "HORA EXTRA"
     ws_res["B11"] = "08:00"
@@ -2217,7 +2223,7 @@ def abrir_ajuda_portal():
 O **Portal RH — Aracruz** foi criado para registrar e acompanhar a frequência mensal dos colaboradores de forma simples e segura.
 
 ### 1. Resumo do mês
-Na parte superior você acompanha os totais de **Faltas, Atestados, Folgas, Presenças, Liberados e Compensações**. A **Média de Colaboradores** considera somente os colaboradores classificados como **OPERACIONAL**, conforme a regra definida para o portal.
+Na parte superior você acompanha os totais de **Faltas, Atestados, Folgas, Presenças, Liberados e Compensações**. A **Média de Colaboradores** considera somente os colaboradores classificados como **OPERACIONAL**: soma Presenças, Faltas, Atestados, Folgas, Liberados e Compensações e divide pelos dias corridos do período. Liberados e Compensações têm o mesmo peso de Folga.
 
 ### 2. Colaboradores
 O quadro **Colaboradores** mostra o total de pessoas cadastradas e a divisão entre **Operacionais** e **Outros**. Você pode usar **Buscar colaborador** para localizar rapidamente um nome e o filtro **STATUS** para visualizar TODOS, OPERACIONAL ou OUTROS.
@@ -5213,8 +5219,9 @@ with _rankings_topo:
         )
 
 # Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
-# Soma FO + FA + OK + A de todos os OPERACIONAIS em todos os dias até hoje e divide pelos dias transcorridos.
-_codigos_recebiveis = {"FO", "FA", "OK", "A"}
+# Soma FO + LB + COMP + FA + OK + A de todos os OPERACIONAIS e divide pelos dias transcorridos.
+# LB e COMP têm o mesmo peso de FO, preservando seus códigos na frequência.
+_codigos_recebiveis = {"FO", "LB", "COMP", "FA", "OK", "A"}
 _total_recebiveis = 0
 # Mapa com o que está salvo; depois sobrepomos o que estiver visível/pendente na grade atual.
 _mapa_media = dict(mapa)
@@ -5446,6 +5453,7 @@ with resumo_topo:
             "SPOT, não classificados, folgas, desligamentos e dias pendentes são excluídos da base. "
             "Os indicadores de frequência mantêm o escopo e os filtros atuais da grade."
         )
+        st.markdown("**Média de colaboradores:** (OK + FA + A + FO + LB + COMP) ÷ dias corridos do período, somente dos OPERACIONAIS. Liberados e Compensações contam como Folga na média, mantendo seus códigos na frequência.")
         st.write(f"Base do contrato: {_abs_dias_apurados} dias apurados, {_abs_faltas} faltas e {_abs_atestados} atestados.")
         st.write(f"Mês anterior: absenteísmo {_fmt_abs(_taxa_abs_anterior)}, faltas {_fmt_abs(_taxa_faltas_anterior)}, atestados {_fmt_abs(_taxa_atestados_anterior)}.")
         st.caption("A comparação utiliza o mesmo intervalo de dias e a classificação atual dos colaboradores. Lançamentos não salvos entram no mês atual.")
