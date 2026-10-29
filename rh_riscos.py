@@ -71,6 +71,19 @@ def tela_riscos(sb, usuario):
             st.caption("Clique em uma barra para filtrar as atividades. Clique novamente na mesma barra para remover a seleção e mostrar todas. Cada atividade é contada uma vez, pela consequência prioritária da triagem.")
         else:
             st.info("Nenhuma atividade para os filtros selecionados.")
+        st.subheader("Exportar relatório")
+        st.caption("PDF com indicadores, gráficos, atividades e plano de ação da seleção atual. Salve as edições da tabela antes de exportar.")
+        if not view.empty:
+            from rh_riscos_export import gerar_pdf_riscos
+            filtros_pdf = f"Busca: {busca or 'Todas'} | Consequência: {categoria} | Validação: {validacao}"
+            if selecionadas:
+                filtros_pdf += " | Gráfico: " + ", ".join(categorias)
+            st.download_button(
+                "📄 Baixar relatório com gráficos (PDF)",
+                data=gerar_pdf_riscos(view, filtros_pdf),
+                file_name=f"mapa_de_riscos_{date.today():%Y-%m-%d}.pdf",
+                mime="application/pdf", key="riscos_baixar_pdf",
+            )
         mostrar_atividades(view, sb, usuario, linhas)
     with plano:
         st.subheader("Plano de ação preventivo")
