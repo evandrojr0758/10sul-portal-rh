@@ -35,7 +35,7 @@ def grafico_niveis(df):
         clear="dblclick", toggle="true",
     )
     base = alt.Chart(contagem).encode(
-        x=alt.X("atividades:Q", title="Quantidade de atividades", axis=alt.Axis(tickMinStep=1),
+        x=alt.X("atividades:Q", title=None, axis=None,
                 scale=alt.Scale(domain=[0, max(1, int(contagem["atividades"].max())) * 1.15])),
         y=alt.Y("nivel_risco:N", title="Nível de risco", sort=NIVEIS_RISCO),
         tooltip=[alt.Tooltip("nivel_risco:N", title="Nível de risco"),
@@ -90,7 +90,7 @@ def tela_riscos(sb, usuario):
         if not view.empty:
             clique = alt.selection_point(name="categoria", fields=["consequencia"], on="click", clear="dblclick", toggle="true")
             grafico = alt.Chart(contagem).mark_bar(cornerRadiusEnd=5).encode(
-                x=alt.X("atividades:Q", title="Quantidade de atividades", axis=alt.Axis(tickMinStep=1),
+                x=alt.X("atividades:Q", title=None, axis=None,
                         scale=alt.Scale(domain=[0, max(1, int(contagem["atividades"].max())) * 1.15])),
                 y=alt.Y("consequencia:N", title=None, sort=CONSEQUENCIAS),
                 color=alt.Color("consequencia:N", scale=alt.Scale(domain=CONSEQUENCIAS, range=CORES), legend=None),
@@ -100,7 +100,7 @@ def tela_riscos(sb, usuario):
             rotulos = alt.Chart(contagem).mark_text(
                 align="left", baseline="middle", dx=6, fontWeight="bold",
             ).encode(
-                x="atividades:Q",
+                x=alt.X("atividades:Q", title=None, axis=None),
                 y=alt.Y("consequencia:N", title=None, sort=CONSEQUENCIAS),
                 text=alt.Text("atividades:Q", format="d"),
             )
