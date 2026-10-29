@@ -123,7 +123,7 @@ def tela_riscos(sb, usuario):
     calculados = [calcular_risco(p, s) for p, s in zip(df["probabilidade"], df["consequencia"])]
     df["pontuacao_risco"] = pd.Series([r[0] for r in calculados], index=df.index, dtype=object)
     df["nivel_risco"] = [r[1] for r in calculados]
-    painel, plano, editar = st.tabs(["Painel e atividades", "Plano de ação", "Validar / editar atividade"])
+    painel, plano, editar, frequencia_monitor = st.tabs(["Painel e atividades", "Plano de ação", "Validar / editar atividade", "Frequência no Monitor"])
     with painel:
         cols = st.columns(4)
         cols[0].metric("Atividades mapeadas", len(df))
@@ -229,6 +229,10 @@ def tela_riscos(sb, usuario):
                 key="riscos_baixar_excel",
             )
         mostrar_atividades(view, sb, usuario, linhas)
+    with frequencia_monitor:
+        import importlib
+        monitor = importlib.reload(importlib.import_module("rh_riscos_monitor"))
+        monitor.tela(sb, linhas)
     with plano:
         st.subheader("Plano de ação preventivo")
         atrasadas = df.apply(lambda r: bool(r.get("prazo") and str(r["prazo"]) < date.today().isoformat() and r.get("status_acao") != "Concluída"), axis=1)
@@ -253,6 +257,13 @@ def tela_riscos(sb, usuario):
             dados["atividade"] = st.text_input("Nome da atividade", value=str(original.get("atividade") or ""))
             freq_atual = normalizar_frequencia(original.get("frequencia_atividade"))
             dados["frequencia_atividade"] = st.selectbox("Frequência da atividade", FREQUENCIAS, index=FREQUENCIAS.index(freq_atual) if freq_atual in FREQUENCIAS else 0)
+            from rh_riscos_monitor import regra_atividade
+            termos_padrao, _ = regra_atividade(original)
+            dados["termos_monitor"] = st.text_area(
+                "Termos para localizar na descrição ASN (um por linha)",
+                value=original.get("termos_monitor") if isinstance(original.get("termos_monitor"), str) else "\n".join(termos_padrao),
+                help="A busca ignora acentos e maiúsculas. A regra ITR/Revisão para mapeamento e calibração é aplicada separadamente.",
+            )
             dados["nr"] = st.text_input("NR informada na matriz", value=str(original.get("nr") or ""))
             for campo in ["riscos", "controles", "cenario", "lacuna", "acao"]:
                 dados[campo] = st.text_area(ROTULOS[campo], value=str(original.get(campo) or ""))
