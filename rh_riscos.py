@@ -57,7 +57,7 @@ def tela_riscos(sb, usuario):
         return
     st.title("🦺 Mapa de riscos e plano preventivo")
     st.caption("Base: matriz de outubro/2026 e mapeamento completo EXEMPLO 2. As severidades importadas são triagens; a Segurança deve validar cada cenário em campo.")
-    st.info("Vermelho: potencial de fatalidade/amputação • Amarelo: lesões com ou sem afastamento • Verde: baixo potencial • Cinza: a validar. A cor representa a severidade selecionada. O nível de risco permanece conforme a matriz.")
+    st.info("Vermelho: potencial de fatalidade/amputação • Amarelo: lesões com ou sem afastamento • Verde: baixo potencial • Cinza: a validar. A cor representa a severidade selecionada. O nível de risco pode ser editado na tabela.")
     try:
         regs = sb("GET", "rh_seguranca_riscos", "select=*&order=id.asc&limit=1000") or []
     except Exception as exc:
@@ -67,7 +67,7 @@ def tela_riscos(sb, usuario):
     df = pd.DataFrame(linhas, columns=list(PADRAO) + ["id"])
     df["consequencia"] = df["consequencia"].fillna("A validar")
     df["severidade"] = df["consequencia"].map(severidade)
-    df["nivel_risco"] = df["classificacao_original"].map(nivel_risco)
+    df["nivel_risco"] = df["nivel_risco"].where(df["nivel_risco"].notna() & df["nivel_risco"].ne(""), df["classificacao_original"]).map(nivel_risco)
     painel, plano, editar = st.tabs(["Painel e atividades", "Plano de ação", "Validar / editar atividade"])
     with painel:
         cols = st.columns(4)
@@ -106,7 +106,7 @@ def tela_riscos(sb, usuario):
         else:
             st.info("Nenhuma atividade para os filtros selecionados.")
         st.subheader("Atividades por nível de risco")
-        st.caption("Nível de risco informado na matriz de origem: Alto, Médio ou Baixo. Atividades sem classificação aparecem como A validar.")
+        st.caption("Nível de risco salvo para cada atividade: Alto, Médio ou Baixo. A classificação inicial vem da matriz e pode ser editada na tabela.")
         evento_nivel = st.altair_chart(
             grafico_niveis(view), use_container_width=True,
             on_select="rerun", key="riscos_grafico_niveis",
@@ -168,6 +168,8 @@ def tela_riscos(sb, usuario):
                 dados[campo] = st.text_area(ROTULOS[campo], value=str(original.get(campo) or ""))
             atual = original.get("consequencia") or "A validar"
             dados["consequencia"] = st.selectbox("Severidade", CONSEQUENCIAS, index=CONSEQUENCIAS.index(atual) if atual in CONSEQUENCIAS else 5)
+            nivel_atual = nivel_risco(original.get("nivel_risco") or original.get("classificacao_original"))
+            dados["nivel_risco"] = st.selectbox("Nível de risco", NIVEIS_RISCO, index=NIVEIS_RISCO.index(nivel_atual))
             dados["validacao"] = st.selectbox("Validação operacional", ["Pendente", "Validada"], index=1 if original.get("validacao") == "Validada" else 0)
             dados["responsavel"] = st.text_input("Responsável", value=str(original.get("responsavel") or ""))
             dados["hierarquia"] = st.text_input("Hierarquia do controle (eliminação, substituição, engenharia, administrativo, EPI)", value=str(original.get("hierarquia") or ""))
@@ -200,7 +202,7 @@ def tela_riscos(sb, usuario):
                     st.error(f"Não foi possível salvar: {exc}")
 
 
-ROTULOS = {"nivel_risco": "Nível de risco (matriz)", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Severidade", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
+ROTULOS = {"nivel_risco": "Nível de risco", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Severidade", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
 
 
 PADRAO = {
@@ -209,9 +211,9 @@ PADRAO = {
     "lacuna": "", "acao": "", "hierarquia": "", "prazo": None,
     "status_acao": "Não iniciada", "evidencia": "",
     "probabilidade_residual": "Não avaliada", "severidade_residual": "Não avaliada",
-    "nivel_residual": "Não avaliado", "classificacao_original": "", "severidade_original": "",
+    "nivel_residual": "Não avaliado", "nivel_risco": None, "classificacao_original": "", "severidade_original": "",
 }
-CAMPOS_GRADE = ["atividade", "consequencia", "riscos", "controles", "responsavel", "nr"]
+CAMPOS_GRADE = ["nivel_risco", "atividade", "consequencia", "riscos", "controles", "responsavel", "nr"]
 
 
 def preparar_alteracoes(editado, visiveis, originais):
@@ -242,7 +244,11 @@ def preparar_alteracoes(editado, visiveis, originais):
         dados["consequencia"] = dados["consequencia"] or "A validar"
         if dados["consequencia"] not in CONSEQUENCIAS:
             raise ValueError("Selecione uma severidade válida.")
-        if novo or any(dados.get(c) != anterior.get(c) for c in CAMPOS_GRADE):
+        dados["nivel_risco"] = dados["nivel_risco"] or "A validar"
+        if dados["nivel_risco"] not in NIVEIS_RISCO:
+            raise ValueError("Selecione um nível de risco válido.")
+        anterior_nivel = nivel_risco((anterior or {}).get("nivel_risco") or (anterior or {}).get("classificacao_original"))
+        if novo or any(dados.get(c) != (anterior_nivel if c == "nivel_risco" else anterior.get(c)) for c in CAMPOS_GRADE):
             dados["validacao"] = "Pendente"
             alteracoes.append((cid, dados, anterior))
     for cid in permitidos - vistos:
@@ -255,17 +261,17 @@ def preparar_alteracoes(editado, visiveis, originais):
 def mostrar_atividades(df, sb, usuario, originais):
     import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
-    st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. A severidade pode ser editada diretamente; alterações voltam para validação pendente.")
+    st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. A severidade e o nível de risco podem ser editados diretamente; alterações voltam para validação pendente.")
     campos = ["id", "atividade", "nivel_risco", "consequencia", "riscos", "controles", "responsavel", "nr", "validacao"]
     base = df[campos].copy()
     # Uma seleção ou gravação diferente nunca reutiliza deltas de outras linhas.
     assinatura = hashlib.sha256(base.to_json(orient="records").encode()).hexdigest()[:16]
     editado = st.data_editor(
         base, use_container_width=True, hide_index=True, num_rows="dynamic",
-        disabled=["id", "nivel_risco", "validacao"],
+        disabled=["id", "validacao"],
         column_config={
             "id": None,
-            "nivel_risco": st.column_config.TextColumn("Nível de risco (matriz)"),
+            "nivel_risco": st.column_config.SelectboxColumn("Nível de risco", options=NIVEIS_RISCO),
             **{c: st.column_config.TextColumn(ROTULOS[c]) for c in ["atividade", "riscos", "controles", "responsavel", "nr"]},
             "atividade": st.column_config.TextColumn("Atividade", required=True),
             "consequencia": st.column_config.SelectboxColumn("Severidade", options=CONSEQUENCIAS),
