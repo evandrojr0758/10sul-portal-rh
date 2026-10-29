@@ -213,7 +213,7 @@ PADRAO = {
     "probabilidade_residual": "Não avaliada", "severidade_residual": "Não avaliada",
     "nivel_residual": "Não avaliado", "nivel_risco": None, "classificacao_original": "", "severidade_original": "",
 }
-CAMPOS_GRADE = ["nivel_risco", "atividade", "consequencia", "riscos", "controles", "responsavel", "nr"]
+CAMPOS_GRADE = ["validacao", "nivel_risco", "atividade", "consequencia", "riscos", "controles", "responsavel", "nr"]
 
 
 def preparar_alteracoes(editado, visiveis, originais):
@@ -247,9 +247,15 @@ def preparar_alteracoes(editado, visiveis, originais):
         dados["nivel_risco"] = dados["nivel_risco"] or "A validar"
         if dados["nivel_risco"] not in NIVEIS_RISCO:
             raise ValueError("Selecione um nível de risco válido.")
+        dados["validacao"] = dados["validacao"] or "Pendente"
+        if dados["validacao"] not in ("Pendente", "Validada"):
+            raise ValueError("Selecione uma validação operacional válida.")
         anterior_nivel = nivel_risco((anterior or {}).get("nivel_risco") or (anterior or {}).get("classificacao_original"))
         if novo or any(dados.get(c) != (anterior_nivel if c == "nivel_risco" else anterior.get(c)) for c in CAMPOS_GRADE):
-            dados["validacao"] = "Pendente"
+            if dados["validacao"] == "Validada" and (
+                dados["consequencia"] == "A validar" or not str(dados.get("cenario") or "").strip()
+            ):
+                raise ValueError(f"Para validar '{nome}', informe a severidade e o cenário na aba Validar / editar atividade.")
             alteracoes.append((cid, dados, anterior))
     for cid in permitidos - vistos:
         anterior = por_id[cid]
@@ -261,21 +267,21 @@ def preparar_alteracoes(editado, visiveis, originais):
 def mostrar_atividades(df, sb, usuario, originais):
     import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
-    st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. A severidade e o nível de risco podem ser editados diretamente; alterações voltam para validação pendente.")
+    st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. Severidade, nível de risco e validação operacional são editáveis. Para marcar Validada, informe a severidade e o cenário na aba Validar / editar atividade.")
     campos = ["id", "atividade", "nivel_risco", "consequencia", "riscos", "controles", "responsavel", "nr", "validacao"]
     base = df[campos].copy()
     # Uma seleção ou gravação diferente nunca reutiliza deltas de outras linhas.
     assinatura = hashlib.sha256(base.to_json(orient="records").encode()).hexdigest()[:16]
     editado = st.data_editor(
         base, use_container_width=True, hide_index=True, num_rows="dynamic",
-        disabled=["id", "validacao"],
+        disabled=["id"],
         column_config={
             "id": None,
             "nivel_risco": st.column_config.SelectboxColumn("Nível de risco", options=NIVEIS_RISCO),
             **{c: st.column_config.TextColumn(ROTULOS[c]) for c in ["atividade", "riscos", "controles", "responsavel", "nr"]},
             "atividade": st.column_config.TextColumn("Atividade", required=True),
             "consequencia": st.column_config.SelectboxColumn("Severidade", options=CONSEQUENCIAS),
-            "validacao": st.column_config.TextColumn("Validação operacional"),
+            "validacao": st.column_config.SelectboxColumn("Validação operacional", options=["Pendente", "Validada"]),
         },
         key=f"riscos_grade_{assinatura}_{st.session_state.get('riscos_grade_versao', 0)}",
     )
