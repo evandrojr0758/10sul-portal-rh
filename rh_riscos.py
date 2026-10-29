@@ -123,6 +123,23 @@ def tela_riscos(sb, usuario):
         cols[1].metric("Potencial crítico", int(df["severidade"].eq("CRÍTICA").sum()))
         cols[2].metric("Potencial moderado", int(df["severidade"].eq("MODERADA").sum()))
         cols[3].metric("A validar em campo", int(df["validacao"].ne("Validada").sum()))
+        with st.expander("Como a probabilidade foi preenchida — mapa de critérios"):
+            st.markdown("**Preenchimento preliminar por inferência a partir das atividades, perigos e controles cadastrados.** Frequência, duração da exposição, eficácia dos controles e histórico de acidentes não foram conferidos em campo.")
+            st.table(pd.DataFrame([
+                {"Probabilidade proposta": "1 — Baixa", "Atividades consideradas": "Serviços administrativos em escritório; pedido e entrega de materiais (PCM)", "Critério usado na triagem": "Rotinas com controles descritos: organização, carrinho, cadeira ergonômica e pausas."},
+                {"Probabilidade proposta": "2 — Média", "Atividades consideradas": "Demais atividades da triagem inicial", "Critério usado na triagem": "Perigos conhecidos e controles cadastrados, sem dados suficientes sobre a exposição real."},
+                {"Probabilidade proposta": "3 — Alta", "Atividades consideradas": "Socorro mecânico; trabalho em altura", "Critério usado na triagem": "Condições externas variáveis e exposição a quedas, consideradas como hipótese para revisão prioritária."},
+            ]))
+            st.info("O perigo da atividade, sozinho, não comprova uma probabilidade alta. As propostas devem ser revistas pela Segurança considerando a exposição e a eficácia dos controles. O quadro descreve a triagem inicial; as classificações atuais aparecem no detalhamento abaixo.")
+            st.markdown("**Justificativa por atividade**")
+            justificativas = [{
+                "Atividade": r.get("atividade") or "",
+                "Probabilidade atual": normalizar_probabilidade(r.get("probabilidade")),
+                "Justificativa da triagem": r.get("justificativa_probabilidade") or "Sem justificativa de triagem registrada.",
+                "Validação operacional": r.get("validacao") or "Pendente",
+            } for r in linhas]
+            st.dataframe(pd.DataFrame(justificativas), use_container_width=True, hide_index=True)
+            st.caption("Referência: NR-1, item 1.5.4.4.5.4 — exposição ao perigo e eficácia das medidas de prevenção.")
         f1, f2, f3, f4 = st.columns(4)
         busca = f1.text_input("Buscar atividade ou risco", key="riscos_busca")
         categoria = f2.selectbox("Severidade", ["TODAS"] + CONSEQUENCIAS, key="riscos_consequencia")
