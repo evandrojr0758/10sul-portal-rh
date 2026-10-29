@@ -39,6 +39,9 @@ def regra_atividade(atividade):
     nome = normalizar(atividade.get("atividade"))
     termos = [nome] if nome else []
     automatica = None
+    if "servicos a quente" in nome or "servico a quente" in nome:
+        termos = ["solda", "soldas", "soldagem", "soldar", "soldado", "soldada",
+                  "soldando", "servicos a quente", "servico a quente"]
     for prefixo, padroes, auto in REGRAS:
         if nome.startswith(prefixo):
             termos, automatica = list(padroes), auto
