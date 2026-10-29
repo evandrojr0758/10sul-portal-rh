@@ -1,3 +1,4 @@
+streamlit>=1.49,<2
 streamlit-keyup
 openpyxl
 pandas
