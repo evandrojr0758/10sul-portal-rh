@@ -21,7 +21,7 @@ ET.register_namespace('r', 'http://schemas.openxmlformats.org/officeDocument/200
 CATS = ['1 — Leve', '2 — Moderada', '3 — Grave / Crítica', 'A validar']
 STATUS = ['Não iniciada', 'Em andamento', 'Concluída']
 CAMPOS = [
-    ['id', 'atividade', 'consequencia', 'probabilidade', 'validacao', 'riscos', 'controles', 'cenario', 'nr', 'pontuacao_risco', 'nivel_risco'],
+    ['id', 'atividade', 'consequencia', 'probabilidade', 'validacao', 'riscos', 'controles', 'cenario', 'nr', 'pontuacao_risco', 'nivel_risco', 'frequencia_atividade'],
     ['id', 'atividade', 'lacuna', 'acao', 'hierarquia', 'responsavel', 'prazo', 'status_acao', 'evidencia', 'probabilidade_residual', 'severidade_residual', 'nivel_residual'],
 ]
 
@@ -70,10 +70,11 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
             colunas = raiz.find(_q('cols'))
             ET.SubElement(colunas, _q('col'), min='10', max='10', width='18', customWidth='1')
             ET.SubElement(colunas, _q('col'), min='11', max='11', width='22', customWidth='1')
+            ET.SubElement(colunas, _q('col'), min='12', max='12', width='25', customWidth='1')
             for linha in dados:
                 n = int(linha.get('r'))
                 if n in (5, 6, 7):
-                    for letra, titulo in [('J', 'Pontuação (P × S)'), ('K', 'Nível de risco')]:
+                    for letra, titulo in [('J', 'Pontuação (P × S)'), ('K', 'Nível de risco'), ('L', 'Frequência da atividade')]:
                         celula = deepcopy(list(linha)[-1])
                         celula.set('r', f'{letra}{n}')
                         if n == 5:
@@ -92,6 +93,8 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
                 coluna = re.sub(r'\d', '', celula.get('r'))
                 celula.set('r', f'{coluna}{i+6}')
                 valor = registro.get(campos[j], '')
+                if campos[j] == 'frequencia_atividade':
+                    valor = valor or 'Diária'
                 if campos[j] == 'prazo' and valor:
                     try:
                         valor = (date.fromisoformat(str(valor)[:10]) - date(1899, 12, 30)).days
