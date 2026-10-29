@@ -5128,6 +5128,7 @@ def _resumo_diario_frequencia(grade, dias):
         ("Faltas", {"FA"}),
         ("Atestados", {"A"}),
         ("Férias", {"FE"}),
+        ("Pendentes", {""}),
         ("Total do dia", {"FO", "LB", "COMP", "OK", "A", "FA"}),
     ]
     codigos = {
@@ -5147,13 +5148,13 @@ st.dataframe(
     _resumo_diario_frequencia(editado, colunas_dia),
     use_container_width=True,
     hide_index=True,
-    height=247,
+    height=282,
     column_config={
         "RESUMO DO DIA": st.column_config.TextColumn("RESUMO DO DIA", width="medium", pinned=True),
         **{dia: st.column_config.NumberColumn(dia, width="small", format="%d") for dia in colunas_dia},
     },
 )
-st.caption("Totais somente dos OPERACIONAIS exibidos na grade, conforme os filtros atuais. OUTROS ficam fora de todas as linhas. Folgas incluem FO, LB e COMP. Total do dia = Folgas + Presenças + Atestados + Faltas, sem Férias. Pendentes e DEM não entram nos totais.")
+st.caption("Totais somente dos OPERACIONAIS exibidos na grade, conforme os filtros atuais. OUTROS ficam fora de todas as linhas. Folgas incluem FO, LB e COMP. Total do dia = Folgas + Presenças + Atestados + Faltas, sem Férias. Pendentes são exibidos separadamente e não entram no Total do dia nem na média. DEM não entra nas contagens.")
 
 # Ranking combinado por colaborador — Faltas x Atestados.
 # Obedece ao filtro TODOS / OPERACIONAL / OUTROS e considera também alterações ainda não salvas.
