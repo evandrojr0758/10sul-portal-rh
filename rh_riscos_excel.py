@@ -18,10 +18,10 @@ ET.register_namespace('x', X)
 ET.register_namespace('c', C)
 ET.register_namespace('a', A)
 ET.register_namespace('r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships')
-CATS = ['Fatalidade possível', 'Amputação possível', 'Afastamento possível', 'Lesão sem afastamento possível', 'Baixo potencial', 'A validar']
+CATS = ['1 — Leve', '2 — Moderada', '3 — Grave / Crítica', 'A validar']
 STATUS = ['Não iniciada', 'Em andamento', 'Concluída']
 CAMPOS = [
-    ['id', 'atividade', 'consequencia', 'severidade', 'validacao', 'riscos', 'controles', 'cenario', 'nr'],
+    ['id', 'atividade', 'consequencia', 'probabilidade', 'validacao', 'riscos', 'controles', 'cenario', 'nr'],
     ['id', 'atividade', 'lacuna', 'acao', 'hierarquia', 'responsavel', 'prazo', 'status_acao', 'evidencia', 'probabilidade_residual', 'severidade_residual', 'nivel_residual'],
 ]
 
@@ -60,9 +60,11 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
             for celula in raiz.iter(_q('c')):
                 if celula.get('r') == 'C5':
                     _valor(celula, 'Severidade')
+                elif celula.get('r') == 'D5':
+                    _valor(celula, 'Probabilidade (P)')
             for coluna in raiz.find(_q('cols')):
                 if int(coluna.get('min')) == 4 and int(coluna.get('max')) == 4:
-                    coluna.set('hidden', '1')
+                    coluna.set('hidden', '0')
         dados = raiz.find(_q('sheetData'))
         modelos = [deepcopy(r) for r in dados if r.get('r') in ('6', '7')]
         for linha in list(dados):
@@ -104,15 +106,18 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
         arquivos[nome] = ET.tostring(raiz, encoding='utf-8', xml_declaration=True)
     consequencias = Counter(r.get('consequencia') for r in registros)
     acoes = Counter(r.get('status_acao') for r in registros)
-    valores = {'B5': len(registros), 'B6': sum(consequencias[c] for c in CATS[:2]),
-               'B7': sum(consequencias[c] for c in CATS[2:4]),
+    valores = {'B5': len(registros), 'B6': consequencias[CATS[2]],
+               'B7': consequencias[CATS[1]],
                'B8': sum(r.get('validacao') != 'Validada' for r in registros),
                'B9': sum(bool(r.get('prazo') and str(r['prazo'])[:10] < instante.date().isoformat() and r.get('status_acao') != 'Concluída') for r in registros)}
-    valores.update({f'B{i+14}': consequencias[c] for i, c in enumerate(CATS)})
+    valores.update({f'B{i+14}': consequencias[c] if i < len(CATS) else 0 for i, c in enumerate(CATS + ['', ''])})
     valores.update({f'B{i+26}': acoes[c] for i, c in enumerate(STATUS)})
     raiz = ET.fromstring(arquivos['xl/worksheets/sheet1.xml'])
     for celula in raiz.iter(_q('c')):
         ref = celula.get('r')
+        if ref.startswith('A') and ref[1:].isdigit() and 14 <= int(ref[1:]) <= 19:
+            posicao = int(ref[1:]) - 14
+            _valor(celula, CATS[posicao] if posicao < len(CATS) else '')
         if ref == 'A3':
             _valor(celula, 'Emitido em ' + instante.strftime('%d/%m/%Y %H:%M') + ' (Brasília)')
         if ref in valores:
@@ -136,7 +141,17 @@ def gerar_excel_riscos(df, filtros='Todos os registros', agora=None):
         raiz = ET.fromstring(arquivos[nome])
         primeiro = 'chart1.' in nome
         quantidades = [consequencias[c] for c in CATS] if primeiro else [acoes[c] for c in STATUS]
-        paleta = ['DC2626', 'EF4444', 'EAB308', 'FACC15', '16A34A', '64748B'] if primeiro else ['64748B', 'EAB308', '16A34A']
+        paleta = ['16A34A', 'EAB308', 'DC2626', '64748B'] if primeiro else ['64748B', 'EAB308', '16A34A']
+        if primeiro:
+            for ref in raiz.findall('.//{' + C + '}f'):
+                if ref.text:
+                    ref.text = ref.text.replace('$19', '$17')
+            for cache in raiz.findall('.//{' + C + '}strCache'):
+                for child in list(cache):
+                    cache.remove(child)
+                ET.SubElement(cache, '{' + C + '}ptCount', val=str(len(CATS)))
+                for i, categoria in enumerate(CATS):
+                    ET.SubElement(ET.SubElement(cache, '{' + C + '}pt', idx=str(i)), '{' + C + '}v').text = categoria
         for cache in raiz.findall('.//{' + C + '}numCache'):
             for filho in list(cache):
                 if filho.tag.endswith('}pt') or filho.tag.endswith('}ptCount'):
