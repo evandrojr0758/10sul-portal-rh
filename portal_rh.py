@@ -1427,6 +1427,15 @@ def _admissao_gratificacao(data_admissao, ano, mes):
     return True, ""
 
 
+def _ferias_mes_inteiro(dias_ferias, ano, mes):
+    """Só bloqueia por férias quando todos os dias da competência têm FE."""
+    dias = set(dias_ferias or ())
+    return all(
+        date(int(ano), int(mes), dia).isoformat() in dias
+        for dia in range(1, calendar.monthrange(int(ano), int(mes))[1] + 1)
+    )
+
+
 def tela_apuracao_gratificacao():
     usr=st.session_state.get("usuario_logado") or {}
     st.markdown("### 💰 Apuração Mensal de Gratificação")
@@ -1436,7 +1445,7 @@ def tela_apuracao_gratificacao():
     mes_g=g1.selectbox("Mês da apuração", range(1,13), index=hoje.month-1, format_func=lambda x: meses_g[x-1], key="grat_mes")
     ano_g=int(g2.number_input("Ano da apuração", min_value=2025, max_value=2100, value=hoje.year, step=1, key="grat_ano"))
     g3.markdown(f"### {meses_g[mes_g-1].upper()} / {ano_g}")
-    st.caption("Em todas as frentes, a bonificação exige 30 dias completos de admissão até o último dia do mês da apuração. Férias (FE) registradas em qualquer dia do mês zeram a bonificação. A data de admissão é obrigatória somente nos novos cadastros; colaboradores antigos sem data não ficam pendentes por esse motivo.")
+    st.caption("Em todas as frentes, a bonificação exige 30 dias completos de admissão até o último dia do mês da apuração. Férias (FE) zeram a bonificação somente quando cobrem o mês inteiro. Férias em parte do mês não geram desconto por férias; os demais critérios continuam valendo. A data de admissão é obrigatória somente nos novos cadastros; colaboradores antigos sem data não ficam pendentes por esse motivo.")
     try:
         regras=ler_regras_gratificacao(); freq=ler_frequencia(ano_g,mes_g)
         colabs=sb("GET","rh_colaboradores","select=*&order=colaborador.asc") or []
@@ -1548,7 +1557,7 @@ def tela_apuracao_gratificacao():
     for f in freq:
         cid=int(f.get("colaborador_id") or 0); cod=cod_por_id.get(int(f.get("ocorrencia_id") or 0),"")
         if cod=="FA": faltas[cid]=faltas.get(cid,0)+1
-        if cod=="FE": ferias[cid]=ferias.get(cid,0)+1
+        if cod=="FE": ferias.setdefault(cid, set()).add(str(f.get("data") or "")[:10])
         if cod=="A":
             obs_at=str(f.get("observacao") or "").upper()
             if "[ATESTADO: MEIO PERÍODO]" in obs_at:
@@ -1644,9 +1653,12 @@ def tela_apuracao_gratificacao():
         if admissao_apta is not True:
             valor = None if admissao_apta is None else 0
             motivos.append(motivo_admissao)
-        if ferias.get(cid, 0):
+        dias_ferias = ferias.get(cid, set())
+        if _ferias_mes_inteiro(dias_ferias, ano_g, mes_g):
             valor = 0
-            motivos.append(f"Férias no período: {ferias[cid]} dia(s) de FE na frequência")
+            motivos.append(f"Férias durante todo o mês: {len(dias_ferias)} dia(s) de FE na frequência")
+        elif dias_ferias:
+            motivos.append(f"Férias em parte do mês: {len(dias_ferias)} dia(s), sem desconto por férias")
         status="⏳ PENDENTE" if valor is None else ("❌ ZERADA" if valor<=0 else ("✅ INTEGRAL" if abs(float(valor)-float(integral)) < 0.01 else "🟠 PARCIAL"))
         ids[nome]=cid
         linhas.append({"COLABORADOR":nome,"EMPRESA":_empresa_colaborador(c, visual=False),"FUNÇÃO":str(c.get("funcao") or "").strip(),"FRENTE":frente,"SALÁRIO":sal,"EQUIPE REVISÃO":equipe,"MÉDIA TEMPO (h)":media,"FALTAS":fa,"ATESTADOS (dias)":at,"DNA":dna,"DESVIOS":des,"INTEGRAL":integral,"GRATIFICAÇÃO":valor,"STATUS":status,"MOTIVO / CÁLCULO":" • ".join(motivos) if motivos else "Requisitos atendidos"})
