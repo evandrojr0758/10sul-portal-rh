@@ -425,6 +425,9 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_
     nome = str(nome or "").strip().upper()
     if not nome:
         raise ValueError("Informe o nome do colaborador.")
+    admissao_iso = venc_data_iso(data_admissao)
+    if not admissao_iso:
+        raise ValueError("Informe a data de admissão do colaborador.")
 
     existentes = sb(
         "GET",
@@ -446,7 +449,7 @@ def cadastrar_colaborador(nome, funcao="", cracha="", empresa="10 SUL", salario_
         "destra": str(destra or "").strip() or None,
         "equipe_revisao": str(equipe_revisao or "").strip().upper() or None,
         "tipo_contratacao": tipo_contratacao,
-        "data_admissao": venc_data_iso(data_admissao),
+        "data_admissao": admissao_iso,
     }
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
 
@@ -5818,7 +5821,7 @@ with st.expander("👥 Cadastro de colaboradores"):
             novo_nome = st.text_input("Colaborador *")
             novo_cracha = st.text_input("Crachá")
             novo_destra = st.text_input("DESTRA")
-            nova_data_admissao = st.date_input("Data de admissão", value=None, format="DD/MM/YYYY", min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
+            nova_data_admissao = st.date_input("Data de admissão *", value=None, format="DD/MM/YYYY", min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
             novo_salario = st.number_input("Salário base (R$)", min_value=0.0, step=0.01, value=0.0)
         with cc2:
             nova_funcao = st.selectbox("Função", [""] + _funcoes_novo)
@@ -6040,7 +6043,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                     format="DD/MM/YYYY",
                 ),
                 "data_admissao": st.column_config.DateColumn(
-                    "Data de admissão", format="DD/MM/YYYY",
+                    "Data de admissão", format="DD/MM/YYYY", required=True,
                     min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
                 ),
             },
@@ -6120,6 +6123,8 @@ with st.expander("👥 Cadastro de colaboradores"):
             atuais = {str(c["id"]): c for c in (sb("GET", "rh_colaboradores", "select=*") or [])}
             for linha, *_ in alteracoes:
                 cid = str(linha["id"])
+                if not venc_data_iso(linha.get("data_admissao")):
+                    raise ValueError(f"Informe a data de admissão de {linha.get('colaborador') or cid} antes de salvar.")
                 anterior = original_cadastro[cid]
                 atual = atuais.get(cid)
                 if atual is None or any(atual.get(k) != anterior.get(k) for k in ("ativo", "status", "data_admissao", "data_desligamento", "motivo_desligamento", "observacao_desligamento")):
