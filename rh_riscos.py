@@ -90,12 +90,21 @@ def tela_riscos(sb, usuario):
         if not view.empty:
             clique = alt.selection_point(name="categoria", fields=["consequencia"], on="click", clear="dblclick", toggle="true")
             grafico = alt.Chart(contagem).mark_bar(cornerRadiusEnd=5).encode(
-                x=alt.X("atividades:Q", title="Quantidade de atividades", axis=alt.Axis(tickMinStep=1)),
+                x=alt.X("atividades:Q", title="Quantidade de atividades", axis=alt.Axis(tickMinStep=1),
+                        scale=alt.Scale(domain=[0, max(1, int(contagem["atividades"].max())) * 1.15])),
                 y=alt.Y("consequencia:N", title=None, sort=CONSEQUENCIAS),
                 color=alt.Color("consequencia:N", scale=alt.Scale(domain=CONSEQUENCIAS, range=CORES), legend=None),
                 opacity=alt.condition(clique, alt.value(1), alt.value(0.45)),
                 tooltip=[alt.Tooltip("consequencia:N", title="Severidade"), alt.Tooltip("atividades:Q", title="Atividades")],
             ).add_params(clique).properties(height=280)
+            rotulos = alt.Chart(contagem).mark_text(
+                align="left", baseline="middle", dx=6, fontWeight="bold",
+            ).encode(
+                x="atividades:Q",
+                y=alt.Y("consequencia:N", title=None, sort=CONSEQUENCIAS),
+                text=alt.Text("atividades:Q", format="d"),
+            )
+            grafico = grafico + rotulos
             evento = st.altair_chart(grafico, use_container_width=True, on_select="rerun", key="riscos_grafico")
             selecionadas = evento.get("selection", {}).get("categoria", [])
             if selecionadas:
