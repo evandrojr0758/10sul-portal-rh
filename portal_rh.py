@@ -1063,10 +1063,11 @@ def tela_regras_gratificacao():
                     st.error(f"Não foi possível carregar o link do estoque: {exc}")
             else:
                 st.caption("Regra-base para ITR, SOS, CNP, BORRACHARIA, CAPD e CRAVEJAMENTO. FABRICAÇÃO não entra nesta regra.")
-                c1,c2,c3 = st.columns(3)
+                c1,c2,c3,c4 = st.columns(4)
                 valor = c1.number_input("Bonificação integral (R$)", min_value=0.0, value=float(r.get("valor_fixo") or 360), step=10.0, key=f"rg_vlr_{r['id']}")
                 desc_at = c2.number_input("1 dia de atestado — desconto (%)", min_value=0.0, max_value=100.0, value=float(r.get("desconto_1_atestado_percentual") or 20), step=1.0, key=f"rg_atp_{r['id']}")
-                atest_tudo = c3.number_input("Dias de atestado para zerar tudo", min_value=1, value=int(r.get("atestados_zera_tudo") or 2), step=1, key=f"rg_att_{r['id']}")
+                desc_at2 = c3.number_input("2 dias de atestado — desconto (%)", min_value=0.0, max_value=100.0, value=float(r.get("desconto_2_atestados_percentual") if r.get("desconto_2_atestados_percentual") is not None else 50), step=1.0, key=f"rg_atp2_{r['id']}")
+                atest_tudo = c4.number_input("Dias de atestado para zerar tudo", min_value=3, value=max(3, int(r.get("atestados_zera_tudo") or 3)), step=1, key=f"rg_att_{r['id']}")
                 c4,c5 = st.columns(2)
                 dna_min = c4.number_input("DNA mínimo no mês", min_value=0, value=int(r.get("dna_minimo") or 2), step=1, key=f"rg_dna_{r['id']}")
                 atraso_hab = c5.checkbox("Ativar regra de atraso acumulado", value=bool(r.get("atraso_habilitado", False)), key=f"rg_atraso_{r['id']}", help="Deixe desativado por enquanto. Depois vamos calcular automaticamente a soma dos atrasos.")
@@ -1078,7 +1079,7 @@ def tela_regras_gratificacao():
                     "percentual_salario": None, "valor_fixo": valor,
                     "peso_absenteismo": None, "peso_tempo_entrega": None,
                     "falta_zera_tudo": True, "desconto_1_atestado_valor": None,
-                    "desconto_1_atestado_percentual": desc_at, "atestados_zera_categoria": None,
+                    "desconto_1_atestado_percentual": desc_at, "desconto_2_atestados_percentual": desc_at2, "atestados_zera_categoria": None,
                     "atestados_zera_tudo": int(atest_tudo), "dna_minimo": int(dna_min),
                     "dna_abaixo_minimo_zera": True, "desvio_comportamental_zera": True,
                     "atraso_habilitado": bool(atraso_hab), "limite_atraso_minutos": limite_atraso,
@@ -1590,9 +1591,13 @@ def tela_apuracao_gratificacao():
                 valor=None; motivos.append("informar média da Revisão")
             else: valor=abs_parcela + tempo_parcela*(pct_tempo/100)
         elif valor>0:
-            if at>=int(demais.get("atestados_zera_tudo") or 2): valor=0; motivos.append(f"{at} dias de atestado")
+            if at>=int(demais.get("atestados_zera_tudo") or 3): valor=0; motivos.append(f"{at} dias de atestado")
             elif at>=1:
-                desc=float(demais.get("desconto_1_atestado_percentual") or 20); valor=integral*(1-desc/100); motivos.append(f"1 dia de atestado (-{desc:.0f}%)")
+                campo_desconto = "desconto_2_atestados_percentual" if at >= 2 else "desconto_1_atestado_percentual"
+                padrao_desconto = 50 if at >= 2 else 20
+                desc = float(demais.get(campo_desconto) if demais.get(campo_desconto) is not None else padrao_desconto)
+                valor = integral * (1 - desc / 100)
+                motivos.append(f"{at:g} dia(s) de atestado (-{desc:g}%)")
         if frente == "FABRICAÇÃO":
             fab_manual = fab_ap.get(cid, {})
             integral, valor, motivo_fab = rh_fabricacao.calcular(
