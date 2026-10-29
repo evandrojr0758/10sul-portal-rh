@@ -2005,9 +2005,10 @@ def tela_dna_seguranca():
         horizontal=True, key="seguranca_area",
     )
     if area_seguranca == "Mapa de riscos e plano preventivo":
-        from rh_riscos import tela_riscos
+        import importlib
+        riscos = importlib.reload(importlib.import_module("rh_riscos"))
         cabecalho_sessao()
-        tela_riscos(sb, usr)
+        riscos.tela_riscos(sb, usr)
         return
     st.subheader("Controle de DNA")
     st.caption("Informe somente a quantidade de DNAs realizados por colaborador em cada competência.")
