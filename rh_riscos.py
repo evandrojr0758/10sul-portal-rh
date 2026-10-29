@@ -56,8 +56,8 @@ def tela_riscos(sb, usuario):
         st.error("O mapa de riscos está disponível somente no acesso da Segurança.")
         return
     st.title("🦺 Mapa de riscos e plano preventivo")
-    st.caption("Base: matriz de outubro/2026 e mapeamento completo EXEMPLO 2. As consequências importadas são triagens; a Segurança deve validar cada cenário em campo.")
-    st.info("Vermelho: potencial de fatalidade/amputação • Amarelo: lesões com ou sem afastamento • Verde: baixo potencial • Cinza: a validar. A cor representa a consequência potencial, não uma nova avaliação da probabilidade.")
+    st.caption("Base: matriz de outubro/2026 e mapeamento completo EXEMPLO 2. As severidades importadas são triagens; a Segurança deve validar cada cenário em campo.")
+    st.info("Vermelho: potencial de fatalidade/amputação • Amarelo: lesões com ou sem afastamento • Verde: baixo potencial • Cinza: a validar. A cor representa a severidade selecionada. O nível de risco permanece conforme a matriz.")
     try:
         regs = sb("GET", "rh_seguranca_riscos", "select=*&order=id.asc&limit=1000") or []
     except Exception as exc:
@@ -77,7 +77,7 @@ def tela_riscos(sb, usuario):
         cols[3].metric("A validar em campo", int(df["validacao"].ne("Validada").sum()))
         f1, f2, f3 = st.columns(3)
         busca = f1.text_input("Buscar atividade ou risco", key="riscos_busca")
-        categoria = f2.selectbox("Consequência potencial", ["TODAS"] + CONSEQUENCIAS, key="riscos_consequencia")
+        categoria = f2.selectbox("Severidade", ["TODAS"] + CONSEQUENCIAS, key="riscos_consequencia")
         validacao = f3.selectbox("Validação operacional", ["TODAS", "Pendente", "Validada"], key="riscos_validacao")
         view = df.copy()
         if busca:
@@ -94,7 +94,7 @@ def tela_riscos(sb, usuario):
                 y=alt.Y("consequencia:N", title=None, sort=CONSEQUENCIAS),
                 color=alt.Color("consequencia:N", scale=alt.Scale(domain=CONSEQUENCIAS, range=CORES), legend=None),
                 opacity=alt.condition(clique, alt.value(1), alt.value(0.45)),
-                tooltip=[alt.Tooltip("consequencia:N", title="Consequência"), alt.Tooltip("atividades:Q", title="Atividades")],
+                tooltip=[alt.Tooltip("consequencia:N", title="Severidade"), alt.Tooltip("atividades:Q", title="Atividades")],
             ).add_params(clique).properties(height=280)
             evento = st.altair_chart(grafico, use_container_width=True, on_select="rerun", key="riscos_grafico")
             selecionadas = evento.get("selection", {}).get("categoria", [])
@@ -102,7 +102,7 @@ def tela_riscos(sb, usuario):
                 categorias = [p["consequencia"] for p in selecionadas if "consequencia" in p]
                 if categorias:
                     view = view[view["consequencia"].isin(categorias)]
-            st.caption("Clique em uma barra para filtrar as atividades. Clique novamente na mesma barra para remover a seleção e mostrar todas. Cada atividade é contada uma vez, pela consequência prioritária da triagem.")
+            st.caption("Clique em uma barra para filtrar as atividades. Clique novamente na mesma barra para remover a seleção e mostrar todas. Cada atividade é contada uma vez, pela severidade selecionada.")
         else:
             st.info("Nenhuma atividade para os filtros selecionados.")
         st.subheader("Atividades por nível de risco")
@@ -122,7 +122,7 @@ def tela_riscos(sb, usuario):
         st.caption("PDF ou Excel formatado com indicadores, gráficos, atividades e plano de ação da seleção atual. Salve as edições da tabela antes de exportar.")
         if not view.empty:
             from rh_riscos_export import gerar_pdf_riscos
-            filtros_pdf = f"Busca: {busca or 'Todas'} | Consequência: {categoria} | Validação: {validacao}"
+            filtros_pdf = f"Busca: {busca or 'Todas'} | Severidade: {categoria} | Validação: {validacao}"
             if selecionadas:
                 filtros_pdf += " | Gráfico: " + ", ".join(categorias)
             if niveis_selecionados:
@@ -167,7 +167,7 @@ def tela_riscos(sb, usuario):
             for campo in ["riscos", "controles", "cenario", "lacuna", "acao"]:
                 dados[campo] = st.text_area(ROTULOS[campo], value=str(original.get(campo) or ""))
             atual = original.get("consequencia") or "A validar"
-            dados["consequencia"] = st.selectbox("Consequência prioritária", CONSEQUENCIAS, index=CONSEQUENCIAS.index(atual) if atual in CONSEQUENCIAS else 5)
+            dados["consequencia"] = st.selectbox("Severidade", CONSEQUENCIAS, index=CONSEQUENCIAS.index(atual) if atual in CONSEQUENCIAS else 5)
             dados["validacao"] = st.selectbox("Validação operacional", ["Pendente", "Validada"], index=1 if original.get("validacao") == "Validada" else 0)
             dados["responsavel"] = st.text_input("Responsável", value=str(original.get("responsavel") or ""))
             dados["hierarquia"] = st.text_input("Hierarquia do controle (eliminação, substituição, engenharia, administrativo, EPI)", value=str(original.get("hierarquia") or ""))
@@ -183,7 +183,7 @@ def tela_riscos(sb, usuario):
             if not dados["atividade"].strip():
                 st.error("Informe o nome da atividade.")
             elif dados["validacao"] == "Validada" and (dados["consequencia"] == "A validar" or not dados["cenario"].strip()):
-                st.error("Para validar, informe o cenário e a consequência prioritária.")
+                st.error("Para validar, informe o cenário e a severidade.")
             elif dados["status_acao"] == "Concluída" and not dados["evidencia"].strip():
                 st.error("Informe a evidência antes de concluir a ação.")
             else:
@@ -200,7 +200,7 @@ def tela_riscos(sb, usuario):
                     st.error(f"Não foi possível salvar: {exc}")
 
 
-ROTULOS = {"nivel_risco": "Nível de risco (matriz)", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Consequência potencial", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
+ROTULOS = {"nivel_risco": "Nível de risco (matriz)", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Severidade", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
 
 
 PADRAO = {
@@ -241,7 +241,7 @@ def preparar_alteracoes(editado, visiveis, originais):
             dados[campo] = "" if pd.isna(valor) else str(valor).strip()
         dados["consequencia"] = dados["consequencia"] or "A validar"
         if dados["consequencia"] not in CONSEQUENCIAS:
-            raise ValueError("Selecione uma consequência válida.")
+            raise ValueError("Selecione uma severidade válida.")
         if novo or any(dados.get(c) != anterior.get(c) for c in CAMPOS_GRADE):
             dados["validacao"] = "Pendente"
             alteracoes.append((cid, dados, anterior))
@@ -255,21 +255,20 @@ def preparar_alteracoes(editado, visiveis, originais):
 def mostrar_atividades(df, sb, usuario, originais):
     import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
-    st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. A severidade é calculada pela consequência; alterações voltam para validação pendente.")
-    campos = ["id", "atividade", "nivel_risco", "consequencia", "severidade", "riscos", "controles", "responsavel", "nr", "validacao"]
+    st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. A severidade pode ser editada diretamente; alterações voltam para validação pendente.")
+    campos = ["id", "atividade", "nivel_risco", "consequencia", "riscos", "controles", "responsavel", "nr", "validacao"]
     base = df[campos].copy()
     # Uma seleção ou gravação diferente nunca reutiliza deltas de outras linhas.
     assinatura = hashlib.sha256(base.to_json(orient="records").encode()).hexdigest()[:16]
     editado = st.data_editor(
         base, use_container_width=True, hide_index=True, num_rows="dynamic",
-        disabled=["id", "nivel_risco", "severidade", "validacao"],
+        disabled=["id", "nivel_risco", "validacao"],
         column_config={
             "id": None,
             "nivel_risco": st.column_config.TextColumn("Nível de risco (matriz)"),
             **{c: st.column_config.TextColumn(ROTULOS[c]) for c in ["atividade", "riscos", "controles", "responsavel", "nr"]},
             "atividade": st.column_config.TextColumn("Atividade", required=True),
-            "consequencia": st.column_config.SelectboxColumn("Consequência potencial", options=CONSEQUENCIAS),
-            "severidade": st.column_config.TextColumn("Severidade (automática)"),
+            "consequencia": st.column_config.SelectboxColumn("Severidade", options=CONSEQUENCIAS),
             "validacao": st.column_config.TextColumn("Validação operacional"),
         },
         key=f"riscos_grade_{assinatura}_{st.session_state.get('riscos_grade_versao', 0)}",
