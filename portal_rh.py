@@ -2223,7 +2223,7 @@ def abrir_ajuda_portal():
 O **Portal RH — Aracruz** foi criado para registrar e acompanhar a frequência mensal dos colaboradores de forma simples e segura.
 
 ### 1. Resumo do mês
-Na parte superior você acompanha os totais de **Faltas, Atestados, Folgas, Presenças, Liberados e Compensações**. A **Média de Colaboradores** considera somente os colaboradores classificados como **OPERACIONAL**: soma Presenças, Faltas, Atestados, Folgas, Liberados e Compensações e divide pelos dias corridos do período. Liberados e Compensações têm o mesmo peso de Folga.
+Na parte superior você acompanha os totais de **Faltas, Atestados, Folgas, Presenças, Liberados e Compensações**. A **Média de Colaboradores** soma os dias de vínculo dos colaboradores **OPERACIONAIS / CONTRATO** e divide pelos dias corridos do período (até hoje no mês atual). Admissão e desligamento entram proporcionalmente, incluindo o dia de entrada e de saída. Férias, folgas, liberados, compensações, afastamentos e dias sem lançamento continuam no quadro. Cadastros antigos sem admissão são considerados desde o início do período.
 
 ### 2. Colaboradores
 O quadro **Colaboradores** mostra o total de pessoas cadastradas e a divisão entre **Operacionais** e **Outros**. Você pode usar **Buscar colaborador** para localizar rapidamente um nome e o filtro **STATUS** para visualizar TODOS, OPERACIONAL ou OUTROS.
@@ -5221,24 +5221,44 @@ with _rankings_topo:
             "Barras na mesma escala."
         )
 
-# Média de Colaboradores — sempre considera TODOS os OPERACIONAIS, independentemente do filtro visual.
-# Soma FO + LB + COMP + FA + OK + A de todos os OPERACIONAIS e divide pelos dias transcorridos.
-# LB e COMP têm o mesmo peso de FO, preservando seus códigos na frequência.
-_codigos_recebiveis = {"FO", "LB", "COMP", "FA", "OK", "A"}
-_total_recebiveis = 0
-# Mapa com o que está salvo; depois sobrepomos o que estiver visível/pendente na grade atual.
+# Média do quadro: dias de vínculo dos OPERACIONAIS / CONTRATO.
+# Não depende do preenchimento da frequência nem do filtro visual de nome/status.
+def _media_quadro_contrato(cadastros, ano, mes, dias_periodo):
+    if dias_periodo <= 0:
+        return 0.0, []
+    inicio = date(int(ano), int(mes), 1)
+    fim = date(int(ano), int(mes), int(dias_periodo))
+    detalhes = []
+    for c in cadastros:
+        if (_classificacao_colaborador(c) != "OPERACIONAL"
+                or str(c.get("tipo_contratacao") or "").strip().upper() != "CONTRATO"):
+            continue
+        admissao = pd.to_datetime(c.get("data_admissao"), errors="coerce")
+        desligamento = pd.to_datetime(c.get("data_desligamento"), errors="coerce")
+        # Cadastro legado sem admissão: considera vínculo desde o início do período.
+        inicio_vinculo = max(inicio, admissao.date()) if pd.notna(admissao) else inicio
+        fim_vinculo = min(fim, desligamento.date()) if pd.notna(desligamento) else fim
+        dias_vinculo = max(0, (fim_vinculo - inicio_vinculo).days + 1)
+        detalhes.append({
+            "COLABORADOR": _nome_colaborador(c),
+            "ADMISSÃO": admissao.date() if pd.notna(admissao) else None,
+            "DESLIGAMENTO": desligamento.date() if pd.notna(desligamento) else None,
+            "DIAS DE VÍNCULO": dias_vinculo,
+            "DIAS DO PERÍODO": dias_periodo,
+            "CONTRIBUIÇÃO NA MÉDIA": dias_vinculo / dias_periodo,
+        })
+    return sum(d["DIAS DE VÍNCULO"] for d in detalhes) / dias_periodo, detalhes
+
+
+_media_diaria, _detalhes_media = _media_quadro_contrato(
+    _colaboradores_todos, int(ano), mes, ultimo_visivel
+)
+
+# A frequência continua alimentando exclusivamente os indicadores de ocorrências.
 _mapa_media = dict(mapa)
 for i, cid in enumerate(ids):
     for dia in range(1, ultimo_visivel + 1):
         _mapa_media[(cid, dia)] = _codigo_grade(editado.iloc[i][f"{dia:02d}"])
-for _c in _colaboradores_todos:
-    if _classificacao_colaborador(_c) != "OPERACIONAL":
-        continue
-    _cid = int(_c["id"])
-    for _dia in range(1, ultimo_visivel + 1):
-        if _codigo_grade(_mapa_media.get((_cid, _dia), "")) in _codigos_recebiveis:
-            _total_recebiveis += 1
-_media_diaria = (_total_recebiveis / ultimo_visivel) if ultimo_visivel else 0
 
 # Absenteísmo operacional: ausências / dias com frequência efetivamente apurada.
 # Folgas, desligamentos e pendências não entram no denominador.
@@ -5456,7 +5476,11 @@ with resumo_topo:
             "SPOT, não classificados, folgas, desligamentos e dias pendentes são excluídos da base. "
             "Os indicadores de frequência mantêm o escopo e os filtros atuais da grade."
         )
-        st.markdown("**Média de colaboradores:** (OK + FA + A + FO + LB + COMP) ÷ dias corridos do período, somente dos OPERACIONAIS. Liberados e Compensações contam como Folga na média, mantendo seus códigos na frequência.")
+        st.markdown("**Média de colaboradores:** soma dos dias de vínculo dos OPERACIONAIS / CONTRATO ÷ dias corridos do período (até hoje no mês atual). Conta do dia da admissão até o dia do desligamento, inclusive. Férias, folgas, liberados, compensações, afastamentos e pendências de frequência não reduzem o quadro. SPOT e OUTROS ficam fora. Cadastros antigos sem admissão contam desde o início do período. A média respeita o filtro de empresa e independe da busca por nome e do filtro de STATUS.")
+        st.write(f"Dias do período: {ultimo_visivel} · Dias de vínculo: {sum(d['DIAS DE VÍNCULO'] for d in _detalhes_media)}.")
+        if _detalhes_media:
+            st.dataframe(pd.DataFrame(_detalhes_media), use_container_width=True, hide_index=True,
+                         column_config={"CONTRIBUIÇÃO NA MÉDIA": st.column_config.NumberColumn(format="%.4f")})
         st.write(f"Base do contrato: {_abs_dias_apurados} dias apurados, {_abs_faltas} faltas e {_abs_atestados} atestados.")
         st.write(f"Mês anterior: absenteísmo {_fmt_abs(_taxa_abs_anterior)}, faltas {_fmt_abs(_taxa_faltas_anterior)}, atestados {_fmt_abs(_taxa_atestados_anterior)}.")
         st.caption("A comparação utiliza o mesmo intervalo de dias e a classificação atual dos colaboradores. Lançamentos não salvos entram no mês atual.")
