@@ -13,8 +13,8 @@ from reportlab.lib.units import mm
 from reportlab.graphics.shapes import Drawing, Rect, String
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, LongTable
 
-CATEGORIAS = ["Fatalidade possível", "Amputação possível", "Afastamento possível", "Lesão sem afastamento possível", "Baixo potencial", "A validar"]
-CORES = ["#dc2626", "#ef4444", "#eab308", "#facc15", "#16a34a", "#64748b"]
+CATEGORIAS = ["1 — Leve", "2 — Moderada", "3 — Grave / Crítica", "A validar"]
+CORES = ["#16a34a", "#eab308", "#dc2626", "#64748b"]
 
 
 def gerar_pdf_riscos(df, filtros="Todos os registros", agora=None):
@@ -75,8 +75,8 @@ def gerar_pdf_riscos(df, filtros="Todos os registros", agora=None):
                 p("Relatório gerencial e plano preventivo"),
                 p("Emitido em " + instante.strftime("%d/%m/%Y às %H:%M") + " (Brasília)"),
                 p("Filtros: " + filtros), Spacer(1, 8)]
-    criticos = sum(r.get("consequencia") in CATEGORIAS[:2] for r in registros)
-    moderados = sum(r.get("consequencia") in CATEGORIAS[2:4] for r in registros)
+    criticos = sum(r.get("consequencia") == CATEGORIAS[2] for r in registros)
+    moderados = sum(r.get("consequencia") == CATEGORIAS[1] for r in registros)
     pendentes = sum(r.get("validacao") != "Validada" for r in registros)
     metricas = Table([[p(n, "NumeroRisco") for n in [len(registros), criticos, moderados, pendentes]],
                       [p(n) for n in ["Atividades selecionadas", "Potencial crítico", "Potencial moderado", "A validar em campo"]]],
@@ -94,9 +94,9 @@ def gerar_pdf_riscos(df, filtros="Todos os registros", agora=None):
                             [[r.get("atividade", ""), r.get("acao", ""), r.get("responsavel", ""), prazo_br(r.get("prazo")), r.get("status_acao", "")] for r in registros],
                             [doc.width*f for f in [.23,.36,.16,.10,.15]]),
                      PageBreak(), p("Atividades e controles", "TituloRisco"),
-                     tabela(["Atividade / NR", "Severidade / validação", "Perigos e riscos", "Controles atuais"],
+                     tabela(["Atividade / NR", "Probabilidade / severidade / validação", "Perigos e riscos", "Controles atuais"],
                             [[str(r.get("atividade", "")) + "\nNR: " + str(r.get("nr", "")),
-                              str(r.get("consequencia", "")) + "\n" + str(r.get("validacao", "")),
+                              "P: " + str(r.get("probabilidade", "A avaliar")) + "\nS: " + str(r.get("consequencia", "")) + "\n" + str(r.get("validacao", "")),
                               r.get("riscos", ""), r.get("controles", "")] for r in registros],
                             [doc.width*f for f in [.23,.20,.27,.30]]),
                      PageBreak(), p("Cenários e reavaliação", "TituloRisco"),
