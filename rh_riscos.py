@@ -19,6 +19,9 @@ def severidade(consequencia):
 
 
 def tela_riscos(sb, usuario):
+    if str((usuario or {}).get("perfil") or "").strip().upper() != "SEGURANCA":
+        st.error("O mapa de riscos está disponível somente no acesso da Segurança.")
+        return
     st.title("🦺 Mapa de riscos e plano preventivo")
     st.caption("Base: matriz de outubro/2026 e mapeamento completo EXEMPLO 2. As consequências importadas são triagens; a Segurança deve validar cada cenário em campo.")
     st.info("Vermelho: potencial de fatalidade/amputação • Amarelo: lesões com ou sem afastamento • Verde: baixo potencial • Cinza: a validar. A cor representa a consequência potencial, não uma nova avaliação da probabilidade.")
