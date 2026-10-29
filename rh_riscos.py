@@ -72,7 +72,7 @@ def tela_riscos(sb, usuario):
         else:
             st.info("Nenhuma atividade para os filtros selecionados.")
         st.subheader("Exportar relatório")
-        st.caption("PDF com indicadores, gráficos, atividades e plano de ação da seleção atual. Salve as edições da tabela antes de exportar.")
+        st.caption("PDF ou Excel formatado com indicadores, gráficos, atividades e plano de ação da seleção atual. Salve as edições da tabela antes de exportar.")
         if not view.empty:
             from rh_riscos_export import gerar_pdf_riscos
             filtros_pdf = f"Busca: {busca or 'Todas'} | Consequência: {categoria} | Validação: {validacao}"
@@ -83,6 +83,15 @@ def tela_riscos(sb, usuario):
                 data=gerar_pdf_riscos(view, filtros_pdf),
                 file_name=f"mapa_de_riscos_{date.today():%Y-%m-%d}.pdf",
                 mime="application/pdf", key="riscos_baixar_pdf",
+            )
+        if not view.empty:
+            from rh_riscos_excel import gerar_excel_riscos
+            st.download_button(
+                "📊 Baixar Excel formatado com gráficos",
+                data=gerar_excel_riscos(view, filtros_pdf),
+                file_name=f"mapa_de_riscos_{date.today():%Y-%m-%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="riscos_baixar_excel",
             )
         mostrar_atividades(view, sb, usuario, linhas)
     with plano:
