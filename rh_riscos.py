@@ -6,6 +6,7 @@ import altair as alt
 
 CONSEQUENCIAS = ["1 — Leve", "2 — Moderada", "3 — Grave / Crítica", "A validar"]
 PROBABILIDADES = ["1 — Baixa", "2 — Média", "3 — Alta", "A avaliar"]
+FREQUENCIAS = ["Diária", "Semanal", "Mensal"]
 NIVEIS_RISCO = ["Alto", "Médio", "Baixo", "A validar"]
 CORES_NIVEIS = ["#dc2626", "#eab308", "#16a34a", "#64748b"]
 
@@ -23,6 +24,11 @@ def normalizar_severidade(valor):
         "Lesão sem afastamento possível": "1 — Leve",
         "Baixo potencial": "1 — Leve",
     }.get(texto, "A validar")
+
+
+def normalizar_frequencia(valor):
+    texto = str(valor or "").strip()
+    return texto or "Diária"
 
 
 def normalizar_probabilidade(valor):
@@ -110,6 +116,7 @@ def tela_riscos(sb, usuario):
     if preliminares:
         st.caption(f"{preliminares} atividade(s) com probabilidade preliminar, pendente de revisão em campo pela Segurança. A justificativa está na aba Validar / editar atividade.")
     df = pd.DataFrame(linhas, columns=list(PADRAO) + ["id"])
+    df["frequencia_atividade"] = df["frequencia_atividade"].fillna("Diária").replace("", "Diária")
     df["consequencia"] = df["consequencia"].map(normalizar_severidade)
     df["probabilidade"] = df["probabilidade"].map(normalizar_probabilidade)
     df["severidade"] = df["consequencia"].map(severidade)
@@ -244,6 +251,8 @@ def tela_riscos(sb, usuario):
                 st.info("Probabilidade preliminar: " + str(original.get("justificativa_probabilidade") or "Revisar em campo."))
             dados = dict(original)
             dados["atividade"] = st.text_input("Nome da atividade", value=str(original.get("atividade") or ""))
+            freq_atual = normalizar_frequencia(original.get("frequencia_atividade"))
+            dados["frequencia_atividade"] = st.selectbox("Frequência da atividade", FREQUENCIAS, index=FREQUENCIAS.index(freq_atual) if freq_atual in FREQUENCIAS else 0)
             dados["nr"] = st.text_input("NR informada na matriz", value=str(original.get("nr") or ""))
             for campo in ["riscos", "controles", "cenario", "lacuna", "acao"]:
                 dados[campo] = st.text_area(ROTULOS[campo], value=str(original.get(campo) or ""))
@@ -285,18 +294,18 @@ def tela_riscos(sb, usuario):
                     st.error(f"Não foi possível salvar: {exc}")
 
 
-ROTULOS = {"pontuacao_risco": "Pontuação (P × S)","probabilidade": "Probabilidade (P)","nivel_risco": "Nível de risco", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Severidade", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
+ROTULOS = {"frequencia_atividade": "Frequência da atividade","pontuacao_risco": "Pontuação (P × S)","probabilidade": "Probabilidade (P)","nivel_risco": "Nível de risco", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Severidade", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
 
 
 PADRAO = {
-    "atividade": "", "riscos": "", "controles": "", "responsavel": "", "nr": "",
+    "frequencia_atividade": "Diária", "atividade": "", "riscos": "", "controles": "", "responsavel": "", "nr": "",
     "probabilidade": "A avaliar", "consequencia": "A validar", "validacao": "Pendente", "cenario": "",
     "lacuna": "", "acao": "", "hierarquia": "", "prazo": None,
     "status_acao": "Não iniciada", "evidencia": "",
     "probabilidade_residual": "Não avaliada", "severidade_residual": "Não avaliada",
     "nivel_residual": "Não avaliado", "pontuacao_risco": None, "nivel_risco": None, "classificacao_original": "", "severidade_original": "",
 }
-CAMPOS_GRADE = ["probabilidade", "validacao", "atividade", "consequencia", "riscos", "controles", "responsavel", "nr"]
+CAMPOS_GRADE = ["frequencia_atividade", "probabilidade", "validacao", "atividade", "consequencia", "riscos", "controles", "responsavel", "nr"]
 
 
 def preparar_alteracoes(editado, visiveis, originais):
@@ -324,6 +333,9 @@ def preparar_alteracoes(editado, visiveis, originais):
         for campo in CAMPOS_GRADE:
             valor = linha.get(campo)
             dados[campo] = "" if pd.isna(valor) else str(valor).strip()
+        dados["frequencia_atividade"] = normalizar_frequencia(dados["frequencia_atividade"])
+        if dados["frequencia_atividade"] not in FREQUENCIAS:
+            raise ValueError("Selecione uma frequência válida: Diária, Semanal ou Mensal.")
         dados["probabilidade"] = dados["probabilidade"] or "A avaliar"
         if dados["probabilidade"] not in PROBABILIDADES:
             raise ValueError("Selecione uma probabilidade válida.")
@@ -334,7 +346,7 @@ def preparar_alteracoes(editado, visiveis, originais):
         dados["validacao"] = dados["validacao"] or "Pendente"
         if dados["validacao"] not in ("Pendente", "Validada"):
             raise ValueError("Selecione uma validação operacional válida.")
-        if novo or any(dados.get(c) != (normalizar_severidade(anterior.get(c)) if c == "consequencia" else normalizar_probabilidade(anterior.get(c)) if c == "probabilidade" else anterior.get(c)) for c in CAMPOS_GRADE):
+        if novo or any(dados.get(c) != (normalizar_severidade(anterior.get(c)) if c == "consequencia" else normalizar_probabilidade(anterior.get(c)) if c == "probabilidade" else normalizar_frequencia(anterior.get(c)) if c == "frequencia_atividade" else anterior.get(c)) for c in CAMPOS_GRADE):
             if dados["validacao"] == "Validada" and (
                 dados["consequencia"] == "A validar" or dados["probabilidade"] == "A avaliar" or not str(dados.get("cenario") or "").strip()
             ):
@@ -351,10 +363,11 @@ def mostrar_atividades(df, sb, usuario, originais):
     import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
     st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. Probabilidade, severidade e validação operacional são editáveis. Pontuação e nível de risco são calculados ao salvar. Para marcar Validada, informe a probabilidade, a severidade e o cenário na aba Validar / editar atividade.")
-    campos = ["id", "atividade", "probabilidade", "consequencia", "pontuacao_risco", "nivel_risco", "validacao", "riscos", "controles", "responsavel", "nr"]
+    campos = ["id", "atividade", "frequencia_atividade", "probabilidade", "consequencia", "pontuacao_risco", "nivel_risco", "validacao", "riscos", "controles", "responsavel", "nr"]
     base = df[campos].copy()
     # Categorias explícitas mantêm os três campos como seletores no editor.
     for campo, opcoes in (
+        ("frequencia_atividade", FREQUENCIAS),
         ("probabilidade", PROBABILIDADES),
         ("consequencia", CONSEQUENCIAS),
         ("validacao", ["Pendente", "Validada"]),
@@ -367,6 +380,7 @@ def mostrar_atividades(df, sb, usuario, originais):
         disabled=["id", "pontuacao_risco", "nivel_risco"],
         column_config={
             "id": None,
+            "frequencia_atividade": st.column_config.SelectboxColumn("Frequência da atividade", options=FREQUENCIAS, default="Diária", required=True),
             "probabilidade": st.column_config.SelectboxColumn("Probabilidade (P)", options=PROBABILIDADES),
             "nivel_risco": st.column_config.TextColumn("Nível de risco (automático)"),
             "pontuacao_risco": st.column_config.NumberColumn("P × S", format="%d"),
