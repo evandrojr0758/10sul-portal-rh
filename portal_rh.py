@@ -5118,6 +5118,40 @@ for coluna in colunas_dia:
         if codigo in contagens:
             contagens[codigo] += 1
 
+# Totais no rodapé de cada dia, com o mesmo escopo da grade visível.
+def _resumo_diario_frequencia(grade, dias):
+    grupos = [
+        ("Folgas", {"FO", "LB", "COMP"}),
+        ("Presenças", {"OK"}),
+        ("Faltas", {"FA"}),
+        ("Atestados", {"A"}),
+        ("Férias", {"FE"}),
+    ]
+    codigos = {
+        dia: [_codigo_grade(v) for v in grade[dia].tolist()]
+        for dia in dias
+    }
+    return pd.DataFrame([
+        {"RESUMO DO DIA": rotulo, **{
+            dia: sum(codigo in grupo for codigo in codigos[dia]) for dia in dias
+        }}
+        for rotulo, grupo in grupos
+    ], columns=["RESUMO DO DIA"] + list(dias))
+
+
+st.markdown("#### Totais por dia")
+st.dataframe(
+    _resumo_diario_frequencia(editado, colunas_dia),
+    use_container_width=True,
+    hide_index=True,
+    height=212,
+    column_config={
+        "RESUMO DO DIA": st.column_config.TextColumn("RESUMO DO DIA", width="medium", pinned=True),
+        **{dia: st.column_config.NumberColumn(dia, width="small", format="%d") for dia in colunas_dia},
+    },
+)
+st.caption("Totais dos colaboradores exibidos na grade, conforme os filtros atuais. Folgas incluem FO, LB e COMP. Pendentes e DEM não entram nos totais.")
+
 # Ranking combinado por colaborador — Faltas x Atestados.
 # Obedece ao filtro TODOS / OPERACIONAL / OUTROS e considera também alterações ainda não salvas.
 _rank_ocorrencias = []
