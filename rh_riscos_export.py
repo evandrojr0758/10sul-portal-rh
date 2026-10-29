@@ -95,7 +95,7 @@ def gerar_pdf_riscos(df, filtros="Todos os registros", agora=None):
                             [doc.width*f for f in [.23,.36,.16,.10,.15]]),
                      PageBreak(), p("Atividades e controles", "TituloRisco"),
                      tabela(["Atividade / NR", "P / S / risco / validação", "Perigos e riscos", "Controles atuais"],
-                            [[str(r.get("atividade", "")) + "\nNR: " + str(r.get("nr", "")),
+                            [[str(r.get("atividade", "")) + "\nFrequência: " + str(r.get("frequencia_atividade") or "Diária") + "\nNR: " + str(r.get("nr", "")),
                               "P: " + str(r.get("probabilidade", "A avaliar")) + "\nS: " + str(r.get("consequencia", "")) + "\nP × S: " + str(r.get("pontuacao_risco") or "—") + " | " + str(r.get("nivel_risco", "A validar")) + "\n" + str(r.get("validacao", "")),
                               r.get("riscos", ""), r.get("controles", "")] for r in registros],
                             [doc.width*f for f in [.23,.20,.27,.30]]),
