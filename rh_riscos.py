@@ -5,6 +5,9 @@ import streamlit as st
 import altair as alt
 
 CONSEQUENCIAS = ["Fatalidade possível", "Amputação possível", "Afastamento possível", "Lesão sem afastamento possível", "Baixo potencial", "A validar"]
+NIVEIS_RISCO = ["Alto", "Médio", "Baixo", "A validar"]
+CORES_NIVEIS = ["#dc2626", "#eab308", "#16a34a", "#64748b"]
+
 CORES = ["#dc2626", "#ef4444", "#eab308", "#facc15", "#16a34a", "#64748b"]
 
 
@@ -16,6 +19,36 @@ def severidade(consequencia):
     if consequencia == "Baixo potencial":
         return "BAIXA"
     return "A VALIDAR"
+
+
+def nivel_risco(valor):
+    texto = str(valor or "").strip().casefold()
+    return {"alto": "Alto", "médio": "Médio", "medio": "Médio", "baixo": "Baixo"}.get(texto, "A validar")
+
+
+def grafico_niveis(df):
+    contagem = (df.groupby("nivel_risco").size()
+                .reindex(NIVEIS_RISCO, fill_value=0)
+                .rename_axis("nivel_risco").reset_index(name="atividades"))
+    clique = alt.selection_point(
+        name="nivel", fields=["nivel_risco"], on="click",
+        clear="dblclick", toggle="true",
+    )
+    base = alt.Chart(contagem).encode(
+        x=alt.X("atividades:Q", title="Quantidade de atividades", axis=alt.Axis(tickMinStep=1),
+                scale=alt.Scale(domain=[0, max(1, int(contagem["atividades"].max())) * 1.15])),
+        y=alt.Y("nivel_risco:N", title="Nível de risco", sort=NIVEIS_RISCO),
+        tooltip=[alt.Tooltip("nivel_risco:N", title="Nível de risco"),
+                 alt.Tooltip("atividades:Q", title="Atividades", format="d")],
+    )
+    barras = base.mark_bar(cornerRadiusEnd=5).encode(
+        color=alt.Color("nivel_risco:N", scale=alt.Scale(domain=NIVEIS_RISCO, range=CORES_NIVEIS), legend=None),
+        opacity=alt.condition(clique, alt.value(1), alt.value(0.45)),
+    ).add_params(clique)
+    rotulos = base.mark_text(align="left", baseline="middle", dx=6, fontWeight="bold").encode(
+        text=alt.Text("atividades:Q", format="d"),
+    )
+    return (barras + rotulos).properties(height=220)
 
 
 def tela_riscos(sb, usuario):
@@ -34,6 +67,7 @@ def tela_riscos(sb, usuario):
     df = pd.DataFrame(linhas, columns=list(PADRAO) + ["id"])
     df["consequencia"] = df["consequencia"].fillna("A validar")
     df["severidade"] = df["consequencia"].map(severidade)
+    df["nivel_risco"] = df["classificacao_original"].map(nivel_risco)
     painel, plano, editar = st.tabs(["Painel e atividades", "Plano de ação", "Validar / editar atividade"])
     with painel:
         cols = st.columns(4)
@@ -71,6 +105,19 @@ def tela_riscos(sb, usuario):
             st.caption("Clique em uma barra para filtrar as atividades. Clique novamente na mesma barra para remover a seleção e mostrar todas. Cada atividade é contada uma vez, pela consequência prioritária da triagem.")
         else:
             st.info("Nenhuma atividade para os filtros selecionados.")
+        st.subheader("Atividades por nível de risco")
+        st.caption("Nível de risco informado na matriz de origem: Alto, Médio ou Baixo. Atividades sem classificação aparecem como A validar.")
+        evento_nivel = st.altair_chart(
+            grafico_niveis(view), use_container_width=True,
+            on_select="rerun", key="riscos_grafico_niveis",
+        )
+        niveis_selecionados = [
+            p["nivel_risco"] for p in evento_nivel.get("selection", {}).get("nivel", [])
+            if "nivel_risco" in p
+        ]
+        if niveis_selecionados:
+            view = view[view["nivel_risco"].isin(niveis_selecionados)]
+        st.caption("Clique em uma barra para filtrar as atividades por nível. Clique novamente para remover a seleção.")
         st.subheader("Exportar relatório")
         st.caption("PDF ou Excel formatado com indicadores, gráficos, atividades e plano de ação da seleção atual. Salve as edições da tabela antes de exportar.")
         if not view.empty:
@@ -78,6 +125,8 @@ def tela_riscos(sb, usuario):
             filtros_pdf = f"Busca: {busca or 'Todas'} | Consequência: {categoria} | Validação: {validacao}"
             if selecionadas:
                 filtros_pdf += " | Gráfico: " + ", ".join(categorias)
+            if niveis_selecionados:
+                filtros_pdf += " | Nível de risco: " + ", ".join(niveis_selecionados)
             st.download_button(
                 "📄 Baixar relatório com gráficos (PDF)",
                 data=gerar_pdf_riscos(view, filtros_pdf),
@@ -151,7 +200,7 @@ def tela_riscos(sb, usuario):
                     st.error(f"Não foi possível salvar: {exc}")
 
 
-ROTULOS = {"atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Consequência potencial", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
+ROTULOS = {"nivel_risco": "Nível de risco (matriz)", "atividade": "Atividade", "riscos": "Perigos / riscos", "controles": "Controles atuais", "cenario": "Cenário de acidente / exposição", "consequencia": "Consequência potencial", "severidade": "Severidade", "validacao": "Validação operacional", "responsavel": "Responsável", "nr": "NR informada na matriz", "lacuna": "Lacuna identificada em campo", "acao": "Ação adicional proposta", "hierarquia": "Hierarquia do controle", "prazo": "Prazo", "status_acao": "Status da ação", "evidencia": "Evidência / reavaliação", "probabilidade_residual": "Probabilidade residual", "severidade_residual": "Severidade residual", "nivel_residual": "Nível residual"}
 
 
 PADRAO = {
@@ -207,15 +256,16 @@ def mostrar_atividades(df, sb, usuario, originais):
     import hashlib
     st.subheader(f"Atividades selecionadas ({len(df)})")
     st.caption("Edite as células, use a última linha para acrescentar e selecione uma linha para excluir. Clique em Salvar alterações. A severidade é calculada pela consequência; alterações voltam para validação pendente.")
-    campos = ["id", "atividade", "consequencia", "severidade", "riscos", "controles", "responsavel", "nr", "validacao"]
+    campos = ["id", "atividade", "nivel_risco", "consequencia", "severidade", "riscos", "controles", "responsavel", "nr", "validacao"]
     base = df[campos].copy()
     # Uma seleção ou gravação diferente nunca reutiliza deltas de outras linhas.
     assinatura = hashlib.sha256(base.to_json(orient="records").encode()).hexdigest()[:16]
     editado = st.data_editor(
         base, use_container_width=True, hide_index=True, num_rows="dynamic",
-        disabled=["id", "severidade", "validacao"],
+        disabled=["id", "nivel_risco", "severidade", "validacao"],
         column_config={
             "id": None,
+            "nivel_risco": st.column_config.TextColumn("Nível de risco (matriz)"),
             **{c: st.column_config.TextColumn(ROTULOS[c]) for c in ["atividade", "riscos", "controles", "responsavel", "nr"]},
             "atividade": st.column_config.TextColumn("Atividade", required=True),
             "consequencia": st.column_config.SelectboxColumn("Consequência potencial", options=CONSEQUENCIAS),
