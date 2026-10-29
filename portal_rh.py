@@ -4481,14 +4481,17 @@ if bool(st.session_state["usuario_logado"].get("trocar_senha", False)):
     st.stop()
 
 _perfil_atual = str(st.session_state["usuario_logado"].get("perfil") or "").upper()
+# O perfil Segurança abre sua área mesmo quando o link conserva outra rota.
+if _perfil_atual == "SEGURANCA":
+    st.query_params.pop("precificacao", None)
+    st.query_params.pop("agenda", None)
+    tela_dna_seguranca()
+    st.stop()
 if str(st.query_params.get("precificacao") or "") == "1" and _perfil_atual != "ADMIN":
     st.error("A precificação está disponível somente para o perfil Administrador.")
     st.stop()
 if str(st.query_params.get("agenda") or "") == "1" and _perfil_atual != "ADMIN":
     st.error("A agenda está disponível somente para o perfil Administrador.")
-    st.stop()
-if _perfil_atual == "SEGURANCA":
-    tela_dna_seguranca()
     st.stop()
 if _perfil_atual not in ("RH", "ADMIN"):
     st.error("Seu perfil não possui acesso a este portal.")
