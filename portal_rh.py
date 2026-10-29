@@ -1413,9 +1413,11 @@ def _admissao_gratificacao(data_admissao, ano, mes):
         admissao_iso = venc_data_iso(data_admissao)
         admissao = date.fromisoformat(admissao_iso) if admissao_iso else None
     except (ValueError, TypeError, OverflowError):
-        admissao = None
+        return None, "Corrigir a data de admissão inválida no cadastro"
     if admissao is None:
-        return None, "Informar data de admissão no cadastro para validar o mínimo de 30 dias"
+        # Cadastros antigos podem permanecer sem data durante a atualização.
+        # Novas inclusões exigem a data na função cadastrar_colaborador.
+        return True, ""
     dias = (referencia - admissao).days
     if dias < 0:
         return False, f"Admissão em {admissao:%d/%m/%Y}, posterior à competência"
@@ -1433,7 +1435,7 @@ def tela_apuracao_gratificacao():
     mes_g=g1.selectbox("Mês da apuração", range(1,13), index=hoje.month-1, format_func=lambda x: meses_g[x-1], key="grat_mes")
     ano_g=int(g2.number_input("Ano da apuração", min_value=2025, max_value=2100, value=hoje.year, step=1, key="grat_ano"))
     g3.markdown(f"### {meses_g[mes_g-1].upper()} / {ano_g}")
-    st.caption("Em todas as frentes, a bonificação exige 30 dias completos de admissão até o último dia do mês da apuração. Férias (FE) registradas em qualquer dia do mês zeram a bonificação. Sem data de admissão, a apuração fica pendente, salvo quando já estiver zerada por férias.")
+    st.caption("Em todas as frentes, a bonificação exige 30 dias completos de admissão até o último dia do mês da apuração. Férias (FE) registradas em qualquer dia do mês zeram a bonificação. A data de admissão é obrigatória somente nos novos cadastros; colaboradores antigos sem data não ficam pendentes por esse motivo.")
     try:
         regras=ler_regras_gratificacao(); freq=ler_frequencia(ano_g,mes_g)
         colabs=sb("GET","rh_colaboradores","select=*&order=colaborador.asc") or []
@@ -6043,7 +6045,7 @@ with st.expander("👥 Cadastro de colaboradores"):
                     format="DD/MM/YYYY",
                 ),
                 "data_admissao": st.column_config.DateColumn(
-                    "Data de admissão", format="DD/MM/YYYY", required=True,
+                    "Data de admissão", format="DD/MM/YYYY", required=False,
                     min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
                 ),
             },
@@ -6123,8 +6125,6 @@ with st.expander("👥 Cadastro de colaboradores"):
             atuais = {str(c["id"]): c for c in (sb("GET", "rh_colaboradores", "select=*") or [])}
             for linha, *_ in alteracoes:
                 cid = str(linha["id"])
-                if not venc_data_iso(linha.get("data_admissao")):
-                    raise ValueError(f"Informe a data de admissão de {linha.get('colaborador') or cid} antes de salvar.")
                 anterior = original_cadastro[cid]
                 atual = atuais.get(cid)
                 if atual is None or any(atual.get(k) != anterior.get(k) for k in ("ativo", "status", "data_admissao", "data_desligamento", "motivo_desligamento", "observacao_desligamento")):
