@@ -6,7 +6,7 @@ import altair as alt
 
 CONSEQUENCIAS = ["1 — Leve", "2 — Moderada", "3 — Grave / Crítica", "A validar"]
 PROBABILIDADES = ["1 — Baixa", "2 — Média", "3 — Alta", "A avaliar"]
-FREQUENCIAS = ["Diária", "Semanal", "Mensal"]
+FREQUENCIAS = ["Diária", "Semanal", "Mensal", "Sob demanda"]
 NIVEIS_RISCO = ["Alto", "Médio", "Baixo", "A validar"]
 CORES_NIVEIS = ["#dc2626", "#eab308", "#16a34a", "#64748b"]
 
@@ -346,7 +346,7 @@ def preparar_alteracoes(editado, visiveis, originais):
             dados[campo] = "" if pd.isna(valor) else str(valor).strip()
         dados["frequencia_atividade"] = normalizar_frequencia(dados["frequencia_atividade"])
         if dados["frequencia_atividade"] not in FREQUENCIAS:
-            raise ValueError("Selecione uma frequência válida: Diária, Semanal ou Mensal.")
+            raise ValueError("Selecione uma frequência válida: Diária, Semanal, Mensal ou Sob demanda.")
         dados["probabilidade"] = dados["probabilidade"] or "A avaliar"
         if dados["probabilidade"] not in PROBABILIDADES:
             raise ValueError("Selecione uma probabilidade válida.")
