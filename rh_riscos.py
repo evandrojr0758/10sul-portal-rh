@@ -407,6 +407,10 @@ def mostrar_atividades(df, sb, usuario, originais):
         st.caption(f"Não foi possível atualizar a frequência observada: {exc}")
     campos = ["id", "atividade", "frequencia_atividade", "frequencia_observada", "probabilidade", "consequencia", "pontuacao_risco", "nivel_risco", "validacao", "riscos", "validadores", "controles", "responsavel", "nr"]
     base = df[campos].copy()
+    # Campos novos em registros antigos podem chegar como NaN numérico.
+    # O editor TextColumn precisa receber colunas de texto, mesmo quando vazias.
+    for campo in ["atividade", "frequencia_observada", "nivel_risco", "riscos", "validadores", "controles", "responsavel", "nr"]:
+        base[campo] = base[campo].fillna("").map(str).astype(object)
     # Categorias explícitas mantêm os três campos como seletores no editor.
     for campo, opcoes in (
         ("frequencia_atividade", FREQUENCIAS),
@@ -579,15 +583,55 @@ def evolucao_riscos(regs):
 
 
 def mostrar_evolucao(regs):
-    with st.expander('Evolução do mapa de risco'):
-        st.caption('Evolução por nível calculado (P × S), baseada nas alterações registradas. Atividades sem histórico entram na data da consulta; inclusão/exclusão também altera os totais. Baixo corresponde ao nível leve da matriz.')
+    with st.expander("Evolução do mapa de risco", expanded=False):
+        st.caption("Cada ponto representa o fechamento de um dia, com a quantidade de atividades em cada nível. Vermelho = alto; amarelo = médio; verde = baixo; cinza = a validar. A queda do alto pode refletir reclassificação ou exclusão, não comprova sozinha uma melhoria de segurança.")
         dados = evolucao_riscos(regs)
         if dados.empty:
-            st.info('Ainda não há estados registrados para comparação.')
+            st.info("Ainda não há estados registrados para comparação.")
             return
-        dados['em'] = pd.to_datetime(dados['em'],utc=True).dt.tz_convert('America/Sao_Paulo')
-        st.altair_chart(alt.Chart(dados).mark_line(point=True,interpolate='step-after').encode(
-            x=alt.X('em:T',title='Data / hora'),y=alt.Y('atividades:Q',title='Atividades',axis=alt.Axis(tickMinStep=1)),
-            color=alt.Color('nivel:N',scale=alt.Scale(domain=NIVEIS_RISCO,range=CORES_NIVEIS)),
-            tooltip=['em:T','nivel:N','atividades:Q']),use_container_width=True)
-        st.download_button('Baixar evolução (CSV)',dados.to_csv(index=False,sep=';').encode('utf-8-sig'),'evolucao_riscos.csv','text/csv')
+        dados["em"] = pd.to_datetime(dados["em"], utc=True, format="ISO8601").dt.tz_convert("America/Sao_Paulo")
+        dados = dados.sort_values("em")
+        dados["dia"] = dados["em"].dt.strftime("%d/%m/%Y")
+        diario = dados.groupby(["dia", "nivel"], sort=False).tail(1).copy()
+        diario["ordem"] = diario["em"].dt.strftime("%Y-%m-%d")
+        datas = diario.sort_values("ordem")["dia"].drop_duplicates().tolist()
+        primeiro = diario[diario["dia"].eq(datas[0])].set_index("nivel")["atividades"]
+        ultimo = diario[diario["dia"].eq(datas[-1])].set_index("nivel")["atividades"]
+        resumo = pd.DataFrame([{"Nível de risco": n, "Inicial": int(primeiro.get(n, 0)),
+                                "Atual": int(ultimo.get(n, 0)),
+                                "Variação": int(ultimo.get(n, 0) - primeiro.get(n, 0))}
+                               for n in NIVEIS_RISCO])
+        st.write(f"Comparação: fechamento de {datas[0]} × {datas[-1]}")
+        st.dataframe(resumo, hide_index=True, use_container_width=True)
+        st.caption("Variação negativa = menos atividades naquele nível. Os primeiros registros podem representar a classificação inicial de atividades que estavam A validar.")
+        st.altair_chart(alt.Chart(diario).mark_line(point=True, interpolate="step-after").encode(
+            x=alt.X("dia:N", sort=datas, title="Data", axis=alt.Axis(labelAngle=-30)),
+            y=alt.Y("atividades:Q", title="Quantidade de atividades", axis=alt.Axis(tickMinStep=1)),
+            color=alt.Color("nivel:N", title="Nível de risco", scale=alt.Scale(domain=NIVEIS_RISCO, range=CORES_NIVEIS)),
+            tooltip=[alt.Tooltip("dia:N", title="Data"), alt.Tooltip("nivel:N", title="Nível de risco"),
+                     alt.Tooltip("atividades:Q", title="Atividades", format="d")]), use_container_width=True)
+        mudancas = []
+        ordem = {"Baixo": 1, "Médio": 2, "Alto": 3}
+        for r in regs:
+            atual = r.get("dados") or {}
+            hist = sorted([h for h in atual.get("historico", []) if h.get("em")], key=lambda h: h["em"])
+            for i, h in enumerate(hist):
+                antes = h.get("antes") or {}
+                depois = hist[i+1].get("antes", {}) if i+1 < len(hist) else atual
+                if not antes or antes.get("excluido") or depois.get("excluido"):
+                    continue
+                de = calcular_risco(antes.get("probabilidade"), antes.get("consequencia"))[1]
+                para = calcular_risco(depois.get("probabilidade"), depois.get("consequencia"))[1]
+                if de in ordem and para in ordem and de != para:
+                    mudancas.append({"Data": pd.to_datetime(h["em"], utc=True).tz_convert("America/Sao_Paulo").strftime("%d/%m/%Y %H:%M"),
+                                     "Atividade": depois.get("atividade") or antes.get("atividade", ""),
+                                     "Antes": de, "Depois": para,
+                                     "Evolução": "Redução de risco" if ordem[para] < ordem[de] else "Aumento de risco"})
+        if mudancas:
+            st.write("Reclassificações de risco registradas")
+            st.dataframe(pd.DataFrame(mudancas), hide_index=True, use_container_width=True)
+        else:
+            st.info("Ainda não há reclassificações entre níveis conhecidos no histórico. A classificação inicial não é contada como redução de risco.")
+        st.download_button("Baixar evolução diária (CSV)",
+                           diario[["dia", "nivel", "atividades"]].rename(columns={"dia": "Data", "nivel": "Nível de risco", "atividades": "Atividades"}).to_csv(index=False, sep=";").encode("utf-8-sig"),
+                           "evolucao_riscos.csv", "text/csv")
