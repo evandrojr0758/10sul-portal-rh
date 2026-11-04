@@ -2000,6 +2000,10 @@ def tela_apuracao_gratificacao():
 def tela_dna_seguranca():
     st.title("🦺 Portal da Segurança do Trabalho")
     usr=st.session_state.get("usuario_logado") or {}
+    if str(st.query_params.get("consulta_riscos", "")) == "1":
+        import rh_riscos
+        rh_riscos.tela_riscos(sb, usr, somente_consulta=True)
+        return
     area_seguranca = st.radio(
         "Área da Segurança", ["Controle de DNA", "Mapa de riscos e plano preventivo"],
         horizontal=True, key="seguranca_area",
@@ -6379,6 +6383,7 @@ else:
     st.caption("Nenhuma observação de LB/COMP registrada neste mês.")
 
 st.caption("Desenvolvido para 10 Sul • Portal RH")
+
 
 
 
