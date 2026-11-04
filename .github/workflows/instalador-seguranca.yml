@@ -5,6 +5,7 @@ on:
     paths:
       - 'installer/**'
       - 'seguranca_desktop.py'
+      - 'rh_riscos*.py'
       - 'rh_dna_local.py'
       - 'rh_dna_offline.py'
       - '.github/workflows/instalador-seguranca.yml'
