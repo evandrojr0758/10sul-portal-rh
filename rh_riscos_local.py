@@ -1,5 +1,6 @@
 """Base principal local SQLite, publicação no online com detecção de conflitos."""
 import json, sqlite3, uuid, threading
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -19,10 +20,15 @@ class BaseLocal:
                 for r in seed or []:
                     c.execute('INSERT INTO atividades VALUES (?,?,?,0)',(int(r['id']),canon(r),canon(r)))
                 c.execute("INSERT INTO meta VALUES ('iniciada','1')")
+    @contextmanager
     def db(self):
         c=sqlite3.connect(self.path,timeout=20)
-        c.execute('PRAGMA journal_mode=WAL')
-        return c
+        try:
+            c.execute('PRAGMA journal_mode=WAL')
+            with c:
+                yield c
+        finally:
+            c.close()
     def __call__(self, method, tabela, params='', payload=None, prefer=None):
         if tabela != TABELA:
             if method=='GET': return []
