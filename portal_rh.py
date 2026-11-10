@@ -2585,7 +2585,7 @@ def _carregar_fechamento_cmc(ano, mes):
     if payload:
         st.session_state[f"cmc_estado_salvo_{ano}_{mes}"] = payload.get("estado", {})
         for key, value in payload.get("estado", {}).items():
-            if key in _chaves_cmc(ano, mes) or key in ("cadastro_funcoes_cmc_bahia", "cadastro_valores_cmc_bahia"):
+            if key in _chaves_cmc(ano, mes) or key == "cadastro_valores_cmc_bahia":
                 # Preserva conferências já realizadas na sessão antes desta atualização.
                 if key not in st.session_state:
                     st.session_state[key] = pd.read_json(StringIO(value["dataframe"]), orient="split") if isinstance(value, dict) and "dataframe" in value else value
@@ -2600,9 +2600,14 @@ def _nome_cmc(txt):
     return re.sub(r"\s+", " ", str(txt or "").strip().upper())
 
 def _funcoes_cmc_ativas():
-    """Cadastro CMC Bahia isolado do cadastro de Aracruz."""
-    if "cadastro_funcoes_cmc_bahia" not in st.session_state:
-        st.session_state["cadastro_funcoes_cmc_bahia"] = dict(_FUNCOES_CMC)
+    """Cadastro CMC Bahia independente das competencias e do cadastro de Aracruz."""
+    if not st.session_state.get("cmc_funcoes_globais_carregadas"):
+        salvo = _storage_cmc("GET", f"object/{_CMC_BUCKET}/cadastro-colaboradores.json")
+        funcoes = dict(_FUNCOES_CMC)
+        if isinstance(salvo, dict):
+            funcoes.update({_nome_cmc(n): _nome_cmc(f) for n, f in salvo.items() if _nome_cmc(n) and _nome_cmc(f)})
+        st.session_state["cadastro_funcoes_cmc_bahia"] = funcoes
+        st.session_state["cmc_funcoes_globais_carregadas"] = True
     return st.session_state["cadastro_funcoes_cmc_bahia"]
 
 def _valores_cmc_ativos():
@@ -2634,8 +2639,23 @@ def _modal_cadastro_colaboradores_cmc():
                 funcao = _nome_cmc(row.get("FUNÇÃO"))
                 if nome and funcao:
                     novo[nome] = funcao
-            st.session_state["cadastro_funcoes_cmc_bahia"] = novo
-            st.success("Registro efetuado com sucesso!")
+            try:
+                if not novo:
+                    raise ValueError("O cadastro nao pode ser salvo vazio.")
+                buckets = _storage_cmc("GET", "bucket") or []
+                if not any(b.get("id") == _CMC_BUCKET for b in buckets):
+                    _storage_cmc("POST", "bucket", {"id": _CMC_BUCKET, "name": _CMC_BUCKET, "public": False})
+                caminho = f"object/{_CMC_BUCKET}/cadastro-colaboradores.json"
+                _storage_cmc("POST", caminho, novo)
+                confirmado = _storage_cmc("GET", caminho)
+                if confirmado != novo:
+                    raise RuntimeError("A gravacao do cadastro nao foi confirmada.")
+            except Exception as exc:
+                st.error(f"Cadastro nao salvo: {exc}")
+            else:
+                st.session_state["cadastro_funcoes_cmc_bahia"] = novo
+                st.session_state["cmc_funcoes_globais_carregadas"] = True
+                st.success("Cadastro CMC Bahia salvo e confirmado no Supabase!")
     _abrir()
 
 def _modal_valores_funcoes_cmc():
