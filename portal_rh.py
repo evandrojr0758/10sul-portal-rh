@@ -5577,22 +5577,29 @@ with resumo_topo:
     _quadro_base = [c for c in _colaboradores_quadro_atual
                     if _filtro_empresa == "TODAS" or _empresa_colaborador(c, visual=True) == _filtro_empresa]
     _quadro_frequencia = {}
+    _quadro_referencia = None
     _quadro_erro = False
     try:
-        _quadro_offset = 0
-        while True:
-            _quadro_lote = sb("GET", "rh_frequencia",
-                f"select=colaborador_id,ocorrencia_id&data=eq.{hoje.isoformat()}"
-                f"&order=colaborador_id.asc&limit=1000&offset={_quadro_offset}") or []
-            for _r in _quadro_lote:
-                _quadro_frequencia[int(_r["colaborador_id"])] = ocorrencia_codigo_por_id.get(_r.get("ocorrencia_id"), "")
-            if len(_quadro_lote) < 1000:
-                break
-            _quadro_offset += len(_quadro_lote)
-        # A prévia inclui as alterações da grade de hoje ainda não salvas.
-        if (int(ano), int(mes)) == (hoje.year, hoje.month):
-            for _cid in ids:
-                _quadro_frequencia[int(_cid)] = _mapa_media.get((_cid, hoje.day), "")
+        _ids_quadro = {int(c["id"]) for c in _quadro_base if c.get("id") is not None}
+        _preview_hoje = {int(cid): _mapa_media.get((cid, hoje.day), "") for cid in ids if int(cid) in _ids_quadro} if (int(ano), int(mes)) == (hoje.year, hoje.month) else {}
+        _filtro_quadro = "&colaborador_id=in.(" + ",".join(str(cid) for cid in sorted(_ids_quadro)) + ")" if _ids_quadro else "&colaborador_id=eq.-1"
+        _ultima_quadro = sb("GET", "rh_frequencia",
+            f"select=data&data=lte.{hoje.isoformat()}&ocorrencia_id=not.is.null"
+            + _filtro_quadro + "&order=data.desc&limit=1") or []
+        _quadro_referencia = hoje.isoformat() if any(_codigo_grade(v) for v in _preview_hoje.values()) else (_ultima_quadro[0]["data"] if _ultima_quadro else None)
+        if _quadro_referencia:
+            _quadro_offset = 0
+            while True:
+                _quadro_lote = sb("GET", "rh_frequencia",
+                    f"select=colaborador_id,ocorrencia_id&data=eq.{_quadro_referencia}"
+                    + _filtro_quadro + f"&order=colaborador_id.asc&limit=1000&offset={_quadro_offset}") or []
+                for _r in _quadro_lote:
+                    _quadro_frequencia[int(_r["colaborador_id"])] = ocorrencia_codigo_por_id.get(_r.get("ocorrencia_id"), "")
+                if len(_quadro_lote) < 1000:
+                    break
+                _quadro_offset += len(_quadro_lote)
+        if _quadro_referencia == hoje.isoformat():
+            _quadro_frequencia.update(_preview_hoje)
     except Exception:
         _quadro_erro = True
     _quadro = _quadro_colaboradores_agora(
@@ -5642,13 +5649,14 @@ with resumo_topo:
         _situacoes_html += (
             f'<div class="rh-card" style="border-top:3px solid {_cor}">'
             f'<span class="rh-label">{_rotulo}</span>'
-            f'<span class="rh-value">{"—" if _quadro_erro else len(_pessoas)}</span>'
-            f'<span class="rh-previous">{"Consulta indisponível" if _quadro_erro else _tipos}</span></div>'
+            f'<span class="rh-value">{"—" if _quadro_erro or not _quadro_referencia else len(_pessoas)}</span>'
+            f'<span class="rh-previous">{"Consulta indisponível" if _quadro_erro else _tipos if _quadro_referencia else "Sem data preenchida"}</span></div>'
         )
+    _quadro_ref_texto = date.fromisoformat(_quadro_referencia).strftime("%d/%m/%Y") if _quadro_referencia else "Sem lançamentos"
     st.markdown(
         '<section class="rh-panel"><h3>Quadro de colaboradores — agora</h3>'
         f'<div class="rh-subtitle">{hoje.strftime("%d/%m/%Y")} · Brasília · '
-        f'Empresa: {html.escape(_filtro_empresa)} · Vínculos vigentes</div>'
+        f'Empresa: {html.escape(_filtro_empresa)} · Vínculos vigentes · Frequência de referência: {_quadro_ref_texto}</div>'
         f'<div class="rh-grid" style="margin-top:.7rem">{_team_html}</div>'
         f'<div class="rh-grid rh-rates" style="margin-top:.7rem">{_situacoes_html}</div>'
         '</section>', unsafe_allow_html=True,
@@ -5656,8 +5664,8 @@ with resumo_topo:
     if _quadro_erro:
         st.warning("Não foi possível consultar a frequência de hoje. Férias, faltas e afastamentos estão indisponíveis.")
     else:
-        st.caption(f"{_quadro['pendentes']} colaborador(es) sem lançamento hoje. "
-                   "As situações refletem os lançamentos do dia, incluindo a prévia de edições ainda não salvas.")
+        st.caption(f"Referência da frequência: {_quadro_ref_texto}. {_quadro['pendentes']} colaborador(es) sem lançamento nessa data. "
+                   "Sem registros hoje, o quadro usa a data anterior mais recente preenchida. Edições de hoje ainda não salvas aparecem na prévia.")
         with st.expander("Ver nomes de quem está de férias, com falta ou afastado"):
             for _codigo, _rotulo in [("FE", "Férias"), ("FA", "Faltas"), ("AF", "Afastamentos")]:
                 st.markdown(f"**{_rotulo} — {len(_quadro['situacoes'][_codigo])}**")
@@ -5666,7 +5674,7 @@ with resumo_topo:
             st.caption("Afastamento = AF na frequência; atestado (A) permanece separado. "
                        "Na divisão por tipo, SPOT tem prioridade; os demais usam OUTROS ou OPERACIONAL. "
                        "Nos totais do cadastro, Spot pode também pertencer a Operacionais ou Outros. "
-                       "O quadro usa sempre hoje e respeita o filtro de empresa.")
+                       "Os vínculos são os vigentes hoje. As situações usam a data de referência exibida e respeitam o filtro de empresa.")
     st.markdown(
         '<section class="rh-panel">'
         '<h3>Frequência e Absenteísmo</h3>'
@@ -5682,6 +5690,20 @@ with resumo_topo:
         '</section>',
         unsafe_allow_html=True,
     )
+    with st.expander("🔔 Receber o quadro no celular — 9h, 13h e 16h"):
+        st.caption("Todos os dias, no horário de Brasília. A notificação mostra a data de referência da frequência.")
+        if st.button("Preparar ativação neste celular", key="rh_quadro_preparar_push"):
+            from datetime import timedelta, timezone
+            _token_push = secrets.token_hex(32)
+            sb("POST", "rh_push_autorizacoes", "", {
+                "token_hash": hashlib.sha256(_token_push.encode()).hexdigest(),
+                "usuario_id": int(st.session_state["usuario_logado"]["id"]),
+                "expira_em": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
+            }, "return=minimal")
+            st.session_state["rh_quadro_push_url"] = "https://central-10sul.peachycrown16.chatgpt.site/#rh=" + _token_push
+        if st.session_state.get("rh_quadro_push_url"):
+            st.link_button("Ativar alertas do Portal RH neste celular", st.session_state["rh_quadro_push_url"])
+            st.caption("Abra no celular, toque em Ativar alertas do Portal RH e permita as notificações. O link vale por 15 minutos.")
     if st.button("📲 Compartilhar resumo no WhatsApp", key="rh_compartilhar_resumo"):
         abrir_resumo_rh_compartilhamento()
     if _abs_anterior_erro:
