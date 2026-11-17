@@ -335,6 +335,7 @@ STATUS_PADRAO = [
     {"codigo":"FE", "descricao":"FÉRIAS", "ordem":5, "ativo":True, "exige_observacao":False},
     {"codigo":"LB", "descricao":"LIBERADO", "ordem":6, "ativo":True, "exige_observacao":True},
     {"codigo":"COMP", "descricao":"COMPENSAÇÃO", "ordem":7, "ativo":True, "exige_observacao":True},
+    {"codigo":"AF", "descricao":"AFASTAMENTO", "ordem":8, "ativo":True, "exige_observacao":True},
 ]
 
 def _campo_nome_colaborador(registro):
@@ -412,7 +413,7 @@ def sincronizar_salarios_referencia():
 
 
 def garantir_ocorrencias():
-    if st.session_state.get("rh_ocorrencias_inicializadas"):
+    if st.session_state.get("rh_ocorrencias_inicializadas_v2"):
         return
     try:
         sb("POST", "rh_ocorrencias", "on_conflict=codigo", STATUS_PADRAO,
@@ -422,7 +423,7 @@ def garantir_ocorrencias():
         minimos = [{k: r[k] for k in ("codigo", "descricao", "ativo")} for r in STATUS_PADRAO]
         sb("POST", "rh_ocorrencias", "on_conflict=codigo", minimos,
            "resolution=merge-duplicates,return=minimal")
-    st.session_state["rh_ocorrencias_inicializadas"] = True
+    st.session_state["rh_ocorrencias_inicializadas_v2"] = True
 
 def ler_colaboradores():
     rows = sb("GET", "rh_colaboradores", "select=*&ativo=eq.true") or []
@@ -4702,7 +4703,9 @@ try:
 except Exception as _venc_erro:
     st.warning(f"Não foi possível carregar os alertas de vencimento: {_venc_erro}")
 
-hoje = date.today()
+from zoneinfo import ZoneInfo
+hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+_colaboradores_quadro_atual = list(colaboradores)
 meses = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
 
 c1, c2, c3 = st.columns([1.4, .8, 3])
@@ -5528,6 +5531,42 @@ def abrir_resumo_rh_compartilhamento():
     st.caption("O resumo inclui nomes do ranking. Escolha o contato ou grupo que deve receber.")
 
 
+
+def _quadro_colaboradores_agora(cadastros, frequencia, referencia, classificar):
+    """Pessoas com vínculo vigente e uma situação por pessoa no dia de referência."""
+    ativos = {}
+    for c in cadastros:
+        if c.get("id") is None or c.get("ativo") is False:
+            continue
+        adm = pd.to_datetime(c.get("data_admissao"), errors="coerce")
+        dem = pd.to_datetime(c.get("data_desligamento"), errors="coerce")
+        if pd.notna(adm) and adm.date() > referencia:
+            continue
+        if pd.notna(dem) and dem.date() < referencia:
+            continue
+        ativos[int(c["id"])] = c
+    situacoes = {"FE": [], "FA": [], "AF": []}
+    for cid, c in ativos.items():
+        codigo = str(frequencia.get(cid) or "").strip().upper()
+        if codigo in situacoes:
+            classificacao = classificar(c)
+            contratacao = str(c.get("tipo_contratacao") or "").strip().upper()
+            situacoes[codigo].append({
+                "COLABORADOR": str(c.get("colaborador") or c.get("nome") or cid),
+                "TIPO": "SPOT" if contratacao == "SPOT" else classificacao,
+                "CLASSIFICAÇÃO": classificacao,
+                "CONTRATAÇÃO": contratacao or "Não informado",
+            })
+    return {
+        "registrados": len(ativos),
+        "outros": sum(classificar(c) == "OUTROS" for c in ativos.values()),
+        "operacionais": sum(classificar(c) == "OPERACIONAL" for c in ativos.values()),
+        "spot": sum(str(c.get("tipo_contratacao") or "").strip().upper() == "SPOT" for c in ativos.values()),
+        "pendentes": sum(not str(frequencia.get(cid) or "").strip() for cid in ativos),
+        "situacoes": situacoes,
+    }
+
+
 with resumo_topo:
 
     _fmt_abs = lambda v: f"{v:.2f}%".replace(".", ",") if v is not None else "—"
@@ -5535,11 +5574,29 @@ with resumo_topo:
         f"{atual - anterior:+.2f} p.p.".replace(".", ",")
         if atual is not None and anterior is not None else None
     )
-    _qtd_registrados = len(_colaboradores_todos)
-    _qtd_operacionais = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OPERACIONAL")
-    _qtd_outros = sum(1 for _c in _colaboradores_todos if _classificacao_colaborador(_c) == "OUTROS")
-    _qtd_contrato = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "CONTRATO")
-    _qtd_spot = sum(1 for _c in _colaboradores_todos if str(_c.get("tipo_contratacao") or "").upper() == "SPOT")
+    _quadro_base = [c for c in _colaboradores_quadro_atual
+                    if _filtro_empresa == "TODAS" or _empresa_colaborador(c, visual=True) == _filtro_empresa]
+    _quadro_frequencia = {}
+    _quadro_erro = False
+    try:
+        _quadro_offset = 0
+        while True:
+            _quadro_lote = sb("GET", "rh_frequencia",
+                f"select=colaborador_id,ocorrencia_id&data=eq.{hoje.isoformat()}"
+                f"&order=colaborador_id.asc&limit=1000&offset={_quadro_offset}") or []
+            for _r in _quadro_lote:
+                _quadro_frequencia[int(_r["colaborador_id"])] = ocorrencia_codigo_por_id.get(_r.get("ocorrencia_id"), "")
+            if len(_quadro_lote) < 1000:
+                break
+            _quadro_offset += len(_quadro_lote)
+        # A prévia inclui as alterações da grade de hoje ainda não salvas.
+        if (int(ano), int(mes)) == (hoje.year, hoje.month):
+            for _cid in ids:
+                _quadro_frequencia[int(_cid)] = _mapa_media.get((_cid, hoje.day), "")
+    except Exception:
+        _quadro_erro = True
+    _quadro = _quadro_colaboradores_agora(
+        _quadro_base, _quadro_frequencia, hoje, _classificacao_colaborador)
 
     def _rh_card(label, value, *, previous=None, delta=None, rate=False):
         esc = lambda v: html.escape(str(v))
@@ -5571,10 +5628,45 @@ with resumo_topo:
         ("Folgas", contagens["FO"]), ("Liberados", contagens["LB"]),
         ("Compensações", contagens["COMP"]), ("Dias apurados (contrato)", _abs_dias_apurados),
     ])
-    _team_html = "".join(_rh_card(label, value) for label, value in [
-        ("Registrados", _qtd_registrados), ("Operacionais", _qtd_operacionais),
-        ("Outros", _qtd_outros), ("Contrato", _qtd_contrato), ("Spot", _qtd_spot),
+    _team_html = "".join(_rh_card(label, _quadro[chave]) for label, chave in [
+        ("Registrados", "registrados"), ("Outros", "outros"),
+        ("Operacionais", "operacionais"), ("Spot", "spot"),
     ])
+    _situacoes_html = ""
+    for _codigo, _rotulo, _cor in [("FE", "Férias agora", "#0891b2"),
+                                   ("FA", "Faltas hoje", "#dc2626"),
+                                   ("AF", "Afastados agora", "#7c3aed")]:
+        _pessoas = _quadro["situacoes"][_codigo]
+        _tipos = " · ".join(f"{tipo.title()}: {sum(p['TIPO'] == tipo for p in _pessoas)}"
+                            for tipo in ("SPOT", "OUTROS", "OPERACIONAL"))
+        _situacoes_html += (
+            f'<div class="rh-card" style="border-top:3px solid {_cor}">'
+            f'<span class="rh-label">{_rotulo}</span>'
+            f'<span class="rh-value">{"—" if _quadro_erro else len(_pessoas)}</span>'
+            f'<span class="rh-previous">{"Consulta indisponível" if _quadro_erro else _tipos}</span></div>'
+        )
+    st.markdown(
+        '<section class="rh-panel"><h3>Quadro de colaboradores — agora</h3>'
+        f'<div class="rh-subtitle">{hoje.strftime("%d/%m/%Y")} · Brasília · '
+        f'Empresa: {html.escape(_filtro_empresa)} · Vínculos vigentes</div>'
+        f'<div class="rh-grid" style="margin-top:.7rem">{_team_html}</div>'
+        f'<div class="rh-grid rh-rates" style="margin-top:.7rem">{_situacoes_html}</div>'
+        '</section>', unsafe_allow_html=True,
+    )
+    if _quadro_erro:
+        st.warning("Não foi possível consultar a frequência de hoje. Férias, faltas e afastamentos estão indisponíveis.")
+    else:
+        st.caption(f"{_quadro['pendentes']} colaborador(es) sem lançamento hoje. "
+                   "As situações refletem os lançamentos do dia, incluindo a prévia de edições ainda não salvas.")
+        with st.expander("Ver nomes de quem está de férias, com falta ou afastado"):
+            for _codigo, _rotulo in [("FE", "Férias"), ("FA", "Faltas"), ("AF", "Afastamentos")]:
+                st.markdown(f"**{_rotulo} — {len(_quadro['situacoes'][_codigo])}**")
+                if _quadro["situacoes"][_codigo]:
+                    st.dataframe(pd.DataFrame(_quadro["situacoes"][_codigo]), hide_index=True, use_container_width=True)
+            st.caption("Afastamento = AF na frequência; atestado (A) permanece separado. "
+                       "Na divisão por tipo, SPOT tem prioridade; os demais usam OUTROS ou OPERACIONAL. "
+                       "Nos totais do cadastro, Spot pode também pertencer a Operacionais ou Outros. "
+                       "O quadro usa sempre hoje e respeita o filtro de empresa.")
     st.markdown(
         '<section class="rh-panel">'
         '<h3>Frequência e Absenteísmo</h3>'
@@ -5587,8 +5679,7 @@ with resumo_topo:
         f'<h4>Resumo da frequência — {int(mes):02d}/{int(ano)}</h4>'
         f'<div class="rh-grid">{_frequency_html}</div>'
         f'<div class="rh-grid rh-secondary">{_secondary_html}</div>'
-        '<h4>Quadro de colaboradores</h4>'
-        f'<div class="rh-grid rh-team">{_team_html}</div></section>',
+        '</section>',
         unsafe_allow_html=True,
     )
     if st.button("📲 Compartilhar resumo no WhatsApp", key="rh_compartilhar_resumo"):
