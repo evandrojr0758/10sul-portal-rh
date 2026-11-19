@@ -64,14 +64,25 @@ def segredo(nome):
 
 SUPABASE_URL = segredo("SUPABASE_URL").rstrip("/")
 SUPABASE_SERVICE_KEY = segredo("SUPABASE_SERVICE_KEY")
+RH_NEON_DATABASE_URL = segredo("RH_NEON_DATABASE_URL")
+RH_NEON_STORAGE = tuple(segredo(nome) for nome in (
+    "RH_NEON_S3_ENDPOINT", "RH_NEON_S3_REGION", "RH_NEON_S3_ACCESS_KEY_ID",
+    "RH_NEON_S3_SECRET_ACCESS_KEY",
+))
+if RH_NEON_DATABASE_URL:
+    import rh_neon
+
 
 def sb(method, tabela, params="", payload=None, prefer=None):
+    normalizado = _json_seguro(payload) if "_json_seguro" in globals() else payload
+    if RH_NEON_DATABASE_URL and tabela != "monitor_asn":
+        return rh_neon.consultar(RH_NEON_DATABASE_URL, method, tabela, params, normalizado, prefer)
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         raise RuntimeError("Configure SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets do Portal RH.")
     url = f"{SUPABASE_URL}/rest/v1/{tabela}"
     if params:
         url += "?" + params
-    data = None if payload is None else json.dumps(_json_seguro(payload) if "_json_seguro" in globals() else payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    data = None if payload is None else json.dumps(normalizado, ensure_ascii=False, allow_nan=False).encode("utf-8")
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("apikey", SUPABASE_SERVICE_KEY)
     req.add_header("Authorization", f"Bearer {SUPABASE_SERVICE_KEY}")
@@ -86,246 +97,21 @@ def sb(method, tabela, params="", payload=None, prefer=None):
         detalhe = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Supabase HTTP {e.code}: {detalhe}") from e
 
-SEED_COLABORADORES = [('ABRAAO OLIVEIRA DOS SANTOS', 'MECANICO'), ('ADAIR DO ROSARIO FERNANDES', 'SOLDADOR'), ('ADRIANO DOS SANTOS RIBEIRO', 'SOLDADOR'), ('MANOEL LUZ ALVES', 'MECANICO (SOCORRISTA)'), ('ALESSANDRO ROCHA MOREIRA', 'ELETRICISTA'), ('ANDRE GUIMARAES CORDEIRO', 'ENCARREGADO DE MANUTENCAO'), ('ANDRE MIRANDA', 'SOLDADOR'), ('ARTHUR DOS SANTOS DA SILVA', 'PINTOR'), ('BRUNO HENRIQUE ARAUJO DA SILVA', 'RESERVA SAP'), ('CARLOS ALBERTO DE SOUZA', 'LAVADOR'), ('CARLOS HENRIQUE DE SOUZA TESTA DA SILVA', 'MECANICO'), ('CARLOS HENRIQUE NASCIMENTO', 'SOLDADOR'), ('CLAUDINEI AMANCIO JACOB', 'LUBRIFICADOR'), ('CLEBER FRAGA BANDEIRA', 'MECANICO (SOCORRISTA)'), ('CLEBES SANTANA SANTOS', 'MECANICO III'), ('CLEISIMAR NICANOR ESPERANCA', 'MECANICO'), ('CRISTIANO QUIRINO MORAES', 'BARRACHEIRO'), ('DANIEL BERTOLDO RODRIGUES', 'MECANICO'), ('DEIVISON BUENO CUNHA', 'MECANICO'), ('DEMETRIO CORDEIRO FLORINDO', 'MECANICO'), ('DENISIO MAGELA ALVES', 'MECANICO II'), ('DIEGO ATHAYDE SCARDUA', 'MECANICO'), ('DIEGO MONTEIRO SILVA', 'AUX TEC E SEG DO TRABALHO'), ('DIMAS DA SILVA MUNIZ', 'MECANICO'), ('DIONES ALVARENGA DOS SANTOS', 'MECANICO'), ('DIONIS GABRIEL CAMPOS', 'AUXILIAR MECANICO'), ('DOUGLAS PEREIRA SANTOS', 'ELETRICISTA'), ('EDCARLOS FRANCISCO DA SILVA', 'MECANICO IV'), ('EDRICK OLIVIERA ALMEIDA', 'LAVADOR'), ('ELIAS DA SILVA JOVENCIO', 'APROVISIONADOR'), ('ELOISIO COVRE', 'MANOBRISTA 10S'), ('ENOC DE OLIVEIRA SANTOS', 'MECANICO (SOCORRISTA)'), ('EVANDRO DOS SANTOS OLIVEIRA JUNIOR', 'ANALISTA DE MANUTENÇÃO'), ('ERICK ROCHA COCCO', 'MECANICO (SOCORRISTA)'), ('EZEQUIEL ALVES VIEIRA', 'MECANICO'), ('EZEQUIEL DE MOURA PAIXÃO', 'BORRACHEIRO II'), ('EZEQUIEL SANTOS HERCULANO', 'APROVISIONADOR'), ('FABIO CANDEIAS SOUZA', 'MECANICO'), ('FABIO CORDEIRO DOS SANTOS', 'MECANICO III'), ('FABIO OLIVEIRA SILVA NOGUEIRA', 'MECANICO'), ('FABRICIO FANCHIOTTI', 'TORNEIRO MECANICO'), ('FELIPE REIS DE SOUZA', 'MECANICO'), ('FERNANDO FERNANDES COSTA', 'ALMOXARIFE DE MANUTENÇÃO II'), ('FRANCINY GIACOMIN ALBORGHETE MARTINELI', 'ANALISTA DE RH'), ('GABRIEL DA VITÓRIA ALVARENGA', 'ENCARREGADO DE MANUTENÇÃO II'), ('GABRYEL MACIEL PEREIRA', 'RECONDICIONAMENTO DE CUICA'), ('GEAN PEREIRA DE CARLI', 'AUXILIAR DE MECANICO'), ('GILMAR SILVA OLIVEIRA', 'BORRACHEIRO'), ('GILSON MATHIAS DO NASCIMENTO', 'ELETRICISTA'), ('FELIPE SOUZA MEDEIROS', 'MECANICO (SOCORRISTA)'), ('HELDER DA SILVA ROQUE', 'AUXILIAR MECANICO'), ('HORACIO GUILHERME DE SOUZA ALMEIDA', 'AUXILIAR MECANICO'), ('JARDEL SABINO FELIZARDO', 'MECANICO'), ('JEAN CARLOS LOUREIRO BARBOSA', 'MECANICO'), ('JEFFERSON DE SOUZA MONTEIRO', 'MECANICO'), ('JOAO MACHADO FERNANDES', 'AUXILIAR MECANICO'), ('JOCELI LIRIO DOS SANTOS', 'MECANICO II'), ('JORDAN DAS VIRGENS RIBEIRO', 'LUBRIFICADOR'), ('JOSE ANGEL LARA MATUTE', 'SOLDADOR'), ('JOSE ANTONIO DA SILVA ROSA', 'SOLDADOR'), ('JOSE RICARDO SANTOS', 'LAVADOR'), ('JULIANO DOS SANTOS DIOGO', 'MECANICO'), ('JULIO PAES SOUZA', 'MECANICO'), ('JURANDIR FERREIRA NUNES', 'MECANICO'), ('KAROLINA VAZ PEREIRA', 'TECNICO EM SEGURANÇA DO TRABALHO'), ('KELVIN CHAGAS SANTOS', 'MECANICO'), ('KENNEDY SANTOS DE JESUS', 'AUXILIAR MECANICO II'), ('KIERLEN ALMEIDA DOS SANTOS', 'SOLDADOR'), ('LEONARDO SANTOS MOURA', 'MECANICO'), ('LHESLEY GOMES DE OLIVEIRA', 'MECANICO'), ('LUAN GUIDOTI LIMA', 'MECANICO'), ('LUCAS AZEVEDO RUFINO', 'SOLDADOR'), ('LUCAS CORREA SA SILVA', 'APROVISIONADOR'), ('LUCAS DE SOUZA GOMES', 'SOLDADOR'), ('LUZINETE MONTEIRO CRUZ', 'AUXILIAR ADMINISTRATIVO'), ('MAIKO JHONATAN MARTINS LISBOA', 'MECANICO'), ('MARCELO DE OLIVEIRA', 'AUXILIAR DE SERVIÇOS GERAIS II'), ('MARCOS JACOB DE SOUZA', 'BORRACHEIRO'), ('MARCOS VINICIUS BENEDITO LEMOS', ''), ('MARLON PINHEIRO DE MATOS', 'MECANICO'), ('MATEUS GOMES BITI', 'MECANICO'), ('MATHEUS FERREIRA SANTUZZI', 'APROVISIONADOR'), ('MURILO GOMES CARVALHO', 'AUXILIAR MECANICO'), ('OSNIR PASSOS GOMES', 'ENCARREGADO DE MANUTENÇÃO IV'), ('PAULO CESAR DOS REIS', 'MECANICO'), ('PEDRO DE ASSIS JUNIOR', 'ELETRICISTA'), ('PEDRO DE JESUS BARBOSA', 'ELETRICISTA'), ('RAFAEL FRANCISCO DO NASCIMENTO SANTOS', 'MECANICO'), ('RAMON MUNIZ COSER', 'AUXILIAR MECANICO'), ('REGINALDO RIBEIRO DA SILVA', 'SOLDADOR'), ('RENATO DOS SANTOS GONÇALVES', 'MECANICO'), ('RIAN ANTONIO FERNANDES VARGAS', 'AUXILIAR DE ELETRICISTA DE VEICULOS'), ('ROGERIO DA CONCEIÇÃO REBOUÇAS', 'SOLDADOR'), ('ROSIVELTON OLIVEIRA GOMES', 'MECANICO'), ('RUBENS GUILHERME MARINS', 'SUPERVISOR'), ('RUBENS ROCHA CRUZ', 'INSPETOR'), ('SANTINHO PERONI', 'MECANICO'), ('SILAS PASSOS DE SOUSA', 'MECANICO (SOCORRISTA)'), ('SILVIO CARLOS SOUZA', 'CRAVEJAMENTO DE LONA'), ('SOLIMAR NATALI', 'SOLDADOR'), ('TASSIO DOS SANTOS QUARESMA', 'MECANICO'), ('VALTEMI CORREIA DE OLIVEIRA', 'SOLDADOR'), ('VANDER MARCOS DE SOUZA', 'MANOBRISTA'), ('VANILSON DE JESUS', 'MECANICO'), ('VICTOR MARCELINO RAMOS', 'AUXILIAR MECANICO'), ('VINICIUS HENRIQUE SANTOS SILVA', 'BORRACHEIRO'), ('VINICIUS PINTO ROSA', 'BORRACHEIRO'), ('VITOR SANTOS SOUZA', 'SOLDADOR'), ('WAGNER HONORIO DE ALMEIDA', 'SUPERVISOR'), ('WANDERSON SANTOS SOUZA', 'ELETRICISTA'), ('WALLACE RODRIGUES DO NASCIMENTO', 'BORRACHEIRO II'), ('WEBERSON CORDEIRO DOS SANTOS', 'SOLDADOR'), ('WENDRYEL PEREIRA AMORIM PAULUSCENA', 'MECANICO II'), ('WENIO DA PURIFICAÇÃO RIBEIRO', 'MECANICO'), ('WESLEY BRAGA CABRAL', 'MECANICO'), ('WESLEY SOUZA DOS SANTOS', 'MECANICO')]
-SALARIO_REFERENCIA = {
-    'ABRAAO OLIVEIRA DOS SANTOS': 3230.83,
-    'ADAIR DO ROSARIO FERNANDES': 3119.42,
-    'ADRIANO DOS SANTOS RIBEIRO': 2610.01,
-    'ALESSANDRO ROCHA MOREIRA': 2770.37,
-    'ANDRE GUIMARAES CORDEIRO': 6300.00,
-    'ANDRE MIRANDA': 3119.42,
-    'ARTHUR DOS SANTOS DA SILVA': 2117.79,
-    'BRUNO HENRIQUE ARAUJO DA SILVA': 2500.00,
-    'CARLOS ALBERTO DE SOUZA': 1870.52,
-    'CARLOS HENRIQUE DE SOUZA TESTA DA SILVA': 2904.93,
-    'CARLOS HENRIQUE NASCIMENTO': 3119.42,
-    'CLAUDINEI AMANCIO JACOB': 1870.52,
-    'CLEBER FRAGA BANDEIRA': 3230.83,
-    'CLEBES SANTANA SANTOS': 2904.93,
-    'CLEISIMAR NICANOR ESPERANCA': 2610.01,
-    'CRISTIANO QUIRINO MORAES': 2473.87,
-    'DANIEL BERTOLDO RODRIGUES': 2610.01,
-    'DEIVISON BUENO CUNHA': 3230.83,
-    'DEMETRIO CORDEIRO FLORINDO': 2610.01,
-    'DENISIO MAGELA ALVES': 3230.83,
-    'DIEGO ATHAYDE SCARDUA': 2216.28,
-    'DIEGO MONTEIRO SILVA': 2354.81,
-    'DIMAS DA SILVA MUNIZ': 3230.83,
-    'DIONES ALVARENGA DOS SANTOS': 3230.83,
-    'DIONIS GABRIEL CAMPOS': 2216.28,
-    'DOUGLAS PEREIRA SANTOS': 2770.37,
-    'EDCARLOS FRANCISCO DA SILVA': 3230.83,
-    'EDRICK OLIVIERA ALMEIDA': 1870.52,
-    'ELIAS DA SILVA JOVENCIO': 2400.00,
-    'ELOISIO COVRE': 2940.00,
-    'ENOC DE OLIVEIRA SANTOS': 3692.50,
-    'EVANDRO DOS SANTOS OLIVEIRA JUNIOR': 5275.00,
-    'EZEQUIEL ALVES VIEIRA': 2904.93,
-    'EZEQUIEL DE MOURA PAIXÃO': 2473.87,
-    'EZEQUIEL SANTOS HERCULANO': 3400.00,
-    'FABIO CANDEIAS SOUZA': 3230.83,
-    'FABIO CORDEIRO DOS SANTOS': 2610.01,
-    'FABIO OLIVEIRA SILVA NOGUEIRA': 3230.83,
-    'FABRICIO FANCHIOTTI': 5580.95,
-    'FELIPE REIS DE SOUZA': 2216.28,
-    'FERNANDO FERNANDES COSTA': 3047.39,
-    'GABRIEL DA VITÓRIA ALVARENGA': 3748.30,
-    'GABRYEL MACIEL PEREIRA': 3230.83,
-    'GEAN PEREIRA DE CARLI': 1700.00,
-    'GILMAR SILVA OLIVEIRA': 3165.00,
-    'GILSON MATHIAS DO NASCIMENTO': 3119.42,
-    'HELDER DA SILVA ROQUE': 2216.28,
-    'HORACIO GUILHERME DE SOUZA ALMEIDA': 1870.52,
-    'JARDEL SABINO FELIZARDO': 2610.01,
-    'JEAN CARLOS LOUREIRO BARBOSA': 3230.83,
-    'JEFFERSON DE SOUZA MONTEIRO': 3230.83,
-    'JOAO MACHADO FERNANDES': 1700.00,
-    'JOCELI LIRIO DOS SANTOS': 2610.01,
-    'JORDAN DAS VIRGENS RIBEIRO': 1870.52,
-    'JOSE ANGEL LARA MATUTE': 3119.42,
-    'JOSE ANTONIO DA SILVA ROSA': 3119.42,
-    'JOSE RICARDO SANTOS': 1870.52,
-    'JULIANO DOS SANTOS DIOGO': 3230.83,
-    'JULIO PAES SOUZA': 2216.28,
-    'JURANDIR FERREIRA NUNES': 2610.01,
-    'KAROLINA VAZ PEREIRA': 3798.00,
-    'KELVIN CHAGAS SANTOS': 2904.93,
-    'KENNEDY SANTOS DE JESUS': 1779.08,
-    'KIERLEN ALMEIDA DOS SANTOS': 2216.28,
-    'LEONARDO SANTOS MOURA': 3230.83,
-    'LHESLEY GOMES DE OLIVEIRA': 3230.83,
-    'LUAN GUIDOTI LIMA': 3230.83,
-    'LUCAS AZEVEDO RUFINO': 2216.28,
-    'LUCAS CORREA SA SILVA': 2216.28,
-    'LUCAS DE SOUZA GOMES': 3119.42,
-    'LUZINETE MONTEIRO CRUZ': 2354.81,
-    'MAIKO JHONATAN MARTINS LISBOA': 3230.83,
-    'MARCELO DE OLIVEIRA': 1870.52,
-    'MARCOS JACOB DE SOUZA': 2673.79,
-    'MARCOS VINICIUS BENEDITO LEMOS': 3500.00,
-    'MARLON PINHEIRO DE MATOS': 2216.28,
-    'MATEUS GOMES BITI': 3230.83,
-    'MATHEUS FERREIRA SANTUZZI': 2216.28,
-    'MURILO GOMES CARVALHO': 1870.52,
-    'OSNIR PASSOS GOMES': 5200.00,
-    'PAULO CESAR DOS REIS': 3230.83,
-    'PEDRO DE ASSIS JUNIOR': 3119.42,
-    'PEDRO DE JESUS BARBOSA': 3119.42,
-    'RAFAEL FRANCISCO DO NASCIMENTO SANTOS': 3230.83,
-    'RAMON MUNIZ COSER': 1700.00,
-    'REGINALDO RIBEIRO DA SILVA': 3119.42,
-    'RENATO DOS SANTOS GONÇALVES': 3230.83,
-    'RIAN ANTONIO FERNANDES VARGAS': 1700.00,
-    'ROGERIO DA CONCEIÇÃO REBOUÇAS': 3119.42,
-    'ROSIVELTON OLIVEIRA GOMES': 3692.50,
-    'RUBENS GUILHERME MARINS': 7798.56,
-    'RUBENS ROCHA CRUZ': 2904.93,
-    'SANTINHO PERONI': 2904.93,
-    'SILVIO CARLOS SOUZA': 2610.01,
-    'SOLIMAR NATALI': 3119.42,
-    'TASSIO DOS SANTOS QUARESMA': 2610.01,
-    'VALTEMI CORREIA DE OLIVEIRA': 3119.42,
-    'VANDER MARCOS DE SOUZA': 2940.00,
-    'VANILSON DE JESUS': 2904.93,
-    'VICTOR MARCELINO RAMOS': 1870.52,
-    'VINICIUS HENRIQUE SANTOS SILVA': 2473.87,
-    'VINICIUS PINTO ROSA': 2473.87,
-    'VITOR SANTOS SOUZA': 3119.42,
-    'WAGNER HONORIO DE ALMEIDA': 7798.56,
-    'WANDERSON SANTOS SOUZA': 2647.42,
-    'WALLACE RODRIGUES DO NASCIMENTO': 2473.87,
-    'WEBERSON CORDEIRO DOS SANTOS': 3119.42,
-    'WENDRYEL PEREIRA AMORIM PAULUSCENA': 2610.01,
-    'WENIO DA PURIFICAÇÃO RIBEIRO': 2610.01,
-    'WESLEY BRAGA CABRAL': 3230.83,
-    'WESLEY SOUZA DOS SANTOS': 3230.83,
-    'FRANCINY GIACOMIN ALBORGHETE MARTINELI': 3376.00,
-}
+
+_referencias_em_memoria = None
 
 
-CLASSIFICACAO_REFERENCIA = {'ABRAAO OLIVEIRA DOS SANTOS': 'OPERACIONAL', 'ADAIR DO ROSARIO FERNANDES': 'OPERACIONAL', 'ADRIANO DOS SANTOS RIBEIRO': 'OPERACIONAL', 'MANOEL LUZ ALVES': 'OPERACIONAL', 'ALESSANDRO ROCHA MOREIRA': 'OPERACIONAL', 'ANDRE GUIMARAES CORDEIRO': 'OUTROS', 'ANDRE MIRANDA': 'OPERACIONAL', 'ARTHUR DOS SANTOS DA SILVA': 'OPERACIONAL', 'BRUNO HENRIQUE ARAUJO DA SILVA': 'OPERACIONAL', 'CARLOS ALBERTO DE SOUZA': 'OPERACIONAL', 'CARLOS HENRIQUE DE SOUZA TESTA DA SILVA': 'OPERACIONAL', 'CARLOS HENRIQUE NASCIMENTO': 'OPERACIONAL', 'CLAUDINEI AMANCIO JACOB': 'OPERACIONAL', 'CLEBER FRAGA BANDEIRA': 'OPERACIONAL', 'CLEBES SANTANA SANTOS': 'OPERACIONAL', 'CLEISIMAR NICANOR ESPERANCA': 'OPERACIONAL', 'CRISTIANO QUIRINO MORAES': 'OPERACIONAL', 'DANIEL BERTOLDO RODRIGUES': 'OPERACIONAL', 'DEIVISON BUENO CUNHA': 'OPERACIONAL', 'DEMETRIO CORDEIRO FLORINDO': 'OPERACIONAL', 'DENISIO MAGELA ALVES': 'OPERACIONAL', 'DIEGO ATHAYDE SCARDUA': 'OPERACIONAL', 'DIEGO MONTEIRO SILVA': 'OUTROS', 'DIMAS DA SILVA MUNIZ': 'OPERACIONAL', 'DIONES ALVARENGA DOS SANTOS': 'OPERACIONAL', 'DIONIS GABRIEL CAMPOS': 'OPERACIONAL', 'DOUGLAS PEREIRA SANTOS': 'OPERACIONAL', 'EDCARLOS FRANCISCO DA SILVA': 'OPERACIONAL', 'EDRICK OLIVIERA ALMEIDA': 'OUTROS', 'ELIAS DA SILVA JOVENCIO': 'OPERACIONAL', 'ELOISIO COVRE': 'OUTROS', 'ENOC DE OLIVEIRA SANTOS': 'OPERACIONAL', 'EVANDRO DOS SANTOS OLIVEIRA JUNIOR': 'OUTROS', 'ERICK ROCHA COCCO': 'OPERACIONAL', 'EZEQUIEL ALVES VIEIRA': 'OPERACIONAL', 'EZEQUIEL DE MOURA PAIXÃO': 'OPERACIONAL', 'EZEQUIEL SANTOS HERCULANO': 'OPERACIONAL', 'FABIO CANDEIAS SOUZA': 'OPERACIONAL', 'FABIO CORDEIRO DOS SANTOS': 'OPERACIONAL', 'FABIO OLIVEIRA SILVA NOGUEIRA': 'OPERACIONAL', 'FABRICIO FANCHIOTTI': 'OUTROS', 'FELIPE REIS DE SOUZA': 'OPERACIONAL', 'FERNANDO FERNANDES COSTA': 'OUTROS', 'FRANCINY GIACOMIN ALBORGHETE MARTINELI': 'OUTROS', 'GABRIEL DA VITÓRIA ALVARENGA': 'OUTROS', 'GABRYEL MACIEL PEREIRA': 'OPERACIONAL', 'GEAN PEREIRA DE CARLI': 'OPERACIONAL', 'GILMAR SILVA OLIVEIRA': 'OPERACIONAL', 'GILSON MATHIAS DO NASCIMENTO': 'OPERACIONAL', 'FELIPE SOUZA MEDEIROS': 'OPERACIONAL', 'HELDER DA SILVA ROQUE': 'OPERACIONAL', 'HORACIO GUILHERME DE SOUZA ALMEIDA': 'OPERACIONAL', 'HUGO ROSSONY RUY': 'OPERACIONAL', 'JARDEL SABINO FELIZARDO': 'OPERACIONAL', 'JEAN CARLOS LOUREIRO BARBOSA': 'OPERACIONAL', 'JEFFERSON DE SOUZA MONTEIRO': 'OPERACIONAL', 'JOAO MACHADO FERNANDES': 'OPERACIONAL', 'JOCELI LIRIO DOS SANTOS': 'OPERACIONAL', 'JORDAN DAS VIRGENS RIBEIRO': 'OPERACIONAL', 'JOSE ANGEL LARA MATUTE': 'OPERACIONAL', 'JOSE ANTONIO DA SILVA ROSA': 'OPERACIONAL', 'JOSE RICARDO SANTOS': 'OPERACIONAL', 'JULIANO DOS SANTOS DIOGO': 'OPERACIONAL', 'JULIO PAES SOUZA': 'OPERACIONAL', 'JURANDIR FERREIRA NUNES': 'OPERACIONAL', 'KAROLINA VAZ PEREIRA': 'OUTROS', 'KELVIN ALEXANDRE RAMOS': 'OPERACIONAL', 'KELVIN CHAGAS SANTOS': 'OPERACIONAL', 'KENNEDY SANTOS DE JESUS': 'OPERACIONAL', 'KIERLEN ALMEIDA DOS SANTOS': 'OPERACIONAL', 'LEONARDO SANTOS MOURA': 'OPERACIONAL', 'LHESLEY GOMES DE OLIVEIRA': 'OPERACIONAL', 'LUAN GUIDOTI LIMA': 'OPERACIONAL', 'LUCAS AZEVEDO RUFINO': 'OPERACIONAL', 'LUCAS CORREA SA SILVA': 'OPERACIONAL', 'LUCAS DE SOUZA GOMES': 'OPERACIONAL', 'LUZINETE MONTEIRO CRUZ': 'OUTROS', 'MAIKO JHONATAN MARTINS LISBOA': 'OPERACIONAL', 'MARCELO DE OLIVEIRA': 'OPERACIONAL', 'MARCOS JACOB DE SOUZA': 'OPERACIONAL', 'MARCOS VINICIUS BENEDITO LEMOS': 'OUTROS', 'MARLON PINHEIRO DE MATOS': 'OPERACIONAL', 'MATEUS GOMES BITI': 'OPERACIONAL', 'MATHEUS FERREIRA SANTUZZI': 'OPERACIONAL', 'MURILO GOMES CARVALHO': 'OPERACIONAL', 'OSNIR PASSOS GOMES': 'OUTROS', 'PAULO CESAR DOS REIS': 'OPERACIONAL', 'PEDRO DE ASSIS JUNIOR': 'OPERACIONAL', 'PEDRO DE JESUS BARBOSA': 'OPERACIONAL', 'RAFAEL FRANCISCO DO NASCIMENTO SANTOS': 'OPERACIONAL', 'RAMON MUNIZ COSER': 'OPERACIONAL', 'REGINALDO RIBEIRO DA SILVA': 'OPERACIONAL', 'RENATO DOS SANTOS GONÇALVES': 'OPERACIONAL', 'RIAN ANTONIO FERNANDES VARGAS': 'OPERACIONAL', 'ROGERIO DA CONCEIÇÃO REBOUÇAS': 'OPERACIONAL', 'ROSIVELTON OLIVEIRA GOMES': 'OPERACIONAL', 'RUBENS BRAGANÇA DA SILVA': 'OPERACIONAL', 'RUBENS GUILHERME MARINS': 'OUTROS', 'RUBENS ROCHA CRUZ': 'OPERACIONAL', 'SANTINHO PERONI': 'OPERACIONAL', 'SILAS PASSOS DE SOUSA': 'OPERACIONAL', 'SILVIO CARLOS SOUZA': 'OPERACIONAL', 'SOLIMAR NATALI': 'OPERACIONAL', 'TASSIO DOS SANTOS QUARESMA': 'OPERACIONAL', 'VALTEMI CORREIA DE OLIVEIRA': 'OPERACIONAL', 'VANDER MARCOS DE SOUZA': 'OUTROS', 'VANILSON DE JESUS': 'OPERACIONAL', 'VICTOR MARCELINO RAMOS': 'OPERACIONAL', 'VINICIUS HENRIQUE SANTOS SILVA': 'OPERACIONAL', 'VINICIUS PINTO ROSA': 'OPERACIONAL', 'VITOR SANTOS SOUZA': 'OPERACIONAL', 'WAGNER HONORIO DE ALMEIDA': 'OUTROS', 'WANDERSON SANTOS SOUZA': 'OPERACIONAL', 'WALLACE RODRIGUES DO NASCIMENTO': 'OPERACIONAL', 'WEBERSON CORDEIRO DOS SANTOS': 'OPERACIONAL', 'WENDRYEL PEREIRA AMORIM PAULUSCENA': 'OPERACIONAL', 'WENIO DA PURIFICAÇÃO RIBEIRO': 'OPERACIONAL', 'WESLEY BRAGA CABRAL': 'OPERACIONAL', 'WESLEY SOUZA DOS SANTOS': 'OPERACIONAL'}
+def _referencias_cadastro():
+    global _referencias_em_memoria
+    if _referencias_em_memoria is None:
+        if RH_NEON_DATABASE_URL:
+            registros = sb("GET", "rh_referencias_cadastro", "select=dados&id=eq.1&limit=1")
+            _referencias_em_memoria = registros[0]["dados"] if registros else {}
+        else:
+            configurado = segredo("RH_REFERENCIAS_CADASTRO")
+            _referencias_em_memoria = json.loads(configurado) if configurado else {}
+    return _referencias_em_memoria
 
-EMPRESA_REFERENCIA = {
-    'ABRAAO OLIVEIRA DOS SANTOS': '10 SUL SERVICE',
-    'ADAIR DO ROSARIO FERNANDES': '10 SUL SERVICE',
-    'ADRIANO DOS SANTOS RIBEIRO': '10 SUL SERVICE',
-    'ALESSANDRO ROCHA MOREIRA': '10 SUL SERVICE',
-    'ANDRE GUIMARAES CORDEIRO': '10 SUL SERVICE',
-    'ANDRE MIRANDA': '10 SUL SERVICE',
-    'ARTHUR DOS SANTOS DA SILVA': '10 SUL PRESTADORA',
-    'BRUNO HENRIQUE ARAUJO DA SILVA': '10 SUL SERVICE',
-    'CARLOS ALBERTO DE SOUZA': '10 SUL SERVICE',
-    'CARLOS HENRIQUE DE SOUZA TESTA DA SILVA': '10 SUL SERVICE',
-    'CARLOS HENRIQUE NASCIMENTO': '10 SUL SERVICE',
-    'CLAUDINEI AMANCIO JACOB': '10 SUL SERVICE',
-    'CLEBER FRAGA BANDEIRA': '10 SUL SERVICE',
-    'CLEBES SANTANA SANTOS': '10 SUL SERVICE',
-    'CLEISIMAR NICANOR ESPERANCA': '10 SUL SERVICE',
-    'CRISTIANO QUIRINO MORAES': '10 SUL SERVICE',
-    'DANIEL BERTOLDO RODRIGUES': '10 SUL SERVICE',
-    'DEIVISON BUENO CUNHA': '10 SUL SERVICE',
-    'DEMETRIO CORDEIRO FLORINDO': '10 SUL SERVICE',
-    'DENISIO MAGELA ALVES': '10 SUL SERVICE',
-    'DIEGO ATHAYDE SCARDUA': '10 SUL SERVICE',
-    'DIEGO MONTEIRO SILVA': '10 SUL SERVICE',
-    'DIMAS DA SILVA MUNIZ': '10 SUL SERVICE',
-    'DIONES ALVARENGA DOS SANTOS': '10 SUL SERVICE',
-    'DIONIS GABRIEL CAMPOS': '10 SUL SERVICE',
-    'DOUGLAS PEREIRA SANTOS': '10 SUL SERVICE',
-    'EDCARLOS FRANCISCO DA SILVA': '10 SUL SERVICE',
-    'EDRICK OLIVIERA ALMEIDA': '10 SUL SERVICE',
-    'ELIAS DA SILVA JOVENCIO': '10 SUL SERVICE',
-    'ELOISIO COVRE': '10 SUL SERVICE',
-    'ENOC DE OLIVEIRA SANTOS': '10 SUL SERVICE',
-    'ERICK ROCHA COCCO': '10 SUL PRESTADORA',
-    'EVANDRO DOS SANTOS OLIVEIRA JUNIOR': '10 SUL SERVICE',
-    'EZEQUIEL ALVES VIEIRA': '10 SUL SERVICE',
-    'EZEQUIEL DE MOURA PAIXÃO': '10 SUL SERVICE',
-    'EZEQUIEL SANTOS HERCULANO': '10 SUL SERVICE',
-    'FABIO CANDEIAS SOUZA': '10 SUL SERVICE',
-    'FABIO CORDEIRO DOS SANTOS': '10 SUL SERVICE',
-    'FABIO OLIVEIRA SILVA NOGUEIRA': '10 SUL SERVICE',
-    'FABRICIO FANCHIOTTI': '10 SUL SERVICE',
-    'FELIPE REIS DE SOUZA': '10 SUL SERVICE',
-    'FELIPE SOUZA MEDEIROS': '10 SUL PRESTADORA',
-    'FERNANDO FERNANDES COSTA': '10 SUL SERVICE',
-    'FRANCINY GIACOMIN ALBORGHETE MARTINELI': '10 SUL SERVICE',
-    'GABRIEL DA VITÓRIA ALVARENGA': '10 SUL SERVICE',
-    'GABRYEL MACIEL PEREIRA': '10 SUL SERVICE',
-    'GEAN PEREIRA DE CARLI': '10 SUL SERVICE',
-    'GILMAR SILVA OLIVEIRA': '10 SUL SERVICE',
-    'GILSON MATHIAS DO NASCIMENTO': '10 SUL SERVICE',
-    'HELDER DA SILVA ROQUE': '10 SUL SERVICE',
-    'HORACIO GUILHERME DE SOUZA ALMEIDA': '10 SUL SERVICE',
-    'HUGO ROSSONY RUY': '10 SUL SERVICE',
-    'JARDEL SABINO FELIZARDO': '10 SUL SERVICE',
-    'JEAN CARLOS LOUREIRO BARBOSA': '10 SUL SERVICE',
-    'JEFFERSON DE SOUZA MONTEIRO': '10 SUL SERVICE',
-    'JOAO MACHADO FERNANDES': '10 SUL SERVICE',
-    'JOCELI LIRIO DOS SANTOS': '10 SUL SERVICE',
-    'JORDAN DAS VIRGENS RIBEIRO': '10 SUL SERVICE',
-    'JOSE ANGEL LARA MATUTE': '10 SUL SERVICE',
-    'JOSE ANTONIO DA SILVA ROSA': '10 SUL SERVICE',
-    'JOSE RICARDO SANTOS': '10 SUL SERVICE',
-    'JULIANO DOS SANTOS DIOGO': '10 SUL SERVICE',
-    'JULIO PAES SOUZA': '10 SUL SERVICE',
-    'JURANDIR FERREIRA NUNES': '10 SUL SERVICE',
-    'KAROLINA VAZ PEREIRA': '10 SUL SERVICE',
-    'KELVIN ALEXANDRE RAMOS': '10 SUL SERVICE',
-    'KELVIN CHAGAS SANTOS': '10 SUL SERVICE',
-    'KENNEDY SANTOS DE JESUS': '10 SUL SERVICE',
-    'KIERLEN ALMEIDA DOS SANTOS': '10 SUL SERVICE',
-    'LEONARDO SANTOS MOURA': '10 SUL SERVICE',
-    'LHESLEY GOMES DE OLIVEIRA': '10 SUL SERVICE',
-    'LUAN GUIDOTI LIMA': '10 SUL SERVICE',
-    'LUCAS AZEVEDO RUFINO': '10 SUL SERVICE',
-    'LUCAS CORREA SA SILVA': '10 SUL SERVICE',
-    'LUCAS DE SOUZA GOMES': '10 SUL SERVICE',
-    'LUZINETE MONTEIRO CRUZ': '10 SUL SERVICE',
-    'MAIKO JHONATAN MARTINS LISBOA': '10 SUL SERVICE',
-    'MANOEL LUZ ALVES': '10 SUL PRESTADORA',
-    'MARCELO DE OLIVEIRA': '10 SUL SERVICE',
-    'MARCOS JACOB DE SOUZA': '10 SUL SERVICE',
-    'MARCOS VINICIUS BENEDITO LEMOS': '10 SUL SERVICE',
-    'MARLON PINHEIRO DE MATOS': '10 SUL SERVICE',
-    'MATEUS GOMES BITI': '10 SUL SERVICE',
-    'MATHEUS FERREIRA SANTUZZI': '10 SUL SERVICE',
-    'MURILO GOMES CARVALHO': '10 SUL SERVICE',
-    'OSNIR PASSOS GOMES': '10 SUL SERVICE',
-    'PAULO CESAR DOS REIS': '10 SUL SERVICE',
-    'PEDRO DE ASSIS JUNIOR': '10 SUL SERVICE',
-    'PEDRO DE JESUS BARBOSA': '10 SUL SERVICE',
-    'RAFAEL FRANCISCO DO NASCIMENTO SANTOS': '10 SUL SERVICE',
-    'RAMON MUNIZ COSER': '10 SUL SERVICE',
-    'REGINALDO RIBEIRO DA SILVA': '10 SUL SERVICE',
-    'RENATO DOS SANTOS GONÇALVES': '10 SUL SERVICE',
-    'RIAN ANTONIO FERNANDES VARGAS': '10 SUL SERVICE',
-    'ROGERIO DA CONCEIÇÃO REBOUÇAS': '10 SUL PRESTADORA',
-    'ROSIVELTON OLIVEIRA GOMES': '10 SUL SERVICE',
-    'RUBENS BRAGANÇA DA SILVA': '10 SUL SERVICE',
-    'RUBENS GUILHERME MARINS': '10 SUL SERVICE',
-    'RUBENS ROCHA CRUZ': '10 SUL SERVICE',
-    'SANTINHO PERONI': '10 SUL SERVICE',
-    'SILAS PASSOS DE SOUSA': '10 SUL PRESTADORA',
-    'SILVIO CARLOS SOUZA': '10 SUL SERVICE',
-    'SOLIMAR NATALI': '10 SUL SERVICE',
-    'TASSIO DOS SANTOS QUARESMA': '10 SUL SERVICE',
-    'VALTEMI CORREIA DE OLIVEIRA': '10 SUL SERVICE',
-    'VANDER MARCOS DE SOUZA': '10 SUL SERVICE',
-    'VANILSON DE JESUS': '10 SUL SERVICE',
-    'VICTOR MARCELINO RAMOS': '10 SUL SERVICE',
-    'VINICIUS HENRIQUE SANTOS SILVA': '10 SUL SERVICE',
-    'VINICIUS PINTO ROSA': '10 SUL SERVICE',
-    'VITOR SANTOS SOUZA': '10 SUL SERVICE',
-    'WAGNER HONORIO DE ALMEIDA': '10 SUL SERVICE',
-    'WALLACE RODRIGUES DO NASCIMENTO': '10 SUL SERVICE',
-    'WANDERSON SANTOS SOUZA': '10 SUL PRESTADORA',
-    'WEBERSON CORDEIRO DOS SANTOS': '10 SUL SERVICE',
-    'WENDRYEL PEREIRA AMORIM PAULUSCENA': '10 SUL SERVICE',
-    'WENIO DA PURIFICAÇÃO RIBEIRO': '10 SUL SERVICE',
-    'WESLEY BRAGA CABRAL': '10 SUL SERVICE',
-    'WESLEY SOUZA DOS SANTOS': '10 SUL SERVICE',
-}
 
 STATUS_PADRAO = [
     {"codigo":"OK", "descricao":"PRESENÇA", "ordem":1, "ativo":True, "exige_observacao":False},
@@ -355,8 +141,9 @@ def _classificacao_colaborador(registro):
     if escolha in ("OPERACIONAL", "OUTROS"):
         return escolha
     nome = _nome_colaborador(registro).strip().upper()
-    if nome in CLASSIFICACAO_REFERENCIA:
-        return CLASSIFICACAO_REFERENCIA[nome]
+    referencia = _referencias_cadastro().get("CLASSIFICACAO_REFERENCIA", {})
+    if nome in referencia:
+        return referencia[nome]
     for campo in ("classificacao", "classificação", "tipo", "categoria", "grupo", "tipo_colaborador", "classificacao_colaborador", "status_operacional"):
         valor = str(registro.get(campo) or "").strip().upper()
         if valor in ("OPERACIONAL", "OUTROS"):
@@ -367,7 +154,7 @@ def _empresa_colaborador(registro, visual=False):
     """Usa a empresa real da BaseFuncionário como referência sem alterar o cadastro no banco."""
     nome = _nome_colaborador(registro).strip().upper()
     empresa_banco = str(registro.get("empresa") or "").strip().upper()
-    empresa = empresa_banco if empresa_banco in ("10 SUL SERVICE", "10 SUL PRESTADORA", "SERVICE", "PRESTADORA") else EMPRESA_REFERENCIA.get(nome, empresa_banco)
+    empresa = empresa_banco if empresa_banco in ("10 SUL SERVICE", "10 SUL PRESTADORA", "SERVICE", "PRESTADORA") else (_referencias_cadastro().get("EMPRESA_REFERENCIA") or {}).get(nome, empresa_banco)
     if visual:
         return {
             "10 SUL SERVICE": "SERVICE",
@@ -382,14 +169,14 @@ def sincronizar_seed():
         return
 
     payload = []
-    for nome, funcao in SEED_COLABORADORES:
+    for nome, funcao in (_referencias_cadastro().get("SEED_COLABORADORES") or []):
         payload.append({
             "colaborador": nome,
             "funcao": funcao or None,
             "empresa": "10 SUL",
             "status": "ATIVO",
             "ativo": True,
-            "salario_base": SALARIO_REFERENCIA.get(nome),
+            "salario_base": (_referencias_cadastro().get("SALARIO_REFERENCIA") or {}).get(nome),
         })
 
     sb("POST", "rh_colaboradores", "", payload, "return=minimal")
@@ -403,7 +190,7 @@ def sincronizar_salarios_referencia():
         rows = sb("GET", "rh_colaboradores", "select=id,colaborador,salario_base") or []
         for r in rows:
             nome = _nome_colaborador(r).strip().upper()
-            salario = SALARIO_REFERENCIA.get(nome)
+            salario = (_referencias_cadastro().get("SALARIO_REFERENCIA") or {}).get(nome)
             atual = r.get("salario_base")
             if salario is not None and (atual is None or str(atual).strip() == ""):
                 sb("PATCH", "rh_colaboradores", "id=eq." + urllib.parse.quote(str(r["id"])), {"salario_base": salario}, "return=minimal")
@@ -772,13 +559,19 @@ def _validar_anexo_ocorrencia(arquivo):
 
 
 def _arquivo_ocorrencia(method, caminho, dados=None, mime=None):
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        raise RuntimeError("Configure o acesso do Portal RH ao Supabase.")
     caminho = str(caminho)
     if not re.fullmatch(r"[0-9]+/[a-f0-9]{32}/[A-Za-z0-9_.-]+", caminho):
         raise ValueError("Caminho do anexo inválido.")
+    return _arquivo_rh(method, _RH_OC_BUCKET, caminho, dados, mime)
+
+
+def _arquivo_rh(method, bucket, caminho, dados=None, mime=None, *, upsert=True):
+    if RH_NEON_DATABASE_URL:
+        return rh_neon.arquivo(RH_NEON_STORAGE, method, bucket, caminho, dados, mime, upsert=upsert)
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        raise RuntimeError("Configure o acesso do Portal RH ao Supabase.")
     req = urllib.request.Request(
-        f"{SUPABASE_URL}/storage/v1/object/{_RH_OC_BUCKET}/{urllib.parse.quote(caminho, safe='/')}",
+        f"{SUPABASE_URL}/storage/v1/object/{bucket}/{urllib.parse.quote(caminho, safe='/')}",
         data=dados, method=method,
     )
     req.add_header("apikey", SUPABASE_SERVICE_KEY)
@@ -786,7 +579,7 @@ def _arquivo_ocorrencia(method, caminho, dados=None, mime=None):
     if mime:
         req.add_header("Content-Type", mime)
     if method == "POST":
-        req.add_header("x-upsert", "true")
+        req.add_header("x-upsert", "true" if upsert else "false")
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
             return resp.read()
@@ -972,8 +765,9 @@ def tela_login():
                 else:
                     st.error("Usuário ou senha inválidos.")
             except Exception as e:
-                st.error("Não foi possível validar o acesso. Execute o SQL de usuários desta versão no Supabase.")
-                st.caption(str(e))
+                st.error("Não foi possível validar o acesso. Confira a conexão do Portal RH.")
+                if not RH_NEON_DATABASE_URL:
+                    st.caption(str(e))
 
 def cabecalho_sessao(mostrar_ajuda=False):
     usr = st.session_state.get("usuario_logado") or {}
@@ -2389,40 +2183,27 @@ def abrir_ficha_colaborador(colaborador):
 # FECHAMENTO CMC BAHIA
 # ==========================================================
 # Cadastro de referência — CMC Bahia
-_FUNCOES_CMC = {
-    "ALEHANDRO SOARES DA CONCEICAO":"SOLDADOR", "CARLOS GABRIEL ALVES GONCALVES":"MECANICO II",
-    "DAVI CARVALHO PEDRO CASTRO":"MECANICO II", "EDUARDO FRANCISCO SILVA":"MECANICO II",
-    "EZEQUIEL ALMEIDA BONIFACIO":"SOLDADOR", "GLEISSON DANIEL NEVES MORAES":"MECANICO II",
-    "HELIO DE SOUZA SILVA":"MECANICO II", "JHONAS CORREIA ROSARIO":"BORRACHEIRO",
-    "JUNIOR SAUDE DO NASCIMENTO":"MECANICO II", "KLEIRTOM DE OLIVEIRA SOARES":"MECANICO II",
-    "MARIO EVERTON GONÇALVES BRITO":"MECANICO I", "MATEUS OLIVEIRA SILVA":"BORRACHEIRO",
-    "RICARDO HERMENEGILDO SILVA":"MECANICO I", "RICARDO TIAGO FERNANDES":"MECANICO I",
-    "UELDES SOUZA":"MECANICO II", "WARLEI MARCELINO DE OLIVEIRA":"MECANICO II",
-    "WILLYAN VICTOR RIBEIRO ALMEIDA":"MECANICO I", "HERICLIS HENRIQUE DOS SANTOS ALMEIDA":"MECANICO II",
-    "JOSE MARCOS ALVES ROQUE":"MECANICO I", "ELIAS OLIVEIRA DE JESUS":"MECANICO II",
-    "HENRIQUE SILVA DOS SANTOS":"MECANICO II", "MAGDISLEI ANDRADE DE JESUS":"MECANICO II",
-    "PAULO EDUARDO FERREIRA ELIAS":"ELETRICISTA", "PEDRO IVAN LOPES GALVÃO":"MECANICO I",
-    "WALACE CONCEIÇÃO DERCILIO":"SOLDADOR", "JOSIVAN DE JESUS ARRUDA":"MECANICO II",
-    "GUILHERME NEVES DOS SANTOS":"ELETRICISTA", "MARCOS VINICIUS C. DOS SANTOS FILHO":"MECANICO I",
-    "ALDENI SILVA":"MECANICO II", "ANTONIO DOS SANTOS RODRIGUES":"MECANICO II",
-    "DERIC EDUARDO MELO LOPES":"BORRACHEIRO", "JOAO PEDRO SANTANA ANDRADE":"MECANICO II",
-    "LUTI DE JESUS":"MECANICO II", "WELLINGTON MOREIRA DA SILVA":"MECANICO II",
-    "ALBERTINO DE FREITAS COSTA NETO":"MECANICO II", "MANUEL JOSE ABREU DE JESUS":"MECANICO II",
-    "NICOLAS BRITO LOUREIRO":"MECANICO I", "WALDEM ALVES DOS SANTOS":"MECANICO II",
-    "WESLEY SANTOS NASCIMENTO":"MECANICO II", "GUILHERME SANTOS DE OLIVEIRA":"MECANICO II",
-    "RAFAEL OLIVEIRA DE JESUS":"MECANICO I", "VINICIUS NASCIMENTO DE AZEVEDO":"SOLDADOR",
-    "JULIO TOME MANTOVANI":"MECANICO II", "BENJAMIM FRANKLIN DE JESUS SOBRINHO":"MECANICO I",
-    "GEFERSON DE JESUS DOS SANTOS":"MECANICO I", "IAN FELIPE SILVA ARAUJO":"SOLDADOR",
-    "IVANILDO DIAS GONCALVES":"SOLDADOR", "JOSIVALDO BATISTA ROCHA":"MECANICO I",
-    "KAUA SILVA DIAS":"MECANICO I", "MARCOS VINICIUS CONCEICAO SANTOS":"MECANICO I",
-    "THIAGO DE OLIVEIRA SANTOS":"MECANICO I",
-}
 _VALORES_CMC = {"MECANICO I":10476.96, "MECANICO II":11680.00, "SOLDADOR":11680.00, "BORRACHEIRO":9902.00, "ELETRICISTA":11680.00}
 
 # Persistência privada no Supabase Storage, independente da sessão do navegador.
 _CMC_BUCKET = "rh-fechamentos-cmc"
 
 def _storage_cmc(method, path, payload=None):
+    if RH_NEON_DATABASE_URL:
+        if path == "bucket":
+            existentes = rh_neon.buckets(RH_NEON_STORAGE)
+            if method == "GET":
+                return existentes
+            if method == "POST" and any(b["id"] == payload["id"] for b in existentes):
+                return None
+            raise RuntimeError("Crie o bucket privado de RH no projeto do Neon.")
+        _, bucket, caminho = path.split("/", 2)
+        dados = None if payload is None else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        try:
+            resultado = _arquivo_rh(method, bucket, caminho, dados, "application/json")
+        except FileNotFoundError:
+            return None
+        return json.loads(resultado) if resultado else None
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         raise RuntimeError("Configure os Secrets do Supabase para salvar o fechamento.")
     data = None if payload is None else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
@@ -2604,7 +2385,7 @@ def _funcoes_cmc_ativas():
     """Cadastro CMC Bahia independente das competencias e do cadastro de Aracruz."""
     if not st.session_state.get("cmc_funcoes_globais_carregadas"):
         salvo = _storage_cmc("GET", f"object/{_CMC_BUCKET}/cadastro-colaboradores.json")
-        funcoes = dict(_FUNCOES_CMC)
+        funcoes = dict((_referencias_cadastro().get("_FUNCOES_CMC") or {}))
         if isinstance(salvo, dict):
             funcoes.update({_nome_cmc(n): _nome_cmc(f) for n, f in salvo.items() if _nome_cmc(n) and _nome_cmc(f)})
         st.session_state["cadastro_funcoes_cmc_bahia"] = funcoes
@@ -3703,7 +3484,7 @@ def _consultar_historico_cmc(ano, mes):
     except Exception as exc:
         # O histórico antigo é opcional: nem todas as instalações têm essa tabela.
         # Outros erros devem continuar visíveis, sem serem tratados como ausência de dados.
-        if 'PGRST205' in str(exc) and 'rh_cmc_fechamentos' in str(exc):
+        if (getattr(exc, "sqlstate", None) == "42P01" or "PGRST205" in str(exc)) and "rh_cmc_fechamentos" in str(exc):
             return None
         raise
     return registros[0] if registros else None
@@ -3764,7 +3545,7 @@ def tela_resumo_financeiro_cmc_bahia():
         if resumo.empty:
             st.info('Não há registros válidos para esta competência.')
             return
-        funcoes = estado.get('cadastro_funcoes_cmc_bahia', _FUNCOES_CMC)
+        funcoes = estado.get('cadastro_funcoes_cmc_bahia', (_referencias_cadastro().get("_FUNCOES_CMC") or {}))
         valores = estado.get('cadastro_valores_cmc_bahia', _VALORES_CMC)
         grupos = resumo.assign(FUNCAO=resumo['COLABORADOR'].map(lambda n: funcoes.get(_nome_cmc(n), 'NÃO CADASTRADA'))).groupby('FUNCAO')['MÉDIA CONTABILIZADA'].sum().to_dict()
         linhas = [(f, float(grupos.get(f, 0)), float(valores.get(f, 0)), float(grupos.get(f, 0))*float(valores.get(f, 0))) for f in ['MECANICO I', 'MECANICO II', 'SOLDADOR', 'BORRACHEIRO', 'ELETRICISTA']]
@@ -4074,15 +3855,10 @@ def tela_fechamento_aracruz():
                     try:
                         ext = anexo.name.rsplit(".", 1)[-1].lower()
                         arquivo_path = f"reembolsos-anexos/{identificador}.{ext}"
-                        req = urllib.request.Request(
-                            f"{SUPABASE_URL}/storage/v1/object/rh-fechamentos-aracruz/{arquivo_path}",
-                            data=anexo.getvalue(), method="POST")
-                        req.add_header("apikey", SUPABASE_SERVICE_KEY)
-                        req.add_header("Authorization", f"Bearer {SUPABASE_SERVICE_KEY}")
-                        req.add_header("Content-Type", anexo.type or "application/octet-stream")
-                        req.add_header("x-upsert", "false")
-                        with urllib.request.urlopen(req, timeout=30):
-                            pass
+                        _arquivo_rh(
+                            "POST", "rh-fechamentos-aracruz", arquivo_path, anexo.getvalue(),
+                            anexo.type or "application/octet-stream", upsert=False,
+                        )
                     except Exception as exc:
                         st.error(f"Falha ao anexar comprovante; despesa não registrada: {exc}")
                         st.stop()
@@ -4261,11 +4037,9 @@ def tela_fechamento_aracruz():
                 if r.get("anexo"):
                     if st.button("📎 Baixar comprovante", key="ara_baixar_" + r["id"]):
                         try:
-                            url = f"{SUPABASE_URL}/storage/v1/object/rh-fechamentos-aracruz/{r['anexo']}"
-                            req = urllib.request.Request(url, headers={"apikey": SUPABASE_SERVICE_KEY,
-                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
-                            with urllib.request.urlopen(req, timeout=30) as resposta:
-                                st.session_state["ara_download_" + r["id"]] = resposta.read()
+                            st.session_state["ara_download_" + r["id"]] = _arquivo_rh(
+                                "GET", "rh-fechamentos-aracruz", r["anexo"],
+                            )
                         except Exception as exc:
                             st.error(f"Não foi possível recuperar o anexo: {exc}")
                     if "ara_download_" + r["id"] in st.session_state:
@@ -4471,8 +4245,8 @@ def tela_fechamento_tres_lagoas():
 # ==========================================================
 # LOGIN / ROTEAMENTO POR PERFIL
 # ==========================================================
-if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
+if not RH_NEON_DATABASE_URL and not (SUPABASE_URL and SUPABASE_SERVICE_KEY):
+    st.error("Configure a conexão do Portal RH nos Secrets do Streamlit.")
     st.stop()
 
 try:
@@ -4679,8 +4453,8 @@ with st.expander("💰 Regras de Gratificação", expanded=False):
 with st.expander("🧮 :red-background[**APURAÇÃO DE GRATIFICAÇÃO**]", expanded=False):
     tela_apuracao_gratificacao()
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    st.error("Supabase ainda não configurado neste app. Adicione SUPABASE_URL e SUPABASE_SERVICE_KEY nos Secrets.")
+if not RH_NEON_DATABASE_URL and not (SUPABASE_URL and SUPABASE_SERVICE_KEY):
+    st.error("Configure a conexão do Portal RH nos Secrets do Streamlit.")
     st.stop()
 
 # Inicialização segura
@@ -5692,7 +5466,10 @@ with resumo_topo:
     )
     with st.expander("🔔 Receber o quadro no celular — 9h, 13h e 16h"):
         st.caption("Todos os dias, no horário de Brasília. A notificação mostra a data de referência da frequência.")
-        if st.button("Preparar ativação neste celular", key="rh_quadro_preparar_push"):
+        if RH_NEON_DATABASE_URL:
+            st.info("A ativação de notificações está indisponível nesta conexão.")
+        if st.button("Preparar ativação neste celular", key="rh_quadro_preparar_push",
+                     disabled=bool(RH_NEON_DATABASE_URL)):
             from datetime import timedelta, timezone
             _token_push = secrets.token_hex(32)
             sb("POST", "rh_push_autorizacoes", "", {
@@ -5794,7 +5571,7 @@ if alteracoes:
 
     # Registros que já existem no Supabase são consolidados. Qualquer edição deles
     # exige a senha administrativa, inclusive após F5 ou em outro computador.
-    SENHA_EDICAO_RH = "28266451"
+    SENHA_EDICAO_RH = segredo("RH_SENHA_EDICAO")
     if "rh_edicoes_autorizadas" not in st.session_state:
         st.session_state.rh_edicoes_autorizadas = set()
     if "rh_motivos_edicao" not in st.session_state:
@@ -5831,7 +5608,7 @@ if alteracoes:
             placeholder="Informe por que o lançamento salvo precisa ser alterado",
         )
         if st.button("Confirmar alteração", type="primary", use_container_width=True):
-            if senha != SENHA_EDICAO_RH:
+            if not SENHA_EDICAO_RH or not secrets.compare_digest(senha.encode("utf-8"), SENHA_EDICAO_RH.encode("utf-8")):
                 st.error("Senha incorreta. A alteração não foi autorizada.")
             elif not motivo_alt.strip():
                 st.error("Informe obrigatoriamente o motivo da alteração.")
