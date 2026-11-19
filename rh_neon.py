@@ -134,7 +134,7 @@ def _executar_escrita(conn, stmt, valores, options, preferencias):
         conn.execute(stmt, valores)
         return None
     stmt += sql.SQL(" RETURNING {}").format(_campos(options.get("select", "*")))
-    stmt = sql.SQL("WITH dados AS ({}) SELECT row_to_json(dados) FROM dados").format(stmt)
+    stmt = sql.SQL("WITH dados AS ({}) SELECT row_to_json(dados.*) FROM dados").format(stmt)
     return [r[0] for r in conn.execute(stmt, valores)]
 
 
@@ -162,7 +162,7 @@ def consultar(dsn, method, tabela, params="", payload=None, prefer=None):
             if limit < 0 or offset < 0:
                 raise ValueError("Paginação inválida na consulta de RH.")
             stmt += sql.SQL(" LIMIT %s OFFSET %s")
-            stmt = sql.SQL("SELECT row_to_json(dados) FROM ({}) dados").format(stmt)
+            stmt = sql.SQL("SELECT row_to_json(dados.*) FROM ({}) dados").format(stmt)
             return [r[0] for r in conn.execute(stmt, [*valores, min(1000, limit), offset])]
         if method == "POST" and not filtros:
             return _inserir(conn, alvo, payload, options, preferencias)
